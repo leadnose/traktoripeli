@@ -30,10 +30,20 @@ window.addEventListener("keydown", (e) => {
   keys[e.key] = true;
   if (e.key === " " && !e.repeat) {
     e.preventDefault();
-    tractor.plowDown = !tractor.plowDown;
+    // Raising is always allowed; lowering needs the work gear and field dirt
+    if (tractor.plowDown) tractor.plowDown = false;
+    else if (tractor.fastGear) {
+      tractor.plowFlash = 0.9; // refused: too fast — flash the HUD, no movement
+    } else if (!plowOverField()) {
+      tractor.plowBounce = 0.6; // it tries, catches, and springs back up
+    } else {
+      tractor.plowDown = true;
+      tractor.plowBounce = 0;
+    }
   }
   if (e.key === "Shift" && !e.repeat) {
     tractor.fastGear = !tractor.fastGear;
+    if (tractor.fastGear) tractor.plowDown = false; // lift before shifting up
   }
 });
 
@@ -239,6 +249,26 @@ function plowTileAt(wx, wy, alongX) {
   tiles[ty][tx] = alongX ? 3 : 2;
   growth[ty][tx] = 0;
   drawTile(tx, ty);
+}
+
+// True when any part of the plow's working width is over field dirt.
+// Deliberately generous — samples across the blades and a bit ahead of
+// them — so working the edge rows of a field isn't fiddly.
+function plowOverField() {
+  const cos = Math.cos(tractor.angle);
+  const sin = Math.sin(tractor.angle);
+  const points = [
+    [-9.8, -4],
+    [-9.8, 0],
+    [-9.8, 4],
+    [-6, 0],
+  ];
+  for (const [lx, ly] of points) {
+    const wx = tractor.x + lx * cos - ly * sin;
+    const wy = tractor.y + lx * sin + ly * cos;
+    if (tileTypeAt(wx, wy) >= 1) return true;
+  }
+  return false;
 }
 
 // Harvest a mature crop tile under the world point: score it, throw chaff,
@@ -546,6 +576,8 @@ const tractor = {
   fastGear: true, // Shift toggles between road and work gear
   plowDown: false, // Space toggles the plow
   plowLift: 1, // animated: 0 = blades in the ground, 1 = fully raised
+  plowBounce: 0, // seconds left of the refused-lower dip animation
+  plowFlash: 0, // seconds left of the red HUD flash (refused: gear too fast)
 };
 
 const ACCEL = 55;
@@ -581,11 +613,20 @@ function update(dt) {
   tractor.speed -= grade * 60 * dt;
 
   // Top speed from the gear, further reduced by plow drag when it's down
-  const maxForward =
+  let maxForward =
     (tractor.fastGear ? GEAR_FAST : GEAR_SLOW) * (1 - 0.35 * (1 - tractor.plowLift));
+  let maxReverse = MAX_REVERSE;
+
+  // A lowered plow digging into unbroken ground bogs the tractor down
+  if (tractor.plowLift < 0.5 && !plowOverField()) {
+    maxForward = 3;
+    maxReverse = -3;
+  }
+
   if (tractor.speed > maxForward)
-    tractor.speed = Math.max(maxForward, tractor.speed - 80 * dt);
-  tractor.speed = Math.max(MAX_REVERSE, tractor.speed);
+    tractor.speed = Math.max(maxForward, tractor.speed - 120 * dt);
+  if (tractor.speed < maxReverse)
+    tractor.speed = Math.min(maxReverse, tractor.speed + 120 * dt);
 
   // Steering only has effect while moving; reversing flips it like a real vehicle
   const turnRate =
@@ -604,8 +645,14 @@ function update(dt) {
   tractor.y = Math.max(margin, Math.min(MAP_SIZE - margin, tractor.y));
 
   // Hydraulic lift eases the plow up or down
-  const liftTarget = tractor.plowDown ? 0 : 1;
+  let liftTarget = tractor.plowDown ? 0 : 1;
+  if (tractor.plowBounce > 0) {
+    tractor.plowBounce = Math.max(0, tractor.plowBounce - dt);
+    // Half-sine dip: drops partway, then springs back up
+    liftTarget = 1 - 0.5 * Math.sin((Math.PI * (0.6 - tractor.plowBounce)) / 0.6);
+  }
   tractor.plowLift += (liftTarget - tractor.plowLift) * Math.min(1, dt * 5);
+  tractor.plowFlash = Math.max(0, tractor.plowFlash - dt);
 
   // Till field tiles passing under the blades
   if (tractor.plowLift < 0.3 && Math.abs(tractor.speed) > 2) {
@@ -665,15 +712,18 @@ function draw() {
   // HUD
   screenCtx.fillStyle = "rgba(0,0,0,0.45)";
   screenCtx.fillRect(0, screenCanvas.height - 26, screenCanvas.width, 26);
-  screenCtx.fillStyle = "#e8e8d8";
   screenCtx.font = "bold 13px monospace";
-  screenCtx.fillText(
-    `GEAR: ${tractor.fastGear ? "FAST" : "SLOW"} [Shift]   ` +
-      `PLOW: ${tractor.plowDown ? "DOWN" : "UP"} [Space]   ` +
-      `HARVESTED: ${harvested}   Arrows: drive`,
-    12,
-    screenCanvas.height - 8
-  );
+  const hudY = screenCanvas.height - 8;
+  let hudX = 12;
+  const seg = (text, color) => {
+    screenCtx.fillStyle = color || "#e8e8d8";
+    screenCtx.fillText(text, hudX, hudY);
+    hudX += screenCtx.measureText(text).width;
+  };
+  const flashRed = tractor.plowFlash > 0 && ((tractor.plowFlash * 8) | 0) % 2 === 0;
+  seg(`GEAR: ${tractor.fastGear ? "FAST" : "SLOW"} [Shift]   `, flashRed ? "#ff5040" : null);
+  seg(`PLOW: ${tractor.plowDown ? "DOWN" : "UP"} [Space]   `);
+  seg(`HARVESTED: ${harvested}   Arrows: drive`);
 }
 
 // ---------------------------------------------------------------------------
