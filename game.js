@@ -120,6 +120,17 @@ const mapCtx = mapCanvas.getContext("2d");
 // 2 = plowed with furrows along world y, 3 = plowed with furrows along world x
 const tiles = [];
 
+// Crop growth: seconds since a tile was plowed; stage advances at the
+// thresholds below and the tile is repainted when it does.
+const growth = [];
+const CROP_STAGES = [8, 18, 32]; // seconds to reach sprout / young / mature
+
+function cropStage(g) {
+  let s = 0;
+  for (const t of CROP_STAGES) if (g >= t) s++;
+  return s;
+}
+
 function tileTypeAt(wx, wy) {
   const tx = (wx / TILE) | 0;
   const ty = (wy / TILE) | 0;
@@ -182,6 +193,32 @@ function drawTile(tx, ty) {
       mapCtx.lineTo(b.x, b.y);
       mapCtx.stroke();
     }
+
+    // Crops in rows along the furrows
+    const stage = cropStage(growth[ty][tx]);
+    if (stage > 0) {
+      for (const s of [0.25, 0.5, 0.75]) {
+        for (const t of [0.15, 0.38, 0.62, 0.85]) {
+          const p = alongX
+            ? mp((tx + t) * TILE, (ty + s) * TILE)
+            : mp((tx + s) * TILE, (ty + t) * TILE);
+          const x = Math.round(p.x);
+          const y = Math.round(p.y);
+          if (stage === 1) {
+            mapCtx.fillStyle = shade("#7bc95e", k); // sprout
+            mapCtx.fillRect(x, y - 1, 1, 1);
+          } else if (stage === 2) {
+            mapCtx.fillStyle = shade("#4e9c3a", k); // young plant
+            mapCtx.fillRect(x, y - 2, 1, 2);
+          } else {
+            mapCtx.fillStyle = shade("#a3843a", k); // mature stalk
+            mapCtx.fillRect(x, y - 2, 1, 2);
+            mapCtx.fillStyle = shade("#e3c964", k); // grain head
+            mapCtx.fillRect(x, y - 3, 1, 1);
+          }
+        }
+      }
+    }
   } else {
     // Speckles: dirt clods on unplowed fields, grass tufts elsewhere
     const dots = type === 1 ? DIRT_DOTS : GRASS_DOTS;
@@ -200,11 +237,43 @@ function plowTileAt(wx, wy, alongX) {
   const tx = (wx / TILE) | 0;
   const ty = (wy / TILE) | 0;
   tiles[ty][tx] = alongX ? 3 : 2;
+  growth[ty][tx] = 0;
   drawTile(tx, ty);
 }
 
+// Harvest a mature crop tile under the world point: score it, throw chaff,
+// and return the tile to unplowed field so it can be worked again.
+let harvested = 0;
+
+function harvestAt(wx, wy) {
+  const tx = (wx / TILE) | 0;
+  const ty = (wy / TILE) | 0;
+  if (tx < 0 || ty < 0 || tx >= MAP_TILES || ty >= MAP_TILES) return;
+  if (tiles[ty][tx] < 2 || cropStage(growth[ty][tx]) < 3) return;
+  tiles[ty][tx] = 1;
+  growth[ty][tx] = 0;
+  drawTile(tx, ty);
+  harvested++;
+  spawnChaff((tx + 0.5) * TILE, (ty + 0.5) * TILE);
+}
+
+// Advance crop growth on plowed tiles, repainting when a stage is reached
+function updateCrops(dt) {
+  for (let ty = 0; ty < MAP_TILES; ty++) {
+    for (let tx = 0; tx < MAP_TILES; tx++) {
+      if (tiles[ty][tx] < 2) continue;
+      const g = growth[ty][tx];
+      growth[ty][tx] = g + dt;
+      if (cropStage(g + dt) !== cropStage(g)) drawTile(tx, ty);
+    }
+  }
+}
+
 function makeMap() {
-  for (let ty = 0; ty < MAP_TILES; ty++) tiles.push(new Array(MAP_TILES).fill(0));
+  for (let ty = 0; ty < MAP_TILES; ty++) {
+    tiles.push(new Array(MAP_TILES).fill(0));
+    growth.push(new Array(MAP_TILES).fill(0));
+  }
   for (let i = 0; i < 6; i++) {
     const px = 1 + ((Math.random() * (MAP_TILES - 6)) | 0);
     const py = 1 + ((Math.random() * (MAP_TILES - 6)) | 0);
@@ -419,6 +488,7 @@ function updateSmoke(dt) {
         wy,
         wz: terrainHeight(wx, wy) + 10,
         life: 0.9,
+        maxLife: 0.9,
       });
     }
   }
@@ -432,11 +502,29 @@ function updateSmoke(dt) {
   }
 }
 
+// Golden chaff burst thrown up when a tile is harvested
+function spawnChaff(wx, wy) {
+  const base = terrainHeight(wx, wy);
+  for (let i = 0; i < 8; i++) {
+    const life = 0.5 + Math.random() * 0.4;
+    smoke.push({
+      wx: wx + (Math.random() - 0.5) * 10,
+      wy: wy + (Math.random() - 0.5) * 10,
+      wz: base + 2 + Math.random() * 4,
+      life,
+      maxLife: life,
+      gold: true,
+    });
+  }
+}
+
 function drawSmoke(camX, camY) {
   for (const p of smoke) {
-    const t = 1 - p.life / 0.9;
+    const t = 1 - p.life / p.maxLife;
     const size = 1 + Math.round(t * 3);
-    ctx.fillStyle = `rgba(160,160,160,${(0.6 * (1 - t)).toFixed(2)})`;
+    ctx.fillStyle = p.gold
+      ? `rgba(219,186,84,${(0.8 * (1 - t)).toFixed(2)})`
+      : `rgba(160,160,160,${(0.6 * (1 - t)).toFixed(2)})`;
     ctx.fillRect(
       Math.round(projX(p.wx, p.wy) - camX - size / 2),
       Math.round(projY(p.wx, p.wy, p.wz) - camY - size / 2),
@@ -531,8 +619,12 @@ function update(dt) {
     }
   }
 
+  // Mature crops are gathered by driving over them
+  harvestAt(tractor.x, tractor.y);
+
   updateTracks(dt);
   updateSmoke(dt);
+  updateCrops(dt);
 }
 
 // ---------------------------------------------------------------------------
@@ -578,7 +670,7 @@ function draw() {
   screenCtx.fillText(
     `GEAR: ${tractor.fastGear ? "FAST" : "SLOW"} [Shift]   ` +
       `PLOW: ${tractor.plowDown ? "DOWN" : "UP"} [Space]   ` +
-      `Arrows: drive`,
+      `HARVESTED: ${harvested}   Arrows: drive`,
     12,
     screenCanvas.height - 8
   );
