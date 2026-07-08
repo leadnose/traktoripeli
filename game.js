@@ -53,15 +53,59 @@ function projY(wx, wy, wz) {
 }
 
 // ---------------------------------------------------------------------------
+// Terrain: smooth rolling hills from summed cosine bumps, fading to flat
+// near the map edges so the dirt cliffs stay level.
+// ---------------------------------------------------------------------------
+
+const HILLS = [];
+for (let i = 0; i < 7; i++) {
+  HILLS.push({
+    cx: MAP_SIZE * (0.1 + Math.random() * 0.8),
+    cy: MAP_SIZE * (0.1 + Math.random() * 0.8),
+    r: 60 + Math.random() * 60,
+    h: 10 + Math.random() * 16,
+  });
+}
+
+function terrainHeight(wx, wy) {
+  let h = 0;
+  for (const hill of HILLS) {
+    const d = Math.hypot(wx - hill.cx, wy - hill.cy);
+    if (d < hill.r) h += hill.h * (0.5 + 0.5 * Math.cos((Math.PI * d) / hill.r));
+  }
+  h = 40 * Math.tanh(h / 40); // soft cap where hills stack
+  const m = Math.min(wx, wy, MAP_SIZE - wx, MAP_SIZE - wy);
+  const t = Math.max(0, Math.min(1, m / 40));
+  return h * t * t * (3 - 2 * t);
+}
+
+// ---------------------------------------------------------------------------
+// Shared lighting helpers
+// ---------------------------------------------------------------------------
+
+const LIGHT = { x: 0.35, y: 0.6, z: 0.71 };
+
+const shadeCache = {};
+function shade(color, k) {
+  const key = color + "|" + k.toFixed(2);
+  if (shadeCache[key]) return shadeCache[key];
+  const r = Math.min(255, Math.round(parseInt(color.slice(1, 3), 16) * k));
+  const g = Math.min(255, Math.round(parseInt(color.slice(3, 5), 16) * k));
+  const b = Math.min(255, Math.round(parseInt(color.slice(5, 7), 16) * k));
+  return (shadeCache[key] = `rgb(${r},${g},${b})`);
+}
+
+// ---------------------------------------------------------------------------
 // Ground map (prerendered once)
 // ---------------------------------------------------------------------------
 
 const EDGE_DEPTH = 10; // thickness of the dirt "cliff" at the map's near edges
 const MAP_OFFSET_X = MAP_SIZE; // shift so projX is never negative
+const MAP_OFFSET_Y = 64; // headroom for hilltops that project above y = 0
 
 const mapCanvas = document.createElement("canvas");
 mapCanvas.width = MAP_SIZE * 2;
-mapCanvas.height = MAP_SIZE + EDGE_DEPTH;
+mapCanvas.height = MAP_SIZE + EDGE_DEPTH + MAP_OFFSET_Y;
 
 function makeMap() {
   const mctx = mapCanvas.getContext("2d");
@@ -78,52 +122,69 @@ function makeMap() {
       for (let tx = px; tx < px + pw; tx++) tiles[ty][tx] = 1;
   }
 
-  const mp = (wx, wy) => ({ x: projX(wx, wy) + MAP_OFFSET_X, y: projY(wx, wy, 0) });
+  const mp = (wx, wy) => ({
+    x: projX(wx, wy) + MAP_OFFSET_X,
+    y: projY(wx, wy, terrainHeight(wx, wy)) + MAP_OFFSET_Y,
+  });
 
   const GRASS = ["#4a8f3c", "#478a39", "#4d9340", "#458738"];
   const GRASS_DOTS = ["#3f7d33", "#55a046", "#5aab4b", "#2f6427"];
   const DIRT = ["#8a6b42", "#84663e", "#8f7046"];
-  const DIRT_DOTS = ["#755833", "#96774d"];
 
-  for (let ty = 0; ty < MAP_TILES; ty++) {
-    for (let tx = 0; tx < MAP_TILES; tx++) {
-      const dirt = tiles[ty][tx] === 1;
-      const c0 = mp(tx * TILE, ty * TILE);
-      const c1 = mp((tx + 1) * TILE, ty * TILE);
-      const c2 = mp((tx + 1) * TILE, (ty + 1) * TILE);
-      const c3 = mp(tx * TILE, (ty + 1) * TILE);
+  function drawTile(tx, ty) {
+    const dirt = tiles[ty][tx] === 1;
+    const c0 = mp(tx * TILE, ty * TILE);
+    const c1 = mp((tx + 1) * TILE, ty * TILE);
+    const c2 = mp((tx + 1) * TILE, (ty + 1) * TILE);
+    const c3 = mp(tx * TILE, (ty + 1) * TILE);
 
-      const base = dirt ? DIRT : GRASS;
-      mctx.fillStyle = base[(Math.random() * base.length) | 0];
-      mctx.beginPath();
-      mctx.moveTo(c0.x, c0.y);
-      mctx.lineTo(c1.x, c1.y);
-      mctx.lineTo(c2.x, c2.y);
-      mctx.lineTo(c3.x, c3.y);
-      mctx.closePath();
-      mctx.fill();
+    // Slope shading: brightness from the tile normal against the light
+    const h00 = terrainHeight(tx * TILE, ty * TILE);
+    const h10 = terrainHeight((tx + 1) * TILE, ty * TILE);
+    const h11 = terrainHeight((tx + 1) * TILE, (ty + 1) * TILE);
+    const h01 = terrainHeight(tx * TILE, (ty + 1) * TILE);
+    const dzdx = (h10 + h11 - h00 - h01) / (2 * TILE);
+    const dzdy = (h01 + h11 - h00 - h10) / (2 * TILE);
+    const len = Math.hypot(dzdx, dzdy, 1);
+    const dot = (-dzdx * LIGHT.x - dzdy * LIGHT.y + LIGHT.z) / len;
+    const k = Math.max(0.4, Math.min(1.25, 0.3 + dot));
 
-      if (dirt) {
-        // Furrow lines running across the tile
-        mctx.strokeStyle = "#6d5230";
-        mctx.lineWidth = 1;
-        for (const s of [0.25, 0.5, 0.75]) {
-          const a = mp((tx + s) * TILE, ty * TILE);
-          const b = mp((tx + s) * TILE, (ty + 1) * TILE);
-          mctx.beginPath();
-          mctx.moveTo(a.x, a.y);
-          mctx.lineTo(b.x, b.y);
-          mctx.stroke();
-        }
-      } else {
-        // Grass speckles
-        const dots = GRASS_DOTS;
-        for (let i = 0; i < 5; i++) {
-          const p = mp((tx + Math.random()) * TILE, (ty + Math.random()) * TILE);
-          mctx.fillStyle = dots[(Math.random() * dots.length) | 0];
-          mctx.fillRect(Math.round(p.x), Math.round(p.y), 1, 1);
-        }
+    const base = dirt ? DIRT : GRASS;
+    mctx.fillStyle = shade(base[(Math.random() * base.length) | 0], k);
+    mctx.beginPath();
+    mctx.moveTo(c0.x, c0.y);
+    mctx.lineTo(c1.x, c1.y);
+    mctx.lineTo(c2.x, c2.y);
+    mctx.lineTo(c3.x, c3.y);
+    mctx.closePath();
+    mctx.fill();
+
+    if (dirt) {
+      // Furrow lines running across the tile
+      mctx.strokeStyle = shade("#6d5230", k);
+      mctx.lineWidth = 1;
+      for (const s of [0.25, 0.5, 0.75]) {
+        const a = mp((tx + s) * TILE, ty * TILE);
+        const b = mp((tx + s) * TILE, (ty + 1) * TILE);
+        mctx.beginPath();
+        mctx.moveTo(a.x, a.y);
+        mctx.lineTo(b.x, b.y);
+        mctx.stroke();
       }
+    } else {
+      // Grass speckles
+      for (let i = 0; i < 5; i++) {
+        const p = mp((tx + Math.random()) * TILE, (ty + Math.random()) * TILE);
+        mctx.fillStyle = shade(GRASS_DOTS[(Math.random() * GRASS_DOTS.length) | 0], k);
+        mctx.fillRect(Math.round(p.x), Math.round(p.y), 1, 1);
+      }
+    }
+  }
+
+  // Back-to-front so nearer hills paint over the ones behind them
+  for (let s = 0; s <= 2 * (MAP_TILES - 1); s++) {
+    for (let ty = Math.max(0, s - MAP_TILES + 1); ty <= Math.min(MAP_TILES - 1, s); ty++) {
+      drawTile(s - ty, ty);
     }
   }
 
@@ -177,18 +238,6 @@ const FACES = [
   { n: [0, -1, 0], i: [0, 4, 5, 1] },
 ];
 
-const LIGHT = { x: 0.35, y: 0.6, z: 0.71 };
-
-const shadeCache = {};
-function shade(color, k) {
-  const key = color + "|" + k.toFixed(2);
-  if (shadeCache[key]) return shadeCache[key];
-  const r = Math.round(parseInt(color.slice(1, 3), 16) * k);
-  const g = Math.round(parseInt(color.slice(3, 5), 16) * k);
-  const b = Math.round(parseInt(color.slice(5, 7), 16) * k);
-  return (shadeCache[key] = `rgb(${r},${g},${b})`);
-}
-
 function signedArea(pts) {
   let a = 0;
   for (let i = 0; i < pts.length; i++) {
@@ -203,13 +252,16 @@ function drawTractor(camX, camY) {
   const cos = Math.cos(tractor.angle);
   const sin = Math.sin(tractor.angle);
 
+  // Each point rides at terrain height under its own footprint, which drapes
+  // the model over slopes so the tractor visibly pitches and rolls on hills.
   const local = (lx, ly, lz) => {
     const wx = tractor.x + lx * cos - ly * sin;
     const wy = tractor.y + lx * sin + ly * cos;
+    const wz = lz + terrainHeight(wx, wy);
     return {
       x: Math.round(projX(wx, wy) - camX),
-      y: Math.round(projY(wx, wy, lz) - camY),
-      depth: wx + wy + lz,
+      y: Math.round(projY(wx, wy, wz) - camY),
+      depth: wx + wy + wz,
     };
   };
 
@@ -276,10 +328,12 @@ function updateSmoke(dt) {
       smokeTimer = keys.ArrowUp ? 0.07 : 0.18;
       const cos = Math.cos(tractor.angle);
       const sin = Math.sin(tractor.angle);
+      const wx = tractor.x + 2 * cos;
+      const wy = tractor.y + 2 * sin;
       smoke.push({
-        wx: tractor.x + 2 * cos,
-        wy: tractor.y + 2 * sin,
-        wz: 10,
+        wx,
+        wy,
+        wz: terrainHeight(wx, wy) + 10,
         life: 0.9,
       });
     }
@@ -337,6 +391,15 @@ function update(dt) {
     if (tractor.speed > 0) tractor.speed = Math.max(0, tractor.speed - FRICTION * dt);
     else tractor.speed = Math.min(0, tractor.speed + FRICTION * dt);
   }
+  // Gravity along the slope: uphill fights the engine, downhill helps
+  const cos = Math.cos(tractor.angle);
+  const sin = Math.sin(tractor.angle);
+  const grade =
+    (terrainHeight(tractor.x + cos * 4, tractor.y + sin * 4) -
+      terrainHeight(tractor.x - cos * 4, tractor.y - sin * 4)) /
+    8;
+  tractor.speed -= grade * 60 * dt;
+
   tractor.speed = Math.max(MAX_REVERSE, Math.min(MAX_FORWARD, tractor.speed));
 
   // Steering only has effect while moving; reversing flips it like a real vehicle
@@ -345,8 +408,8 @@ function update(dt) {
   if (keys.ArrowRight) tractor.angle += TURN_RATE * speedFactor * dt;
 
   // Move on the ground plane
-  tractor.x += Math.cos(tractor.angle) * tractor.speed * dt;
-  tractor.y += Math.sin(tractor.angle) * tractor.speed * dt;
+  tractor.x += cos * tractor.speed * dt;
+  tractor.y += sin * tractor.speed * dt;
 
   // Keep on the map
   const margin = 12;
@@ -362,12 +425,12 @@ function update(dt) {
 
 const cam = {
   x: projX(tractor.x, tractor.y) - VIEW_W / 2,
-  y: projY(tractor.x, tractor.y, 0) - VIEW_H / 2,
+  y: projY(tractor.x, tractor.y, terrainHeight(tractor.x, tractor.y)) - VIEW_H / 2,
 };
 
 function updateCamera(dt) {
   const tx = projX(tractor.x, tractor.y) - VIEW_W / 2;
-  const ty = projY(tractor.x, tractor.y, 0) - VIEW_H / 2;
+  const ty = projY(tractor.x, tractor.y, terrainHeight(tractor.x, tractor.y)) - VIEW_H / 2;
   const k = Math.min(1, dt * 4);
   cam.x += (tx - cam.x) * k;
   cam.y += (ty - cam.y) * k;
@@ -385,7 +448,7 @@ function draw() {
   ctx.fillStyle = "#10141a";
   ctx.fillRect(0, 0, VIEW_W, VIEW_H);
 
-  ctx.drawImage(mapCanvas, -MAP_OFFSET_X - camX, -camY);
+  ctx.drawImage(mapCanvas, -MAP_OFFSET_X - camX, -MAP_OFFSET_Y - camY);
   drawTractor(camX, camY);
   drawSmoke(camX, camY);
 
