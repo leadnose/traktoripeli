@@ -28,6 +28,13 @@ const keys = {};
 window.addEventListener("keydown", (e) => {
   if (e.key.startsWith("Arrow")) e.preventDefault();
   keys[e.key] = true;
+  if (e.key === " " && !e.repeat) {
+    e.preventDefault();
+    tractor.plowDown = !tractor.plowDown;
+  }
+  if (e.key === "Shift" && !e.repeat) {
+    tractor.fastGear = !tractor.fastGear;
+  }
 });
 
 window.addEventListener("keyup", (e) => {
@@ -107,11 +114,96 @@ const mapCanvas = document.createElement("canvas");
 mapCanvas.width = MAP_SIZE * 2;
 mapCanvas.height = MAP_SIZE + EDGE_DEPTH + MAP_OFFSET_Y;
 
-function makeMap() {
-  const mctx = mapCanvas.getContext("2d");
+const mapCtx = mapCanvas.getContext("2d");
 
-  // Tile types: 0 = grass, 1 = plowed field
-  const tiles = [];
+// Tile types: 0 = grass, 1 = field (unplowed),
+// 2 = plowed with furrows along world y, 3 = plowed with furrows along world x
+const tiles = [];
+
+function tileTypeAt(wx, wy) {
+  const tx = (wx / TILE) | 0;
+  const ty = (wy / TILE) | 0;
+  if (tx < 0 || ty < 0 || tx >= MAP_TILES || ty >= MAP_TILES) return -1;
+  return tiles[ty][tx];
+}
+
+const GRASS = ["#4a8f3c", "#478a39", "#4d9340", "#458738"];
+const GRASS_DOTS = ["#3f7d33", "#55a046", "#5aab4b", "#2f6427"];
+const DIRT = ["#8a6b42", "#84663e", "#8f7046"];
+const DIRT_DOTS = ["#755833", "#96774d"];
+
+const mp = (wx, wy) => ({
+  x: projX(wx, wy) + MAP_OFFSET_X,
+  y: projY(wx, wy, terrainHeight(wx, wy)) + MAP_OFFSET_Y,
+});
+
+function drawTile(tx, ty) {
+  const type = tiles[ty][tx];
+  const c0 = mp(tx * TILE, ty * TILE);
+  const c1 = mp((tx + 1) * TILE, ty * TILE);
+  const c2 = mp((tx + 1) * TILE, (ty + 1) * TILE);
+  const c3 = mp(tx * TILE, (ty + 1) * TILE);
+
+  // Slope shading: brightness from the tile normal against the light
+  const h00 = terrainHeight(tx * TILE, ty * TILE);
+  const h10 = terrainHeight((tx + 1) * TILE, ty * TILE);
+  const h11 = terrainHeight((tx + 1) * TILE, (ty + 1) * TILE);
+  const h01 = terrainHeight(tx * TILE, (ty + 1) * TILE);
+  const dzdx = (h10 + h11 - h00 - h01) / (2 * TILE);
+  const dzdy = (h01 + h11 - h00 - h10) / (2 * TILE);
+  const len = Math.hypot(dzdx, dzdy, 1);
+  const dot = (-dzdx * LIGHT.x - dzdy * LIGHT.y + LIGHT.z) / len;
+  const k = Math.max(0.4, Math.min(1.25, 0.3 + dot));
+
+  const base = type === 0 ? GRASS : DIRT;
+  mapCtx.fillStyle = shade(base[(Math.random() * base.length) | 0], k);
+  mapCtx.beginPath();
+  mapCtx.moveTo(c0.x, c0.y);
+  mapCtx.lineTo(c1.x, c1.y);
+  mapCtx.lineTo(c2.x, c2.y);
+  mapCtx.lineTo(c3.x, c3.y);
+  mapCtx.closePath();
+  mapCtx.fill();
+
+  if (type >= 2) {
+    // Furrow lines parallel to the direction the tile was plowed in
+    const alongX = type === 3;
+    mapCtx.strokeStyle = shade("#6d5230", k);
+    mapCtx.lineWidth = 1;
+    for (const s of [0.25, 0.5, 0.75]) {
+      const a = alongX
+        ? mp(tx * TILE, (ty + s) * TILE)
+        : mp((tx + s) * TILE, ty * TILE);
+      const b = alongX
+        ? mp((tx + 1) * TILE, (ty + s) * TILE)
+        : mp((tx + s) * TILE, (ty + 1) * TILE);
+      mapCtx.beginPath();
+      mapCtx.moveTo(a.x, a.y);
+      mapCtx.lineTo(b.x, b.y);
+      mapCtx.stroke();
+    }
+  } else {
+    // Speckles: dirt clods on unplowed fields, grass tufts elsewhere
+    const dots = type === 1 ? DIRT_DOTS : GRASS_DOTS;
+    for (let i = 0; i < 5; i++) {
+      const p = mp((tx + Math.random()) * TILE, (ty + Math.random()) * TILE);
+      mapCtx.fillStyle = shade(dots[(Math.random() * dots.length) | 0], k);
+      mapCtx.fillRect(Math.round(p.x), Math.round(p.y), 1, 1);
+    }
+  }
+}
+
+// Turn an unplowed field tile into a plowed one under the world point,
+// with furrows along the axis closest to the travel direction
+function plowTileAt(wx, wy, alongX) {
+  if (tileTypeAt(wx, wy) !== 1) return;
+  const tx = (wx / TILE) | 0;
+  const ty = (wy / TILE) | 0;
+  tiles[ty][tx] = alongX ? 3 : 2;
+  drawTile(tx, ty);
+}
+
+function makeMap() {
   for (let ty = 0; ty < MAP_TILES; ty++) tiles.push(new Array(MAP_TILES).fill(0));
   for (let i = 0; i < 6; i++) {
     const px = 1 + ((Math.random() * (MAP_TILES - 6)) | 0);
@@ -120,65 +212,6 @@ function makeMap() {
     const ph = 2 + ((Math.random() * 3) | 0);
     for (let ty = py; ty < py + ph; ty++)
       for (let tx = px; tx < px + pw; tx++) tiles[ty][tx] = 1;
-  }
-
-  const mp = (wx, wy) => ({
-    x: projX(wx, wy) + MAP_OFFSET_X,
-    y: projY(wx, wy, terrainHeight(wx, wy)) + MAP_OFFSET_Y,
-  });
-
-  const GRASS = ["#4a8f3c", "#478a39", "#4d9340", "#458738"];
-  const GRASS_DOTS = ["#3f7d33", "#55a046", "#5aab4b", "#2f6427"];
-  const DIRT = ["#8a6b42", "#84663e", "#8f7046"];
-
-  function drawTile(tx, ty) {
-    const dirt = tiles[ty][tx] === 1;
-    const c0 = mp(tx * TILE, ty * TILE);
-    const c1 = mp((tx + 1) * TILE, ty * TILE);
-    const c2 = mp((tx + 1) * TILE, (ty + 1) * TILE);
-    const c3 = mp(tx * TILE, (ty + 1) * TILE);
-
-    // Slope shading: brightness from the tile normal against the light
-    const h00 = terrainHeight(tx * TILE, ty * TILE);
-    const h10 = terrainHeight((tx + 1) * TILE, ty * TILE);
-    const h11 = terrainHeight((tx + 1) * TILE, (ty + 1) * TILE);
-    const h01 = terrainHeight(tx * TILE, (ty + 1) * TILE);
-    const dzdx = (h10 + h11 - h00 - h01) / (2 * TILE);
-    const dzdy = (h01 + h11 - h00 - h10) / (2 * TILE);
-    const len = Math.hypot(dzdx, dzdy, 1);
-    const dot = (-dzdx * LIGHT.x - dzdy * LIGHT.y + LIGHT.z) / len;
-    const k = Math.max(0.4, Math.min(1.25, 0.3 + dot));
-
-    const base = dirt ? DIRT : GRASS;
-    mctx.fillStyle = shade(base[(Math.random() * base.length) | 0], k);
-    mctx.beginPath();
-    mctx.moveTo(c0.x, c0.y);
-    mctx.lineTo(c1.x, c1.y);
-    mctx.lineTo(c2.x, c2.y);
-    mctx.lineTo(c3.x, c3.y);
-    mctx.closePath();
-    mctx.fill();
-
-    if (dirt) {
-      // Furrow lines running across the tile
-      mctx.strokeStyle = shade("#6d5230", k);
-      mctx.lineWidth = 1;
-      for (const s of [0.25, 0.5, 0.75]) {
-        const a = mp((tx + s) * TILE, ty * TILE);
-        const b = mp((tx + s) * TILE, (ty + 1) * TILE);
-        mctx.beginPath();
-        mctx.moveTo(a.x, a.y);
-        mctx.lineTo(b.x, b.y);
-        mctx.stroke();
-      }
-    } else {
-      // Grass speckles
-      for (let i = 0; i < 5; i++) {
-        const p = mp((tx + Math.random()) * TILE, (ty + Math.random()) * TILE);
-        mctx.fillStyle = shade(GRASS_DOTS[(Math.random() * GRASS_DOTS.length) | 0], k);
-        mctx.fillRect(Math.round(p.x), Math.round(p.y), 1, 1);
-      }
-    }
   }
 
   // Back-to-front so nearer hills paint over the ones behind them
@@ -196,14 +229,14 @@ function makeMap() {
     [east, south, "#6b4f2e"],
     [south, west, "#57401f"],
   ]) {
-    mctx.fillStyle = color;
-    mctx.beginPath();
-    mctx.moveTo(a.x, a.y);
-    mctx.lineTo(b.x, b.y);
-    mctx.lineTo(b.x, b.y + EDGE_DEPTH);
-    mctx.lineTo(a.x, a.y + EDGE_DEPTH);
-    mctx.closePath();
-    mctx.fill();
+    mapCtx.fillStyle = color;
+    mapCtx.beginPath();
+    mapCtx.moveTo(a.x, a.y);
+    mapCtx.lineTo(b.x, b.y);
+    mapCtx.lineTo(b.x, b.y + EDGE_DEPTH);
+    mapCtx.lineTo(a.x, a.y + EDGE_DEPTH);
+    mapCtx.closePath();
+    mapCtx.fill();
   }
 }
 
@@ -226,6 +259,20 @@ const BOXES = [
   { x0: 3.5, x1: 6.5, y0: 2.3, y1: 3.9, z0: 0.0, z1: 3.2, color: "#2b2b2b" }, // front wheel L
   { x0: 3.5, x1: 6.5, y0: -3.9, y1: -2.3, z0: 0.0, z1: 3.2, color: "#2b2b2b" }, // front wheel R
 ];
+
+// Plow implement behind the tractor; its boxes get a z offset from the
+// hydraulic lift so it can be raised for transport and dropped to till.
+const PLOW_LIFT_HEIGHT = 3.5;
+const PLOW_BOXES = [
+  { x0: -8.6, x1: -7.2, y0: -0.9, y1: 0.9, z0: 3.2, z1: 4.2, color: "#6b6b6b" }, // drawbar
+  { x0: -10.2, x1: -8.8, y0: -4.6, y1: 4.6, z0: 3.4, z1: 4.6, color: "#a32f1e" }, // beam
+];
+for (const yc of [-3.4, -1.1, 1.2, 3.5]) {
+  PLOW_BOXES.push({
+    x0: -10.6, x1: -9.4, y0: yc - 0.55, y1: yc + 0.55, z0: 0.3, z1: 3.4,
+    color: "#54565a", // tine
+  });
+}
 
 // Faces of a unit box; corner index = xi*4 + yi*2 + zi. Windings are chosen
 // so a face's projected signed area is positive exactly when it faces the
@@ -265,12 +312,12 @@ function drawTractor(camX, camY) {
     };
   };
 
-  // Shadow
+  // Shadow (covers tractor plus the plow overhang at the rear)
   const sh = [
-    local(-8.5, -5.5, 0),
+    local(-11, -5.5, 0),
     local(8.5, -5.5, 0),
     local(8.5, 5.5, 0),
-    local(-8.5, 5.5, 0),
+    local(-11, 5.5, 0),
   ];
   ctx.fillStyle = "rgba(0,0,0,0.2)";
   ctx.beginPath();
@@ -279,8 +326,13 @@ function drawTractor(camX, camY) {
   ctx.closePath();
   ctx.fill();
 
+  const lift = tractor.plowLift * PLOW_LIFT_HEIGHT;
+  const boxes = BOXES.concat(
+    PLOW_BOXES.map((b) => ({ ...b, z0: b.z0 + lift, z1: b.z1 + lift }))
+  );
+
   // Painter's algorithm: depth along the view axis is wx + wy + wz.
-  const items = BOXES.map((box) => {
+  const items = boxes.map((box) => {
     const pts = [];
     for (let xi = 0; xi < 2; xi++)
       for (let yi = 0; yi < 2; yi++)
@@ -311,6 +363,38 @@ function drawTractor(camX, camY) {
       ctx.lineWidth = 1;
       ctx.stroke();
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Wheel tracks: stamped permanently into the prerendered map canvas while
+// driving over unplowed field dirt (plowing a tile repaints it clean).
+// ---------------------------------------------------------------------------
+
+const TRACK_WHEELS = [
+  { x: -4.5, y: 4.0, w: 2 }, // rear left (wide tire, wide mark)
+  { x: -4.5, y: -4.0, w: 2 }, // rear right
+  { x: 5.0, y: 3.1, w: 1 }, // front left
+  { x: 5.0, y: -3.1, w: 1 }, // front right
+];
+
+let trackDist = 0;
+
+function updateTracks(dt) {
+  trackDist += Math.abs(tractor.speed) * dt;
+  if (trackDist < 2) return;
+  trackDist = 0;
+
+  const cos = Math.cos(tractor.angle);
+  const sin = Math.sin(tractor.angle);
+  for (const wheel of TRACK_WHEELS) {
+    const wx = tractor.x + wheel.x * cos - wheel.y * sin;
+    const wy = tractor.y + wheel.x * sin + wheel.y * cos;
+    if (tileTypeAt(wx, wy) !== 1) continue; // marks only on unplowed field dirt
+    const px = Math.round(projX(wx, wy) + MAP_OFFSET_X);
+    const py = Math.round(projY(wx, wy, terrainHeight(wx, wy)) + MAP_OFFSET_Y);
+    mapCtx.fillStyle = "rgba(54,38,20,0.45)";
+    mapCtx.fillRect(px - (wheel.w >> 1), py, wheel.w, 1);
   }
 }
 
@@ -371,14 +455,22 @@ const tractor = {
   y: MAP_SIZE / 2,
   angle: 0, // radians in the ground plane; 0 = toward screen lower-right
   speed: 0, // world units/s, positive = forward
+  fastGear: true, // Shift toggles between road and work gear
+  plowDown: false, // Space toggles the plow
+  plowLift: 1, // animated: 0 = blades in the ground, 1 = fully raised
 };
 
 const ACCEL = 55;
 const BRAKE = 80;
 const FRICTION = 28;
-const MAX_FORWARD = 42;
+const GEAR_FAST = 42;
+const GEAR_SLOW = 16;
 const MAX_REVERSE = -20;
-const TURN_RATE = 2.2; // rad/s at full speed
+// Fixed steering geometry: turn rate scales with speed, so the turning
+// radius stays ~TURN_RADIUS at working speeds — tight enough to U-turn
+// into the adjacent row (one tile = 16 units away).
+const TURN_RADIUS = 7; // world units
+const MAX_TURN_RATE = 2.5; // rad/s cap so the fast gear doesn't spin wildly
 
 function update(dt) {
   // Throttle / brake
@@ -400,12 +492,19 @@ function update(dt) {
     8;
   tractor.speed -= grade * 60 * dt;
 
-  tractor.speed = Math.max(MAX_REVERSE, Math.min(MAX_FORWARD, tractor.speed));
+  // Top speed from the gear, further reduced by plow drag when it's down
+  const maxForward =
+    (tractor.fastGear ? GEAR_FAST : GEAR_SLOW) * (1 - 0.35 * (1 - tractor.plowLift));
+  if (tractor.speed > maxForward)
+    tractor.speed = Math.max(maxForward, tractor.speed - 80 * dt);
+  tractor.speed = Math.max(MAX_REVERSE, tractor.speed);
 
   // Steering only has effect while moving; reversing flips it like a real vehicle
-  const speedFactor = tractor.speed / MAX_FORWARD;
-  if (keys.ArrowLeft) tractor.angle -= TURN_RATE * speedFactor * dt;
-  if (keys.ArrowRight) tractor.angle += TURN_RATE * speedFactor * dt;
+  const turnRate =
+    Math.min(Math.abs(tractor.speed) / TURN_RADIUS, MAX_TURN_RATE) *
+    Math.sign(tractor.speed);
+  if (keys.ArrowLeft) tractor.angle -= turnRate * dt;
+  if (keys.ArrowRight) tractor.angle += turnRate * dt;
 
   // Move on the ground plane
   tractor.x += cos * tractor.speed * dt;
@@ -416,6 +515,23 @@ function update(dt) {
   tractor.x = Math.max(margin, Math.min(MAP_SIZE - margin, tractor.x));
   tractor.y = Math.max(margin, Math.min(MAP_SIZE - margin, tractor.y));
 
+  // Hydraulic lift eases the plow up or down
+  const liftTarget = tractor.plowDown ? 0 : 1;
+  tractor.plowLift += (liftTarget - tractor.plowLift) * Math.min(1, dt * 5);
+
+  // Till field tiles passing under the blades
+  if (tractor.plowLift < 0.3 && Math.abs(tractor.speed) > 2) {
+    const alongX = Math.abs(cos) > Math.abs(sin);
+    for (const oy of [-3.5, 0, 3.5]) {
+      plowTileAt(
+        tractor.x - 9.8 * cos - oy * sin,
+        tractor.y - 9.8 * sin + oy * cos,
+        alongX
+      );
+    }
+  }
+
+  updateTracks(dt);
   updateSmoke(dt);
 }
 
@@ -453,6 +569,19 @@ function draw() {
   drawSmoke(camX, camY);
 
   screenCtx.drawImage(view, 0, 0, screenCanvas.width, screenCanvas.height);
+
+  // HUD
+  screenCtx.fillStyle = "rgba(0,0,0,0.45)";
+  screenCtx.fillRect(0, screenCanvas.height - 26, screenCanvas.width, 26);
+  screenCtx.fillStyle = "#e8e8d8";
+  screenCtx.font = "bold 13px monospace";
+  screenCtx.fillText(
+    `GEAR: ${tractor.fastGear ? "FAST" : "SLOW"} [Shift]   ` +
+      `PLOW: ${tractor.plowDown ? "DOWN" : "UP"} [Space]   ` +
+      `Arrows: drive`,
+    12,
+    screenCanvas.height - 8
+  );
 }
 
 // ---------------------------------------------------------------------------
