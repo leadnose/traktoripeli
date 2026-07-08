@@ -24,26 +24,43 @@ const ctx = view.getContext("2d");
 // ---------------------------------------------------------------------------
 
 const keys = {};
+const IMPLEMENT_KEYS = { 1: "plow", 2: "seeder", 3: "harvester", 4: "trailer" };
 
 window.addEventListener("keydown", (e) => {
   if (e.key.startsWith("Arrow")) e.preventDefault();
   keys[e.key] = true;
   if (e.key === " " && !e.repeat) {
     e.preventDefault();
+    const imp = IMPLEMENTS[tractor.implement];
     // Raising is always allowed; lowering needs the work gear and field dirt
-    if (tractor.plowDown) tractor.plowDown = false;
-    else if (tractor.fastGear) {
-      tractor.plowFlash = 0.9; // refused: too fast — flash the HUD, no movement
-    } else if (!plowOverField()) {
-      tractor.plowBounce = 0.6; // it tries, catches, and springs back up
+    if (!imp.liftable) {
+      tractor.implFlash = 0.9; // the trailer has no lift
+    } else if (tractor.implDown) {
+      tractor.implDown = false;
+    } else if (tractor.fastGear) {
+      tractor.gearFlash = 0.9; // refused: too fast — flash the HUD, no movement
+    } else if (!implementOverField()) {
+      tractor.implBounce = 0.6; // it tries, catches, and springs back up
     } else {
-      tractor.plowDown = true;
-      tractor.plowBounce = 0;
+      tractor.implDown = true;
+      tractor.implBounce = 0;
     }
   }
   if (e.key === "Shift" && !e.repeat) {
     tractor.fastGear = !tractor.fastGear;
-    if (tractor.fastGear) tractor.plowDown = false; // lift before shifting up
+    if (tractor.fastGear) tractor.implDown = false; // lift before shifting up
+  }
+  if (IMPLEMENT_KEYS[e.key] && !e.repeat) {
+    // Implements are swapped at the farmyard
+    if (nearFarm()) {
+      if (tractor.implement !== IMPLEMENT_KEYS[e.key]) {
+        tractor.implement = IMPLEMENT_KEYS[e.key];
+        tractor.implDown = false;
+        tractor.implLift = 1;
+      }
+    } else {
+      tractor.implFlash = 0.9;
+    }
   }
 });
 
@@ -70,6 +87,17 @@ function projY(wx, wy, wz) {
 }
 
 // ---------------------------------------------------------------------------
+// Farmyard location (needed by the terrain: the yard sits on a flat pad)
+// ---------------------------------------------------------------------------
+
+const FARM = { x: MAP_SIZE / 2, y: MAP_SIZE - 72 };
+const FARM_RADIUS = 40; // within this distance farm services are available
+
+function nearFarm() {
+  return Math.hypot(tractor.x - FARM.x, tractor.y - FARM.y) < FARM_RADIUS;
+}
+
+// ---------------------------------------------------------------------------
 // Terrain: smooth rolling hills from summed cosine bumps, fading to flat
 // near the map edges so the dirt cliffs stay level.
 // ---------------------------------------------------------------------------
@@ -93,7 +121,10 @@ function terrainHeight(wx, wy) {
   h = 40 * Math.tanh(h / 40); // soft cap where hills stack
   const m = Math.min(wx, wy, MAP_SIZE - wx, MAP_SIZE - wy);
   const t = Math.max(0, Math.min(1, m / 40));
-  return h * t * t * (3 - 2 * t);
+  // Flat pad under the farmyard so the buildings sit level
+  const df = Math.hypot(wx - FARM.x, wy - FARM.y);
+  const tf = Math.max(0, Math.min(1, (df - FARM_RADIUS - 8) / 30));
+  return h * t * t * (3 - 2 * t) * tf * tf * (3 - 2 * tf);
 }
 
 // ---------------------------------------------------------------------------
@@ -126,12 +157,11 @@ mapCanvas.height = MAP_SIZE + EDGE_DEPTH + MAP_OFFSET_Y;
 
 const mapCtx = mapCanvas.getContext("2d");
 
-// Tile types: 0 = grass, 1 = field (unplowed),
-// 2 = plowed with furrows along world y, 3 = plowed with furrows along world x
+// Tile types: 0 = grass, 1 = field (unplowed / stubble), 2 = plowed, 3 = seeded.
+// dirs holds the furrow direction (0 = along world y, 1 = along world x) and
+// growth the seconds since seeding, which drives the crop stages.
 const tiles = [];
-
-// Crop growth: seconds since a tile was plowed; stage advances at the
-// thresholds below and the tile is repainted when it does.
+const dirs = [];
 const growth = [];
 const CROP_STAGES = [8, 18, 32]; // seconds to reach sprout / young / mature
 
@@ -188,7 +218,7 @@ function drawTile(tx, ty) {
 
   if (type >= 2) {
     // Furrow lines parallel to the direction the tile was plowed in
-    const alongX = type === 3;
+    const alongX = dirs[ty][tx] === 1;
     mapCtx.strokeStyle = shade("#6d5230", k);
     mapCtx.lineWidth = 1;
     for (const s of [0.25, 0.5, 0.75]) {
@@ -204,9 +234,9 @@ function drawTile(tx, ty) {
       mapCtx.stroke();
     }
 
-    // Crops in rows along the furrows
-    const stage = cropStage(growth[ty][tx]);
-    if (stage > 0) {
+    // Seeds / crops in rows along the furrows
+    if (type === 3) {
+      const stage = cropStage(growth[ty][tx]);
       for (const s of [0.25, 0.5, 0.75]) {
         for (const t of [0.15, 0.38, 0.62, 0.85]) {
           const p = alongX
@@ -214,7 +244,10 @@ function drawTile(tx, ty) {
             : mp((tx + s) * TILE, (ty + t) * TILE);
           const x = Math.round(p.x);
           const y = Math.round(p.y);
-          if (stage === 1) {
+          if (stage === 0) {
+            mapCtx.fillStyle = shade("#54401f", k); // seed spot
+            mapCtx.fillRect(x, y, 1, 1);
+          } else if (stage === 1) {
             mapCtx.fillStyle = shade("#7bc95e", k); // sprout
             mapCtx.fillRect(x, y - 1, 1, 1);
           } else if (stage === 2) {
@@ -230,7 +263,7 @@ function drawTile(tx, ty) {
       }
     }
   } else {
-    // Speckles: dirt clods on unplowed fields, grass tufts elsewhere
+    // Speckles: dirt clods on fields, grass tufts elsewhere
     const dots = type === 1 ? DIRT_DOTS : GRASS_DOTS;
     for (let i = 0; i < 5; i++) {
       const p = mp((tx + Math.random()) * TILE, (ty + Math.random()) * TILE);
@@ -240,58 +273,49 @@ function drawTile(tx, ty) {
   }
 }
 
-// Turn an unplowed field tile into a plowed one under the world point,
-// with furrows along the axis closest to the travel direction
+// --- Field work, one function per implement ---------------------------------
+
+// Plow: turn unplowed field into furrows along the travel direction
 function plowTileAt(wx, wy, alongX) {
   if (tileTypeAt(wx, wy) !== 1) return;
   const tx = (wx / TILE) | 0;
   const ty = (wy / TILE) | 0;
-  tiles[ty][tx] = alongX ? 3 : 2;
-  growth[ty][tx] = 0;
+  tiles[ty][tx] = 2;
+  dirs[ty][tx] = alongX ? 1 : 0;
   drawTile(tx, ty);
 }
 
-// True when any part of the plow's working width is over field dirt.
-// Deliberately generous — samples across the blades and a bit ahead of
-// them — so working the edge rows of a field isn't fiddly.
-function plowOverField() {
-  const cos = Math.cos(tractor.angle);
-  const sin = Math.sin(tractor.angle);
-  const points = [
-    [-9.8, -4],
-    [-9.8, 0],
-    [-9.8, 4],
-    [-6, 0],
-  ];
-  for (const [lx, ly] of points) {
-    const wx = tractor.x + lx * cos - ly * sin;
-    const wy = tractor.y + lx * sin + ly * cos;
-    if (tileTypeAt(wx, wy) >= 1) return true;
-  }
-  return false;
-}
-
-// Harvest a mature crop tile under the world point: score it, throw chaff,
-// and return the tile to unplowed field so it can be worked again.
-let harvested = 0;
-
-function harvestAt(wx, wy) {
+// Seeder: plant a plowed tile, consuming one seed
+function seedTileAt(wx, wy) {
+  if (seeds <= 0 || tileTypeAt(wx, wy) !== 2) return;
   const tx = (wx / TILE) | 0;
   const ty = (wy / TILE) | 0;
-  if (tx < 0 || ty < 0 || tx >= MAP_TILES || ty >= MAP_TILES) return;
-  if (tiles[ty][tx] < 2 || cropStage(growth[ty][tx]) < 3) return;
+  tiles[ty][tx] = 3;
+  growth[ty][tx] = 0;
+  seeds--;
+  drawTile(tx, ty);
+}
+
+// Harvester: cut a mature crop, leaving a grain sack and stubble behind
+function harvestTileAt(wx, wy) {
+  if (tileTypeAt(wx, wy) !== 3) return;
+  const tx = (wx / TILE) | 0;
+  const ty = (wy / TILE) | 0;
+  if (cropStage(growth[ty][tx]) < 3) return;
   tiles[ty][tx] = 1;
   growth[ty][tx] = 0;
   drawTile(tx, ty);
-  harvested++;
-  spawnChaff((tx + 0.5) * TILE, (ty + 0.5) * TILE);
+  const cx = (tx + 0.5) * TILE;
+  const cy = (ty + 0.5) * TILE;
+  sacks.push({ wx: cx, wy: cy });
+  spawnChaff(cx, cy);
 }
 
-// Advance crop growth on plowed tiles, repainting when a stage is reached
+// Advance crop growth on seeded tiles, repainting when a stage is reached
 function updateCrops(dt) {
   for (let ty = 0; ty < MAP_TILES; ty++) {
     for (let tx = 0; tx < MAP_TILES; tx++) {
-      if (tiles[ty][tx] < 2) continue;
+      if (tiles[ty][tx] !== 3) continue;
       const g = growth[ty][tx];
       growth[ty][tx] = g + dt;
       if (cropStage(g + dt) !== cropStage(g)) drawTile(tx, ty);
@@ -302,6 +326,7 @@ function updateCrops(dt) {
 function makeMap() {
   for (let ty = 0; ty < MAP_TILES; ty++) {
     tiles.push(new Array(MAP_TILES).fill(0));
+    dirs.push(new Array(MAP_TILES).fill(0));
     growth.push(new Array(MAP_TILES).fill(0));
   }
   for (let i = 0; i < 6; i++) {
@@ -313,11 +338,37 @@ function makeMap() {
       for (let tx = px; tx < px + pw; tx++) tiles[ty][tx] = 1;
   }
 
+  // Keep the farmyard clear of fields
+  for (let ty = 0; ty < MAP_TILES; ty++) {
+    for (let tx = 0; tx < MAP_TILES; tx++) {
+      const d = Math.hypot((tx + 0.5) * TILE - FARM.x, (ty + 0.5) * TILE - FARM.y);
+      if (d < FARM_RADIUS + 24) tiles[ty][tx] = 0;
+    }
+  }
+
   // Back-to-front so nearer hills paint over the ones behind them
   for (let s = 0; s <= 2 * (MAP_TILES - 1); s++) {
     for (let ty = Math.max(0, s - MAP_TILES + 1); ty <= Math.min(MAP_TILES - 1, s); ty++) {
       drawTile(s - ty, ty);
     }
+  }
+
+  // Trodden dirt yard around the farm buildings
+  const fc = mp(FARM.x, FARM.y);
+  mapCtx.fillStyle = "#8a6b42";
+  mapCtx.beginPath();
+  mapCtx.ellipse(fc.x, fc.y, FARM_RADIUS * 1.8, FARM_RADIUS * 0.9, 0, 0, Math.PI * 2);
+  mapCtx.fill();
+  mapCtx.fillStyle = "#755833";
+  for (let i = 0; i < 40; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const r = Math.sqrt(Math.random());
+    mapCtx.fillRect(
+      Math.round(fc.x + Math.cos(a) * r * FARM_RADIUS * 1.7),
+      Math.round(fc.y + Math.sin(a) * r * FARM_RADIUS * 0.85),
+      1,
+      1
+    );
   }
 
   // Dirt cliffs along the two near (bottom) edges of the map diamond
@@ -342,9 +393,8 @@ function makeMap() {
 makeMap();
 
 // ---------------------------------------------------------------------------
-// Tractor model: axis-aligned boxes in local space (+x = forward, z = up),
-// rotated around z and projected each frame. Faces are shaded by a fixed
-// light so the tractor reads as 3D from every direction.
+// Box models: everything solid is axis-aligned boxes in local space
+// (+x = forward, z = up), rotated around z and projected each frame.
 // ---------------------------------------------------------------------------
 
 const BOXES = [
@@ -359,9 +409,10 @@ const BOXES = [
   { x0: 3.5, x1: 6.5, y0: -3.9, y1: -2.3, z0: 0.0, z1: 3.2, color: "#2b2b2b" }, // front wheel R
 ];
 
-// Plow implement behind the tractor; its boxes get a z offset from the
-// hydraulic lift so it can be raised for transport and dropped to till.
-const PLOW_LIFT_HEIGHT = 3.5;
+// Implements hang behind the tractor; liftable ones get a z offset from the
+// hydraulic lift so they can be raised for transport and dropped to work.
+const IMPLEMENT_LIFT_HEIGHT = 3.5;
+
 const PLOW_BOXES = [
   { x0: -8.6, x1: -7.2, y0: -0.9, y1: 0.9, z0: 3.2, z1: 4.2, color: "#6b6b6b" }, // drawbar
   { x0: -10.2, x1: -8.8, y0: -4.6, y1: 4.6, z0: 3.4, z1: 4.6, color: "#a32f1e" }, // beam
@@ -372,6 +423,65 @@ for (const yc of [-3.4, -1.1, 1.2, 3.5]) {
     color: "#54565a", // tine
   });
 }
+
+const SEEDER_BOXES = [
+  { x0: -8.6, x1: -7.2, y0: -0.9, y1: 0.9, z0: 3.2, z1: 4.2, color: "#6b6b6b" }, // drawbar
+  { x0: -10.4, x1: -8.6, y0: -4.6, y1: 4.6, z0: 3.2, z1: 4.4, color: "#d8a020" }, // frame
+  { x0: -10.2, x1: -8.8, y0: -3.9, y1: -1.7, z0: 4.4, z1: 6.4, color: "#e6b83c" }, // hopper
+  { x0: -10.2, x1: -8.8, y0: -1.1, y1: 1.1, z0: 4.4, z1: 6.4, color: "#e6b83c" }, // hopper
+  { x0: -10.2, x1: -8.8, y0: 1.7, y1: 3.9, z0: 4.4, z1: 6.4, color: "#e6b83c" }, // hopper
+];
+for (const yc of [-3.4, -1.1, 1.2, 3.5]) {
+  SEEDER_BOXES.push({
+    x0: -10.0, x1: -9.2, y0: yc - 0.35, y1: yc + 0.35, z0: 0.6, z1: 3.2,
+    color: "#54565a", // coulter disc
+  });
+}
+
+const HARVESTER_BOXES = [
+  { x0: -8.6, x1: -7.2, y0: -0.9, y1: 0.9, z0: 3.2, z1: 4.2, color: "#6b6b6b" }, // drawbar
+  { x0: -13.0, x1: -8.6, y0: -4.8, y1: 4.8, z0: 2.2, z1: 8.0, color: "#3d8c40" }, // body
+  { x0: -12.4, x1: -11.2, y0: -4.2, y1: 4.2, z0: 8.0, z1: 9.4, color: "#2f6f33" }, // grain tank
+  { x0: -8.6, x1: -7.4, y0: -4.8, y1: 4.8, z0: 0.4, z1: 2.6, color: "#8a2f22" }, // header reel
+  { x0: -12.6, x1: -9.4, y0: 4.8, y1: 6.0, z0: 0.0, z1: 3.6, color: "#2b2b2b" }, // wheel L
+  { x0: -12.6, x1: -9.4, y0: -6.0, y1: -4.8, z0: 0.0, z1: 3.6, color: "#2b2b2b" }, // wheel R
+];
+
+const TRAILER_BOXES = [
+  { x0: -8.4, x1: -7.0, y0: -0.7, y1: 0.7, z0: 2.6, z1: 3.6, color: "#6b6b6b" }, // drawbar
+  { x0: -14.5, x1: -8.4, y0: -4.2, y1: 4.2, z0: 3.0, z1: 7.0, color: "#7a5a34" }, // wooden bed
+  { x0: -13.6, x1: -9.3, y0: 4.2, y1: 5.4, z0: 0.0, z1: 3.4, color: "#2b2b2b" }, // wheel L
+  { x0: -13.6, x1: -9.3, y0: -5.4, y1: -4.2, z0: 0.0, z1: 3.4, color: "#2b2b2b" }, // wheel R
+];
+
+function trailerBoxes() {
+  if (cargo === 0) return TRAILER_BOXES;
+  // Grain heap grows with the load
+  const h = 0.8 + 2.4 * (cargo / TRAILER_CAP);
+  return TRAILER_BOXES.concat([
+    { x0: -14.0, x1: -8.9, y0: -3.6, y1: 3.6, z0: 7.0, z1: 7.0 + h, color: "#d9b84a" },
+  ]);
+}
+
+const IMPLEMENTS = {
+  plow: { label: "PLOW", liftable: true, boxes: () => PLOW_BOXES },
+  seeder: { label: "SEEDER", liftable: true, boxes: () => SEEDER_BOXES },
+  harvester: { label: "HARVESTER", liftable: true, boxes: () => HARVESTER_BOXES },
+  trailer: { label: "TRAILER", liftable: false, boxes: trailerBoxes },
+};
+
+// Farm buildings, local to FARM
+const FARM_BOXES = [
+  { x0: -16.0, x1: 2.0, y0: -12.0, y1: 2.0, z0: 0.0, z1: 9.0, color: "#a34026" }, // barn
+  { x0: -17.5, x1: 3.5, y0: -13.5, y1: 3.5, z0: 9.0, z1: 12.0, color: "#5b3a28" }, // barn roof
+  { x0: 8.0, x1: 17.0, y0: -9.0, y1: 0.0, z0: 0.0, z1: 20.0, color: "#9aa0a6" }, // silo
+  { x0: 9.0, x1: 16.0, y0: -8.0, y1: -1.0, z0: 20.0, z1: 22.0, color: "#6b7075" }, // silo cap
+];
+
+// Grain sacks dropped by the harvester
+const SACK_BOXES = [
+  { x0: -1.6, x1: 1.6, y0: -1.6, y1: 1.6, z0: 0.0, z1: 2.8, color: "#d9b84a" },
+];
 
 // Faces of a unit box; corner index = xi*4 + yi*2 + zi. Windings are chosen
 // so a face's projected signed area is positive exactly when it faces the
@@ -394,15 +504,19 @@ function signedArea(pts) {
   return a;
 }
 
-function drawTractor(camX, camY) {
-  const cos = Math.cos(tractor.angle);
-  const sin = Math.sin(tractor.angle);
+// ---------------------------------------------------------------------------
+// Scene rendering: all box sets (tractor, implement, farm, sacks) go into one
+// list and are painter-sorted together so occlusion works between them.
+// ---------------------------------------------------------------------------
 
-  // Each point rides at terrain height under its own footprint, which drapes
-  // the model over slopes so the tractor visibly pitches and rolls on hills.
+// Each point rides at terrain height under its own footprint, which drapes
+// models over slopes so they visibly pitch and roll on hills.
+function makeItems(items, boxes, ox, oy, angle, liftZ, camX, camY) {
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
   const local = (lx, ly, lz) => {
-    const wx = tractor.x + lx * cos - ly * sin;
-    const wy = tractor.y + lx * sin + ly * cos;
+    const wx = ox + lx * cos - ly * sin;
+    const wy = oy + lx * sin + ly * cos;
     const wz = lz + terrainHeight(wx, wy);
     return {
       x: Math.round(projX(wx, wy) - camX),
@@ -410,14 +524,40 @@ function drawTractor(camX, camY) {
       depth: wx + wy + wz,
     };
   };
+  for (const box of boxes) {
+    const pts = [];
+    for (let xi = 0; xi < 2; xi++)
+      for (let yi = 0; yi < 2; yi++)
+        for (let zi = 0; zi < 2; zi++)
+          pts.push(
+            local(
+              xi ? box.x1 : box.x0,
+              yi ? box.y1 : box.y0,
+              (zi ? box.z1 : box.z0) + liftZ
+            )
+          );
+    const center = local(
+      (box.x0 + box.x1) / 2,
+      (box.y0 + box.y1) / 2,
+      (box.z0 + box.z1) / 2 + liftZ
+    );
+    items.push({ box, pts, depth: center.depth, cos, sin });
+  }
+}
 
-  // Shadow (covers tractor plus the plow overhang at the rear)
-  const sh = [
-    local(-11, -5.5, 0),
-    local(8.5, -5.5, 0),
-    local(8.5, 5.5, 0),
-    local(-11, 5.5, 0),
-  ];
+function drawScene(camX, camY) {
+  // Tractor + implement shadow
+  const cos = Math.cos(tractor.angle);
+  const sin = Math.sin(tractor.angle);
+  const shPt = (lx, ly) => {
+    const wx = tractor.x + lx * cos - ly * sin;
+    const wy = tractor.y + lx * sin + ly * cos;
+    return {
+      x: Math.round(projX(wx, wy) - camX),
+      y: Math.round(projY(wx, wy, terrainHeight(wx, wy)) - camY),
+    };
+  };
+  const sh = [shPt(-14, -5.5), shPt(8.5, -5.5), shPt(8.5, 5.5), shPt(-14, 5.5)];
   ctx.fillStyle = "rgba(0,0,0,0.2)";
   ctx.beginPath();
   ctx.moveTo(sh[0].x, sh[0].y);
@@ -425,21 +565,22 @@ function drawTractor(camX, camY) {
   ctx.closePath();
   ctx.fill();
 
-  const lift = tractor.plowLift * PLOW_LIFT_HEIGHT;
-  const boxes = BOXES.concat(
-    PLOW_BOXES.map((b) => ({ ...b, z0: b.z0 + lift, z1: b.z1 + lift }))
-  );
-
   // Painter's algorithm: depth along the view axis is wx + wy + wz.
-  const items = boxes.map((box) => {
-    const pts = [];
-    for (let xi = 0; xi < 2; xi++)
-      for (let yi = 0; yi < 2; yi++)
-        for (let zi = 0; zi < 2; zi++)
-          pts.push(local(xi ? box.x1 : box.x0, yi ? box.y1 : box.y0, zi ? box.z1 : box.z0));
-    const center = local((box.x0 + box.x1) / 2, (box.y0 + box.y1) / 2, (box.z0 + box.z1) / 2);
-    return { box, pts, depth: center.depth };
-  });
+  const items = [];
+  makeItems(items, BOXES, tractor.x, tractor.y, tractor.angle, 0, camX, camY);
+  const imp = IMPLEMENTS[tractor.implement];
+  makeItems(
+    items,
+    imp.boxes(),
+    tractor.x,
+    tractor.y,
+    tractor.angle,
+    imp.liftable ? tractor.implLift * IMPLEMENT_LIFT_HEIGHT : 0,
+    camX,
+    camY
+  );
+  makeItems(items, FARM_BOXES, FARM.x, FARM.y, 0, 0, camX, camY);
+  for (const s of sacks) makeItems(items, SACK_BOXES, s.wx, s.wy, 0, 0, camX, camY);
   items.sort((a, b) => a.depth - b.depth);
 
   for (const item of items) {
@@ -447,8 +588,8 @@ function drawTractor(camX, camY) {
       const pts = face.i.map((i) => item.pts[i]);
       if (signedArea(pts) <= 0) continue;
 
-      const nx = face.n[0] * cos - face.n[1] * sin;
-      const ny = face.n[0] * sin + face.n[1] * cos;
+      const nx = face.n[0] * item.cos - face.n[1] * item.sin;
+      const ny = face.n[0] * item.sin + face.n[1] * item.cos;
       const d = nx * LIGHT.x + ny * LIGHT.y + face.n[2] * LIGHT.z;
       const k = Math.min(1, Math.max(0.3, 0.3 + d));
 
@@ -467,7 +608,7 @@ function drawTractor(camX, camY) {
 
 // ---------------------------------------------------------------------------
 // Wheel tracks: stamped permanently into the prerendered map canvas while
-// driving over unplowed field dirt (plowing a tile repaints it clean).
+// driving over unplowed field dirt (working a tile repaints it clean).
 // ---------------------------------------------------------------------------
 
 const TRACK_WHEELS = [
@@ -498,7 +639,7 @@ function updateTracks(dt) {
 }
 
 // ---------------------------------------------------------------------------
-// Exhaust smoke
+// Exhaust smoke & chaff particles
 // ---------------------------------------------------------------------------
 
 const smoke = [];
@@ -532,7 +673,7 @@ function updateSmoke(dt) {
   }
 }
 
-// Golden chaff burst thrown up when a tile is harvested
+// Golden chaff burst thrown up when a tile is harvested or grain is sold
 function spawnChaff(wx, wy) {
   const base = terrainHeight(wx, wy);
   for (let i = 0; i < 8; i++) {
@@ -565,19 +706,29 @@ function drawSmoke(camX, camY) {
 }
 
 // ---------------------------------------------------------------------------
-// Tractor state & physics
+// Tractor state, economy & physics
 // ---------------------------------------------------------------------------
 
+const SEED_CAP = 64; // seeder hopper size, refilled at the farm
+const TRAILER_CAP = 12; // sacks the trailer can carry
+
+let seeds = 0; // start empty: fetch seeds from the farm
+let cargo = 0; // sacks on the trailer
+let sold = 0; // total sacks delivered to the farm
+const sacks = []; // grain sacks lying on the fields
+
 const tractor = {
-  x: MAP_SIZE / 2,
-  y: MAP_SIZE / 2,
-  angle: 0, // radians in the ground plane; 0 = toward screen lower-right
+  x: FARM.x + 34,
+  y: FARM.y + 10,
+  angle: -2.4, // facing up-left, toward the middle of the map
   speed: 0, // world units/s, positive = forward
   fastGear: true, // Shift toggles between road and work gear
-  plowDown: false, // Space toggles the plow
-  plowLift: 1, // animated: 0 = blades in the ground, 1 = fully raised
-  plowBounce: 0, // seconds left of the refused-lower dip animation
-  plowFlash: 0, // seconds left of the red HUD flash (refused: gear too fast)
+  implement: "plow", // current implement: plow / seeder / harvester / trailer
+  implDown: false, // Space toggles the implement
+  implLift: 1, // animated: 0 = working the ground, 1 = fully raised
+  implBounce: 0, // seconds left of the refused-lower dip animation
+  gearFlash: 0, // seconds left of the red HUD flash (refused: gear too fast)
+  implFlash: 0, // seconds left of the red HUD flash (implement complaint)
 };
 
 const ACCEL = 55;
@@ -592,7 +743,29 @@ const MAX_REVERSE = -20;
 const TURN_RADIUS = 7; // world units
 const MAX_TURN_RATE = 2.5; // rad/s cap so the fast gear doesn't spin wildly
 
+// True when any part of the implement's working width is over field dirt.
+// Deliberately generous — samples across the blades and a bit ahead of
+// them — so working the edge rows of a field isn't fiddly.
+function implementOverField() {
+  const cos = Math.cos(tractor.angle);
+  const sin = Math.sin(tractor.angle);
+  const points = [
+    [-9.8, -4],
+    [-9.8, 0],
+    [-9.8, 4],
+    [-6, 0],
+  ];
+  for (const [lx, ly] of points) {
+    const wx = tractor.x + lx * cos - ly * sin;
+    const wy = tractor.y + lx * sin + ly * cos;
+    if (tileTypeAt(wx, wy) >= 1) return true;
+  }
+  return false;
+}
+
 function update(dt) {
+  const imp = IMPLEMENTS[tractor.implement];
+
   // Throttle / brake
   if (keys.ArrowUp) {
     tractor.speed += ACCEL * dt;
@@ -612,13 +785,14 @@ function update(dt) {
     8;
   tractor.speed -= grade * 60 * dt;
 
-  // Top speed from the gear, further reduced by plow drag when it's down
+  // Top speed from the gear, further reduced by drag when working the ground
   let maxForward =
-    (tractor.fastGear ? GEAR_FAST : GEAR_SLOW) * (1 - 0.35 * (1 - tractor.plowLift));
+    (tractor.fastGear ? GEAR_FAST : GEAR_SLOW) *
+    (imp.liftable ? 1 - 0.35 * (1 - tractor.implLift) : 1);
   let maxReverse = MAX_REVERSE;
 
-  // A lowered plow digging into unbroken ground bogs the tractor down
-  if (tractor.plowLift < 0.5 && !plowOverField()) {
+  // A lowered implement digging into unbroken ground bogs the tractor down
+  if (imp.liftable && tractor.implLift < 0.5 && !implementOverField()) {
     maxForward = 3;
     maxReverse = -3;
   }
@@ -644,30 +818,50 @@ function update(dt) {
   tractor.x = Math.max(margin, Math.min(MAP_SIZE - margin, tractor.x));
   tractor.y = Math.max(margin, Math.min(MAP_SIZE - margin, tractor.y));
 
-  // Hydraulic lift eases the plow up or down
-  let liftTarget = tractor.plowDown ? 0 : 1;
-  if (tractor.plowBounce > 0) {
-    tractor.plowBounce = Math.max(0, tractor.plowBounce - dt);
+  // Hydraulic lift eases the implement up or down
+  let liftTarget = tractor.implDown ? 0 : 1;
+  if (tractor.implBounce > 0) {
+    tractor.implBounce = Math.max(0, tractor.implBounce - dt);
     // Half-sine dip: drops partway, then springs back up
-    liftTarget = 1 - 0.5 * Math.sin((Math.PI * (0.6 - tractor.plowBounce)) / 0.6);
+    liftTarget = 1 - 0.5 * Math.sin((Math.PI * (0.6 - tractor.implBounce)) / 0.6);
   }
-  tractor.plowLift += (liftTarget - tractor.plowLift) * Math.min(1, dt * 5);
-  tractor.plowFlash = Math.max(0, tractor.plowFlash - dt);
+  tractor.implLift += (liftTarget - tractor.implLift) * Math.min(1, dt * 5);
+  tractor.gearFlash = Math.max(0, tractor.gearFlash - dt);
+  tractor.implFlash = Math.max(0, tractor.implFlash - dt);
 
-  // Till field tiles passing under the blades
-  if (tractor.plowLift < 0.3 && Math.abs(tractor.speed) > 2) {
+  // Field work under the implement while it's down and moving
+  if (imp.liftable && tractor.implLift < 0.3 && Math.abs(tractor.speed) > 2) {
     const alongX = Math.abs(cos) > Math.abs(sin);
     for (const oy of [-3.5, 0, 3.5]) {
-      plowTileAt(
-        tractor.x - 9.8 * cos - oy * sin,
-        tractor.y - 9.8 * sin + oy * cos,
-        alongX
-      );
+      const wx = tractor.x - 9.8 * cos - oy * sin;
+      const wy = tractor.y - 9.8 * sin + oy * cos;
+      if (tractor.implement === "plow") plowTileAt(wx, wy, alongX);
+      else if (tractor.implement === "seeder") seedTileAt(wx, wy);
+      else if (tractor.implement === "harvester") harvestTileAt(wx, wy);
     }
   }
 
-  // Mature crops are gathered by driving over them
-  harvestAt(tractor.x, tractor.y);
+  // The trailer scoops up grain sacks it passes over
+  if (tractor.implement === "trailer") {
+    const bx = tractor.x - 11 * cos;
+    const by = tractor.y - 11 * sin;
+    for (let i = sacks.length - 1; i >= 0 && cargo < TRAILER_CAP; i--) {
+      if (Math.hypot(sacks[i].wx - bx, sacks[i].wy - by) < 9) {
+        sacks.splice(i, 1);
+        cargo++;
+      }
+    }
+  }
+
+  // Farmyard services: seed refill and grain delivery
+  if (nearFarm()) {
+    if (tractor.implement === "seeder") seeds = SEED_CAP;
+    if (tractor.implement === "trailer" && cargo > 0) {
+      sold += cargo;
+      cargo = 0;
+      spawnChaff(tractor.x - 11 * cos, tractor.y - 11 * sin);
+    }
+  }
 
   updateTracks(dt);
   updateSmoke(dt);
@@ -704,12 +898,13 @@ function draw() {
   ctx.fillRect(0, 0, VIEW_W, VIEW_H);
 
   ctx.drawImage(mapCanvas, -MAP_OFFSET_X - camX, -MAP_OFFSET_Y - camY);
-  drawTractor(camX, camY);
+  drawScene(camX, camY);
   drawSmoke(camX, camY);
 
   screenCtx.drawImage(view, 0, 0, screenCanvas.width, screenCanvas.height);
 
   // HUD
+  const imp = IMPLEMENTS[tractor.implement];
   screenCtx.fillStyle = "rgba(0,0,0,0.45)";
   screenCtx.fillRect(0, screenCanvas.height - 26, screenCanvas.width, 26);
   screenCtx.font = "bold 13px monospace";
@@ -720,10 +915,16 @@ function draw() {
     screenCtx.fillText(text, hudX, hudY);
     hudX += screenCtx.measureText(text).width;
   };
-  const flashRed = tractor.plowFlash > 0 && ((tractor.plowFlash * 8) | 0) % 2 === 0;
-  seg(`GEAR: ${tractor.fastGear ? "FAST" : "SLOW"} [Shift]   `, flashRed ? "#ff5040" : null);
-  seg(`PLOW: ${tractor.plowDown ? "DOWN" : "UP"} [Space]   `);
-  seg(`HARVESTED: ${harvested}   Arrows: drive`);
+  const RED = "#ff5040";
+  const flashGear = tractor.gearFlash > 0 && ((tractor.gearFlash * 8) | 0) % 2 === 0;
+  const flashImpl = tractor.implFlash > 0 && ((tractor.implFlash * 8) | 0) % 2 === 0;
+  seg(`GEAR: ${tractor.fastGear ? "FAST" : "SLOW"} [Shift]   `, flashGear ? RED : null);
+  const state = imp.liftable ? (tractor.implDown ? " DOWN" : " UP") : "";
+  seg(`${imp.label}${state} [Space]   `, flashImpl ? RED : null);
+  if (tractor.implement === "seeder") seg(`SEEDS: ${seeds}   `, seeds === 0 ? RED : null);
+  if (tractor.implement === "trailer") seg(`CARGO: ${cargo}/${TRAILER_CAP}   `);
+  seg(`SOLD: ${sold}   `);
+  seg(`@FARM 1:PLOW 2:SEED 3:HARVEST 4:TRAILER`, "#a8a898");
 }
 
 // ---------------------------------------------------------------------------
