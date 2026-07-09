@@ -55,13 +55,14 @@ console.log(`map seed: ${SEED_TEXT} — reload with ?seed=${SEED_TEXT} to reprod
 // ---------------------------------------------------------------------------
 
 let audio = null;
-let muted = false;
+let soundMuted = false; // Q: all sound
+let musicMuted = false; // M: just the music
 
 function initAudio() {
   if (audio) return;
   const ac = new (window.AudioContext || window.webkitAudioContext)();
   const master = ac.createGain();
-  master.gain.value = muted ? 0 : 0.5;
+  master.gain.value = soundMuted ? 0 : 0.5;
   master.connect(ac.destination);
 
   // Engine: two oscillators an octave apart through a lowpass, with an
@@ -113,13 +114,90 @@ function initAudio() {
   workGain.connect(master);
   noise.start();
 
-  audio = { ac, master, engineGain, osc1, osc2, lfo, workFilter, workGain };
+  // Background music bus: plucks go through a feedback echo for a soft
+  // music-box feel
+  const musicGain = ac.createGain();
+  musicGain.gain.value = musicMuted ? 0 : 1;
+  const echo = ac.createDelay(1);
+  echo.delayTime.value = 0.34;
+  const echoGain = ac.createGain();
+  echoGain.gain.value = 0.3;
+  musicGain.connect(master);
+  musicGain.connect(echo);
+  echo.connect(echoGain);
+  echoGain.connect(echo);
+  echoGain.connect(master);
+
+  audio = {
+    ac,
+    master,
+    engineGain,
+    osc1,
+    osc2,
+    lfo,
+    workFilter,
+    workGain,
+    musicGain,
+    musicStep: 0,
+    musicTime: ac.currentTime + 0.2,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Background music: a gentle music-box arpeggio over an A / F#m / D / E
+// progression, with a soft bass under it. Notes are scheduled a quarter
+// second ahead of the clock from the frame loop.
+// ---------------------------------------------------------------------------
+
+const MUSIC_BASE = 440; // arpeggio around A4; the bass sits two octaves down
+const MUSIC_CHORDS = [
+  { root: 0, minor: false }, // A
+  { root: -3, minor: true }, // F#m
+  { root: -7, minor: false }, // D
+  { root: -5, minor: false }, // E
+];
+const ARP_PATTERN = [0, 1, 2, 3, 1, 2, 3, 2];
+const MUSIC_STEP_DUR = 60 / 104 / 2; // eighth notes at 104 BPM
+
+function musicNote(freq, at, dur, vol) {
+  const o = audio.ac.createOscillator();
+  o.type = "triangle";
+  const g = audio.ac.createGain();
+  o.connect(g);
+  g.connect(audio.musicGain);
+  o.frequency.setValueAtTime(freq, at);
+  g.gain.setValueAtTime(0.0001, at);
+  g.gain.linearRampToValueAtTime(vol, at + 0.015);
+  g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+  o.start(at);
+  o.stop(at + dur + 0.02);
+}
+
+function scheduleMusic() {
+  // After a pause (hidden tab), skip ahead instead of replaying missed notes
+  if (audio.musicTime < audio.ac.currentTime - 0.1) {
+    audio.musicTime = audio.ac.currentTime + 0.1;
+  }
+  while (audio.musicTime < audio.ac.currentTime + 0.25) {
+    const step = audio.musicStep;
+    const at = audio.musicTime;
+    const chord = MUSIC_CHORDS[((step / 8) | 0) % MUSIC_CHORDS.length];
+    const tones = [0, 7, 12, 12 + (chord.minor ? 3 : 4)];
+    const st = chord.root + tones[ARP_PATTERN[step % 8]];
+    musicNote(MUSIC_BASE * Math.pow(2, st / 12), at, 0.5, 0.055);
+    if (step % 4 === 0) {
+      musicNote((MUSIC_BASE / 4) * Math.pow(2, chord.root / 12), at, 0.9, 0.09);
+    }
+    audio.musicStep++;
+    audio.musicTime += MUSIC_STEP_DUR;
+  }
 }
 
 const WORK_NOISE = { plow: [220, 0.16], seeder: [480, 0.14], harvester: [1100, 0.22] };
 
 function updateAudio() {
   if (!audio) return;
+  scheduleMusic();
   const t = audio.ac.currentTime;
   const set = (param, v, tc) => param.setTargetAtTime(v, t, tc);
 
@@ -249,8 +327,12 @@ window.addEventListener("keydown", (e) => {
     }
   }
   if ((e.key === "m" || e.key === "M") && !e.repeat) {
-    muted = !muted;
-    audio.master.gain.setTargetAtTime(muted ? 0 : 0.5, audio.ac.currentTime, 0.02);
+    musicMuted = !musicMuted;
+    audio.musicGain.gain.setTargetAtTime(musicMuted ? 0 : 1, audio.ac.currentTime, 0.02);
+  }
+  if ((e.key === "q" || e.key === "Q") && !e.repeat) {
+    soundMuted = !soundMuted;
+    audio.master.gain.setTargetAtTime(soundMuted ? 0 : 0.5, audio.ac.currentTime, 0.02);
   }
   if (e.key === "Shift" && !e.repeat) {
     tractor.fastGear = !tractor.fastGear;
@@ -2207,7 +2289,8 @@ function draw() {
   screenCtx.font = "11px monospace";
   screenCtx.fillStyle = "rgba(255,255,255,0.6)";
   screenCtx.fillText(
-    `SEED ${SEED_TEXT}   [N] NEW MAP  [S] SET SEED  [R] RESTART  [M] ${muted ? "UNMUTE" : "MUTE"}`,
+    `SEED ${SEED_TEXT}   [N] NEW MAP  [S] SET SEED  [R] RESTART  ` +
+      `[M] MUSIC ${musicMuted ? "OFF" : "ON"}  [Q] SOUND ${soundMuted ? "OFF" : "ON"}`,
     12,
     20
   );
