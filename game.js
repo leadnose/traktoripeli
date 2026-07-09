@@ -1674,6 +1674,121 @@ for (const p of patches) {
 }
 
 // ---------------------------------------------------------------------------
+// Animals: cows and sheep graze in small herds on the meadows, and flocks
+// of birds cross the sky.
+// ---------------------------------------------------------------------------
+
+const COW_BOXES = [
+  { x0: -2.4, x1: 2.0, y0: -1.2, y1: 1.2, z0: 1.3, z1: 3.8, color: "#f0ede2" }, // body
+  { x0: -1.7, x1: 0.4, y0: -1.25, y1: 1.25, z0: 2.4, z1: 3.85, color: "#413c38" }, // patch
+  { x0: 2.0, x1: 3.3, y0: -0.8, y1: 0.8, z0: 2.4, z1: 4.2, color: "#f0ede2" }, // head
+  { x0: 2.9, x1: 3.35, y0: -0.6, y1: 0.6, z0: 2.4, z1: 3.0, color: "#d9a3ab" }, // muzzle
+  { x0: -2.0, x1: -1.2, y0: -1.0, y1: 1.0, z0: 0.0, z1: 1.3, color: "#5a534c" }, // hind legs
+  { x0: 1.0, x1: 1.8, y0: -1.0, y1: 1.0, z0: 0.0, z1: 1.3, color: "#5a534c" }, // front legs
+];
+const SHEEP_BOXES = [
+  { x0: 1.4, x1: 2.4, y0: -0.6, y1: 0.6, z0: 1.6, z1: 2.9, color: "#4a4238" }, // head
+  { x0: -1.4, x1: -0.6, y0: -0.7, y1: 0.7, z0: 0.0, z1: 1.4, color: "#4a4238" }, // hind legs
+  { x0: 0.5, x1: 1.3, y0: -0.7, y1: 0.7, z0: 0.0, z1: 1.4, color: "#4a4238" }, // front legs
+];
+const SHEEP_SHAPES = [
+  { blob: true, x: 0, y: 0, z: 2.1, r: 1.8, color: "#f4f1e6" }, // woolly body
+];
+
+const animals = [];
+for (let herds = 0, tries = 0; herds < 4 && tries < 400; tries++) {
+  const hx = 30 + rand() * (MAP_SIZE - 60);
+  const hy = 30 + rand() * (MAP_SIZE - 60);
+  if (tileTypeAt(hx, hy) !== 0) continue;
+  if (forestTiles.has(tileKey(hx, hy)) || roadTiles.has(tileKey(hx, hy))) continue;
+  if (Math.hypot(hx - FARM.x, hy - FARM.y) < FARM_RADIUS + 24) continue;
+  const species = rand() < 0.5 ? "cow" : "sheep";
+  const n = 3 + ((rand() * 4) | 0);
+  for (let i = 0; i < n; i++) {
+    animals.push({
+      species,
+      hx,
+      hy,
+      wx: hx + (rand() - 0.5) * 24,
+      wy: hy + (rand() - 0.5) * 24,
+      angle: rand() * Math.PI * 2,
+      pause: rand() * 4,
+    });
+  }
+  herds++;
+}
+
+function updateAnimals(dt) {
+  for (const a of animals) {
+    if (a.pause > 0) {
+      a.pause -= dt;
+      continue;
+    }
+    // Amble about, drifting back toward the herd's home spot
+    a.angle += (rand() - 0.5) * 1.4 * dt;
+    if (Math.hypot(a.wx - a.hx, a.wy - a.hy) > 22) {
+      a.angle = Math.atan2(a.hy - a.wy, a.hx - a.wx);
+    }
+    const nx = a.wx + Math.cos(a.angle) * 2.5 * dt;
+    const ny = a.wy + Math.sin(a.angle) * 2.5 * dt;
+    if (tileTypeAt(nx, ny) === 0 && !roadTiles.has(tileKey(nx, ny))) {
+      a.wx = nx;
+      a.wy = ny;
+    } else {
+      a.angle += Math.PI / 2; // blocked by water, field or road: turn away
+    }
+    if (rand() < 0.004) a.pause = 1 + rand() * 3; // stop to graze
+  }
+}
+
+const birds = [];
+for (let flock = 0; flock < 4; flock++) {
+  const fx = rand() * MAP_SIZE;
+  const fy = rand() * MAP_SIZE;
+  const dir = rand() * Math.PI * 2;
+  const n = 3 + ((rand() * 4) | 0);
+  for (let i = 0; i < n; i++) {
+    birds.push({
+      wx: fx + (rand() - 0.5) * 30,
+      wy: fy + (rand() - 0.5) * 30,
+      alt: 26 + rand() * 12,
+      dir: dir + (rand() - 0.5) * 0.3,
+      phase: rand() * 10,
+    });
+  }
+}
+
+function updateBirds(dt) {
+  for (const b of birds) {
+    b.dir += (rand() - 0.5) * 0.5 * dt;
+    b.wx += Math.cos(b.dir) * 22 * dt;
+    b.wy += Math.sin(b.dir) * 22 * dt;
+    if (b.wx < -30) b.wx += MAP_SIZE + 60;
+    if (b.wx > MAP_SIZE + 30) b.wx -= MAP_SIZE + 60;
+    if (b.wy < -30) b.wy += MAP_SIZE + 60;
+    if (b.wy > MAP_SIZE + 30) b.wy -= MAP_SIZE + 60;
+  }
+}
+
+function drawBirds(camX, camY) {
+  ctx.fillStyle = "#2e3138";
+  for (const b of birds) {
+    const x = Math.round(projX(b.wx, b.wy) - camX);
+    const y = Math.round(projY(b.wx, b.wy, terrainHeight(b.wx, b.wy) + b.alt) - camY);
+    if (x < -4 || x > VIEW_W + 4 || y < -4 || y > VIEW_H + 4) continue;
+    if (Math.sin(worldTime * 9 + b.phase) > 0) {
+      ctx.fillRect(x - 2, y - 1, 2, 1); // wings up
+      ctx.fillRect(x + 1, y - 1, 2, 1);
+      ctx.fillRect(x - 1, y, 1, 1);
+    } else {
+      ctx.fillRect(x - 2, y, 2, 1); // wings down
+      ctx.fillRect(x + 1, y, 2, 1);
+      ctx.fillRect(x - 1, y - 1, 1, 1);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Box models: everything solid is axis-aligned boxes in local space
 // (+x = forward, z = up), rotated around z and projected each frame.
 // ---------------------------------------------------------------------------
@@ -1964,6 +2079,14 @@ function drawScene(camX, camY) {
     ctx.moveTo(sx + b.r * 1.6, sy);
     ctx.ellipse(sx, sy, b.r * 1.6, b.r * 0.8, 0, 0, Math.PI * 2);
   }
+  for (const a of animals) {
+    if (!onScreen(a.wx, a.wy, camX, camY)) continue;
+    const sx = Math.round(projX(a.wx, a.wy) - camX);
+    const sy = Math.round(projY(a.wx, a.wy, terrainHeight(a.wx, a.wy)) - camY);
+    const r = a.species === "cow" ? 3.4 : 2.4;
+    ctx.moveTo(sx + r, sy);
+    ctx.ellipse(sx, sy, r, r / 2, 0, 0, Math.PI * 2);
+  }
   ctx.fill();
 
   // Painter's algorithm: depth along the view axis is wx + wy + wz.
@@ -1986,6 +2109,15 @@ function drawScene(camX, camY) {
     if (!onScreen(b.wx, b.wy, camX, camY)) continue;
     b.shapes[0].color = seasonHex(b.seasonColors);
     makeRoundItems(items, b.shapes, b.wx, b.wy, 0, 0, camX, camY);
+  }
+  for (const a of animals) {
+    if (!onScreen(a.wx, a.wy, camX, camY)) continue;
+    if (a.species === "cow") {
+      makeItems(items, COW_BOXES, a.wx, a.wy, a.angle, 0, camX, camY);
+    } else {
+      makeItems(items, SHEEP_BOXES, a.wx, a.wy, a.angle, 0, camX, camY);
+      makeRoundItems(items, SHEEP_SHAPES, a.wx, a.wy, a.angle, 0, camX, camY);
+    }
   }
   for (const s of sacks) {
     if (!onScreen(s.wx, s.wy, camX, camY)) continue;
@@ -2428,6 +2560,8 @@ function update(dt) {
   worldTime += dt;
   updateSmoke(dt);
   updateButterflies(dt);
+  updateAnimals(dt);
+  updateBirds(dt);
   updateSeason();
   if (gameOver) return;
 
@@ -2621,6 +2755,7 @@ function draw() {
   drawScene(camX, camY);
   drawSmoke(camX, camY);
   drawButterflies(camX, camY);
+  drawBirds(camX, camY);
 
   screenCtx.drawImage(view, 0, 0, screenCanvas.width, screenCanvas.height);
 
