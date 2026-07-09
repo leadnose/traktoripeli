@@ -1824,6 +1824,7 @@ function draw() {
   screenCtx.font = "11px monospace";
   screenCtx.fillStyle = "rgba(255,255,255,0.6)";
   screenCtx.fillText(`SEED ${SEED_TEXT}   [N] NEW MAP  [S] SET SEED`, 12, 20);
+  screenCtx.fillText(`${fps.toFixed(0)} FPS`, 12, 36);
 
   // Minimap panel in the top-right corner
   const mmScale = 2;
@@ -1863,10 +1864,14 @@ function draw() {
 // ---------------------------------------------------------------------------
 
 let lastTime = performance.now();
+let fps = 0;
 
 function loop(now) {
-  const dt = Math.min((now - lastTime) / 1000, 0.05);
+  const frameMs = now - lastTime;
+  const dt = Math.min(frameMs / 1000, 0.05);
   lastTime = now;
+  // Smoothed over ~20 frames so the readout doesn't flicker
+  if (frameMs > 0) fps += (1000 / frameMs - fps) * 0.05;
   update(dt);
   updateCamera(dt);
   draw();
