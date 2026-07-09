@@ -516,9 +516,11 @@ function updateCrops(dt) {
 }
 
 // Roads are generated inside makeMap; the samples and covered tiles are kept
-// so field patches, trees and bushes can stay off them.
+// so field patches, trees and bushes can stay off them. The field patch
+// rectangles are kept for the hedgerows planted along their edges.
 const roadSamples = [];
 const roadTiles = new Set();
+const patches = [];
 const tileKey = (wx, wy) => ((wy / TILE) | 0) * MAP_TILES + ((wx / TILE) | 0);
 
 function makeMap() {
@@ -529,7 +531,6 @@ function makeMap() {
   }
 
   // Field patches first: the road network is routed to them afterwards
-  const patches = [];
   for (let i = 0; i < 40; i++) {
     const px = 1 + ((Math.random() * (MAP_TILES - 7)) | 0);
     const py = 1 + ((Math.random() * (MAP_TILES - 7)) | 0);
@@ -879,6 +880,50 @@ for (let attempts = 0; bushes.length < 110 && attempts < 6000; attempts++) {
       },
     ],
   });
+}
+
+// Hedgerows: rows of darker shrubs along some field edges. Gaps open up
+// wherever a road or driveway passes.
+const HEDGE_COLORS = ["#357f36", "#3d8f3c", "#2f7531"];
+for (const p of patches) {
+  const x0 = p.px * TILE;
+  const x1 = (p.px + p.pw) * TILE;
+  const y0 = p.py * TILE;
+  const y1 = (p.py + p.ph) * TILE;
+  const off = 7;
+  for (const [sx, sy, ex, ey] of [
+    [x0, y0 - off, x1, y0 - off],
+    [x0, y1 + off, x1, y1 + off],
+    [x0 - off, y0, x0 - off, y1],
+    [x1 + off, y0, x1 + off, y1],
+  ]) {
+    if (Math.random() > 0.3) continue; // roughly one side per field
+    const len = Math.hypot(ex - sx, ey - sy);
+    for (let s = 2; s < len - 1; s += 6.5) {
+      const wx = sx + ((ex - sx) * s) / len + (Math.random() - 0.5) * 1.5;
+      const wy = sy + ((ey - sy) * s) / len + (Math.random() - 0.5) * 1.5;
+      if (wx < 16 || wy < 16 || wx > MAP_SIZE - 16 || wy > MAP_SIZE - 16) continue;
+      if (tileTypeAt(wx, wy) !== 0) continue; // not on another field
+      if (roadTiles.has(tileKey(wx, wy))) continue; // keep the gates open
+      if (Math.hypot(wx - FARM.x, wy - FARM.y) < FARM_RADIUS + 12) continue;
+      const r = 1.7 + Math.random() * 0.8;
+      bushes.push({
+        wx,
+        wy,
+        r,
+        shapes: [
+          {
+            blob: true,
+            x: 0,
+            y: 0,
+            z: r * 0.9,
+            r,
+            color: HEDGE_COLORS[(Math.random() * HEDGE_COLORS.length) | 0],
+          },
+        ],
+      });
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
