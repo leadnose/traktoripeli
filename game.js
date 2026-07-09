@@ -75,7 +75,7 @@ window.addEventListener("keyup", (e) => {
 // World: x/y on the ground plane, z up. One tile is TILE x TILE world units
 // and projects to a 2*TILE wide, TILE tall diamond on screen.
 const TILE = 16;
-const MAP_TILES = 24;
+const MAP_TILES = 60;
 const MAP_SIZE = MAP_TILES * TILE;
 
 function projX(wx, wy) {
@@ -103,11 +103,11 @@ function nearFarm() {
 // ---------------------------------------------------------------------------
 
 const HILLS = [];
-for (let i = 0; i < 7; i++) {
+for (let i = 0; i < 40; i++) {
   HILLS.push({
     cx: MAP_SIZE * (0.1 + Math.random() * 0.8),
     cy: MAP_SIZE * (0.1 + Math.random() * 0.8),
-    r: 60 + Math.random() * 60,
+    r: 60 + Math.random() * 100,
     h: 10 + Math.random() * 16,
   });
 }
@@ -293,6 +293,7 @@ function fieldPath(P, rounded) {
 // Repaint one tile, then re-dither just that neighborhood of the map canvas
 function drawTile(tx, ty) {
   paintTile(tx, ty);
+  minimapTile(tx, ty);
   const c = [
     mp(tx * TILE, ty * TILE),
     mp((tx + 1) * TILE, ty * TILE),
@@ -520,11 +521,11 @@ function makeMap() {
     dirs.push(new Array(MAP_TILES).fill(0));
     growth.push(new Array(MAP_TILES).fill(0));
   }
-  for (let i = 0; i < 6; i++) {
-    const px = 1 + ((Math.random() * (MAP_TILES - 6)) | 0);
-    const py = 1 + ((Math.random() * (MAP_TILES - 6)) | 0);
-    const pw = 2 + ((Math.random() * 3) | 0);
-    const ph = 2 + ((Math.random() * 3) | 0);
+  for (let i = 0; i < 40; i++) {
+    const px = 1 + ((Math.random() * (MAP_TILES - 7)) | 0);
+    const py = 1 + ((Math.random() * (MAP_TILES - 7)) | 0);
+    const pw = 2 + ((Math.random() * 4) | 0);
+    const ph = 2 + ((Math.random() * 4) | 0);
     for (let ty = py; ty < py + ph; ty++)
       for (let tx = px; tx < px + pw; tx++) tiles[ty][tx] = 1;
   }
@@ -537,10 +538,11 @@ function makeMap() {
     }
   }
 
-  // Back-to-front so nearer hills paint over the ones behind them
+  // Back-to-front so nearer hills paint over the ones behind them. paintTile
+  // skips the per-tile dithering: the whole canvas gets one pass at the end.
   for (let s = 0; s <= 2 * (MAP_TILES - 1); s++) {
     for (let ty = Math.max(0, s - MAP_TILES + 1); ty <= Math.min(MAP_TILES - 1, s); ty++) {
-      drawTile(s - ty, ty);
+      paintTile(s - ty, ty);
     }
   }
 
@@ -585,7 +587,39 @@ function makeMap() {
   ditherRegion(mapCtx, 0, 0, mapCanvas.width, mapCanvas.height);
 }
 
+// ---------------------------------------------------------------------------
+// Minimap: one 2x1-pixel tile diamond, kept up to date by drawTile
+// ---------------------------------------------------------------------------
+
+const minimapCanvas = document.createElement("canvas");
+minimapCanvas.width = MAP_TILES * 2;
+minimapCanvas.height = MAP_TILES;
+const minimapCtx = minimapCanvas.getContext("2d");
+
+// grass, field, plowed, seeded; ripe crops turn gold
+const MINIMAP_COLORS = ["#4fa83e", "#a87e50", "#8a6540", "#90c83c"];
+
+function minimapTile(tx, ty) {
+  const type = tiles[ty][tx];
+  let color = MINIMAP_COLORS[type];
+  if (type === 3 && cropStage(growth[ty][tx]) >= 3) color = "#e3c355";
+  minimapCtx.fillStyle = color;
+  minimapCtx.fillRect(tx - ty + MAP_TILES - 1, (tx + ty) >> 1, 2, 1);
+}
+
 makeMap();
+
+for (let ty = 0; ty < MAP_TILES; ty++)
+  for (let tx = 0; tx < MAP_TILES; tx++) minimapTile(tx, ty);
+
+// Farm marker
+minimapCtx.fillStyle = "#e04030";
+minimapCtx.fillRect(
+  Math.round((FARM.x - FARM.y) / TILE) + MAP_TILES - 1,
+  Math.round((FARM.x + FARM.y) / (2 * TILE)) - 1,
+  3,
+  3
+);
 
 // ---------------------------------------------------------------------------
 // Lollipop trees scattered over the meadows
@@ -603,7 +637,7 @@ const TREE_BLOBS = [
 ];
 
 const trees = [];
-for (let attempts = 0; trees.length < 12 && attempts < 400; attempts++) {
+for (let attempts = 0; trees.length < 60 && attempts < 2000; attempts++) {
   const wx = 24 + Math.random() * (MAP_SIZE - 48);
   const wy = 24 + Math.random() * (MAP_SIZE - 48);
   if (tileTypeAt(wx, wy) !== 0) continue; // grass only, never on a field
@@ -1050,7 +1084,7 @@ function drawClouds(camX, camY) {
 
 const BUTTERFLY_COLORS = ["#ff9ed2", "#ffd94f", "#ffffff", "#b8a6ff"];
 const butterflies = [];
-for (let i = 0; i < 14; i++) {
+for (let i = 0; i < 40; i++) {
   butterflies.push({
     wx: Math.random() * MAP_SIZE,
     wy: Math.random() * MAP_SIZE,
@@ -1429,6 +1463,38 @@ function draw() {
   seg(`CASH: €${cash}   `, cash < SEED_PRICE ? RED : null);
   seg(`SOLD: ${sold}   `);
   seg(`@FARM 1:PLOW 2:SEED 3:HARVEST 4:TRAILER`, "#a8a898");
+
+  // Minimap panel in the top-right corner
+  const mmScale = 2;
+  const mmW = minimapCanvas.width * mmScale;
+  const mmH = minimapCanvas.height * mmScale;
+  const mmX = screenCanvas.width - mmW - 12;
+  const mmY = 12;
+  screenCtx.fillStyle = "rgba(16,28,40,0.5)";
+  screenCtx.fillRect(mmX - 6, mmY - 6, mmW + 12, mmH + 12);
+  screenCtx.drawImage(minimapCanvas, mmX, mmY, mmW, mmH);
+  screenCtx.save();
+  screenCtx.beginPath();
+  screenCtx.rect(mmX, mmY, mmW, mmH);
+  screenCtx.clip();
+  // Camera viewport (the minimap shares the iso projection, minus heights,
+  // so the projected view rectangle maps straight onto it)
+  screenCtx.strokeStyle = "rgba(255,255,255,0.8)";
+  screenCtx.lineWidth = 1;
+  screenCtx.strokeRect(
+    mmX + ((cam.x + MAP_SIZE) / TILE) * mmScale,
+    mmY + (cam.y / TILE) * mmScale,
+    (VIEW_W / TILE) * mmScale,
+    (VIEW_H / TILE) * mmScale
+  );
+  // Tractor
+  const tmx = mmX + ((tractor.x - tractor.y) / TILE + MAP_TILES) * mmScale;
+  const tmy = mmY + ((tractor.x + tractor.y) / (2 * TILE)) * mmScale;
+  screenCtx.fillStyle = "#ffffff";
+  screenCtx.fillRect(tmx - 2, tmy - 2, 4, 4);
+  screenCtx.fillStyle = "#f25c3f";
+  screenCtx.fillRect(tmx - 1, tmy - 1, 2, 2);
+  screenCtx.restore();
 }
 
 // ---------------------------------------------------------------------------
