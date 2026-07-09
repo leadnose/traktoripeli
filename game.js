@@ -178,6 +178,43 @@ function playClunk() {
   o.stop(t + 0.16);
 }
 
+// Soft thump when the trailer scoops up a grain sack
+function playPickup() {
+  if (!audio) return;
+  const t = audio.ac.currentTime;
+  const o = audio.ac.createOscillator();
+  o.type = "sine";
+  const g = audio.ac.createGain();
+  o.connect(g);
+  g.connect(audio.master);
+  o.frequency.setValueAtTime(300, t);
+  o.frequency.exponentialRampToValueAtTime(90, t + 0.09);
+  g.gain.setValueAtTime(0.18, t);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+  o.start(t);
+  o.stop(t + 0.13);
+}
+
+// Rising three-note chime when grain is sold at the farm
+function playSell() {
+  if (!audio) return;
+  const t = audio.ac.currentTime;
+  [880, 1109, 1319].forEach((freq, i) => {
+    const o = audio.ac.createOscillator();
+    o.type = "triangle";
+    const g = audio.ac.createGain();
+    o.connect(g);
+    g.connect(audio.master);
+    const at = t + i * 0.09;
+    o.frequency.setValueAtTime(freq, at);
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.linearRampToValueAtTime(0.14, at + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + 0.25);
+    o.start(at);
+    o.stop(at + 0.26);
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Input
 // ---------------------------------------------------------------------------
@@ -2073,6 +2110,7 @@ function update(dt) {
       if (Math.hypot(sacks[i].wx - bx, sacks[i].wy - by) < 9) {
         sacks.splice(i, 1);
         cargo++;
+        playPickup();
       }
     }
   }
@@ -2093,6 +2131,7 @@ function update(dt) {
       cargo = 0;
       const pose = implementPose();
       spawnChaff(pose.x - 16 * Math.cos(pose.angle), pose.y - 16 * Math.sin(pose.angle));
+      playSell();
     }
   }
 
