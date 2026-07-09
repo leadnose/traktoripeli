@@ -448,26 +448,33 @@ const HARVESTER_BOXES = [
 ];
 
 const TRAILER_BOXES = [
-  { x0: -8.4, x1: -7.0, y0: -0.7, y1: 0.7, z0: 2.6, z1: 3.6, color: "#6b6b6b" }, // drawbar
-  { x0: -14.5, x1: -8.4, y0: -4.2, y1: 4.2, z0: 3.0, z1: 7.0, color: "#7a5a34" }, // wooden bed
-  { x0: -13.6, x1: -9.3, y0: 4.2, y1: 5.4, z0: 0.0, z1: 3.4, color: "#2b2b2b" }, // wheel L
-  { x0: -13.6, x1: -9.3, y0: -5.4, y1: -4.2, z0: 0.0, z1: 3.4, color: "#2b2b2b" }, // wheel R
+  { x0: -11.5, x1: -7.0, y0: -0.7, y1: 0.7, z0: 2.6, z1: 3.6, color: "#6b6b6b" }, // long drawbar
+  { x0: -21.0, x1: -11.5, y0: -4.2, y1: 4.2, z0: 3.0, z1: 7.0, color: "#7a5a34" }, // wooden bed
 ];
+// Tandem axles: two pairs of wheels under the rear half of the bed
+for (const [wx0, wx1] of [[-16.6, -13.8], [-20.0, -17.2]]) {
+  TRAILER_BOXES.push(
+    { x0: wx0, x1: wx1, y0: 4.2, y1: 5.4, z0: 0.0, z1: 3.4, color: "#2b2b2b" }, // wheel L
+    { x0: wx0, x1: wx1, y0: -5.4, y1: -4.2, z0: 0.0, z1: 3.4, color: "#2b2b2b" } // wheel R
+  );
+}
 
 function trailerBoxes() {
   if (cargo === 0) return TRAILER_BOXES;
   // Grain heap grows with the load
   const h = 0.8 + 2.4 * (cargo / TRAILER_CAP);
   return TRAILER_BOXES.concat([
-    { x0: -14.0, x1: -8.9, y0: -3.6, y1: 3.6, z0: 7.0, z1: 7.0 + h, color: "#d9b84a" },
+    { x0: -20.5, x1: -12.0, y0: -3.6, y1: 3.6, z0: 7.0, z1: 7.0 + h, color: "#d9b84a" },
   ]);
 }
 
+// Mounted implements (3-point hitch) turn rigidly with the tractor; towed
+// ones ride on their own wheels and pivot at the drawbar pin.
 const IMPLEMENTS = {
   plow: { label: "PLOW", liftable: true, boxes: () => PLOW_BOXES },
   seeder: { label: "SEEDER", liftable: true, boxes: () => SEEDER_BOXES },
-  harvester: { label: "HARVESTER", liftable: true, boxes: () => HARVESTER_BOXES },
-  trailer: { label: "TRAILER", liftable: false, boxes: trailerBoxes },
+  harvester: { label: "HARVESTER", liftable: true, towed: true, towLength: 4.5, boxes: () => HARVESTER_BOXES },
+  trailer: { label: "TRAILER", liftable: false, towed: true, towLength: 9.9, boxes: trailerBoxes },
 };
 
 // Farm buildings, local to FARM
@@ -546,35 +553,45 @@ function makeItems(items, boxes, ox, oy, angle, liftZ, camX, camY) {
 }
 
 function drawScene(camX, camY) {
-  // Tractor + implement shadow
-  const cos = Math.cos(tractor.angle);
-  const sin = Math.sin(tractor.angle);
-  const shPt = (lx, ly) => {
-    const wx = tractor.x + lx * cos - ly * sin;
-    const wy = tractor.y + lx * sin + ly * cos;
-    return {
-      x: Math.round(projX(wx, wy) - camX),
-      y: Math.round(projY(wx, wy, terrainHeight(wx, wy)) - camY),
+  const pose = implementPose();
+
+  // Ground shadows: one quad under the tractor, one under the implement
+  // (they part ways when a towed implement swings out of line)
+  const shadowQuad = (ox, oy, angle, x0, x1, hw) => {
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    const shPt = (lx, ly) => {
+      const wx = ox + lx * cos - ly * sin;
+      const wy = oy + lx * sin + ly * cos;
+      return {
+        x: Math.round(projX(wx, wy) - camX),
+        y: Math.round(projY(wx, wy, terrainHeight(wx, wy)) - camY),
+      };
     };
+    const sh = [shPt(x0, -hw), shPt(x1, -hw), shPt(x1, hw), shPt(x0, hw)];
+    ctx.moveTo(sh[0].x, sh[0].y);
+    for (const p of sh.slice(1)) ctx.lineTo(p.x, p.y);
+    ctx.closePath();
   };
-  const sh = [shPt(-14, -5.5), shPt(8.5, -5.5), shPt(8.5, 5.5), shPt(-14, 5.5)];
+  // One path for both quads so their overlap at the hitch doesn't darken
+  const imp = IMPLEMENTS[tractor.implement];
+  const impBoxes = imp.boxes();
+  const impRear = Math.min(...impBoxes.map((b) => b.x0)) - 0.5;
   ctx.fillStyle = "rgba(0,0,0,0.2)";
   ctx.beginPath();
-  ctx.moveTo(sh[0].x, sh[0].y);
-  for (const p of sh.slice(1)) ctx.lineTo(p.x, p.y);
-  ctx.closePath();
+  shadowQuad(tractor.x, tractor.y, tractor.angle, -6, 8.5, 5.5);
+  shadowQuad(pose.x, pose.y, pose.angle, impRear, -6.5, 6);
   ctx.fill();
 
   // Painter's algorithm: depth along the view axis is wx + wy + wz.
   const items = [];
   makeItems(items, BOXES, tractor.x, tractor.y, tractor.angle, 0, camX, camY);
-  const imp = IMPLEMENTS[tractor.implement];
   makeItems(
     items,
-    imp.boxes(),
-    tractor.x,
-    tractor.y,
-    tractor.angle,
+    impBoxes,
+    pose.x,
+    pose.y,
+    pose.angle,
     imp.liftable ? tractor.implLift * IMPLEMENT_LIFT_HEIGHT : 0,
     camX,
     camY
@@ -727,6 +744,7 @@ const tractor = {
   speed: 0, // world units/s, positive = forward
   fastGear: true, // Shift toggles between road and work gear
   implement: "plow", // current implement: plow / seeder / harvester / trailer
+  implAngle: -2.4, // world heading of a towed implement (trails the hitch)
   implDown: false, // Space toggles the implement
   implLift: 1, // animated: 0 = working the ground, 1 = fully raised
   implBounce: 0, // seconds left of the refused-lower dip animation
@@ -746,12 +764,29 @@ const MAX_REVERSE = -20;
 const TURN_RADIUS = 7; // world units
 const MAX_TURN_RATE = 2.5; // rad/s cap so the fast gear doesn't spin wildly
 
+// Towed implements pivot at the drawbar pin and trail behind the tractor
+const HITCH_X = -7; // hitch pin position in tractor-local coords
+const MAX_HITCH_ANGLE = 1.6; // jackknife limit: the drawbar hits the wheel
+
+// Frame the implement actually occupies: mounted implements share the
+// tractor's frame; towed ones swing around the hitch with their own heading.
+// The origin is placed so local (HITCH_X, 0) lands exactly on the hitch pin.
+function implementPose() {
+  if (!IMPLEMENTS[tractor.implement].towed)
+    return { x: tractor.x, y: tractor.y, angle: tractor.angle };
+  const a = tractor.implAngle;
+  const hx = tractor.x + HITCH_X * Math.cos(tractor.angle);
+  const hy = tractor.y + HITCH_X * Math.sin(tractor.angle);
+  return { x: hx - HITCH_X * Math.cos(a), y: hy - HITCH_X * Math.sin(a), angle: a };
+}
+
 // True when any part of the implement's working width is over field dirt.
 // Deliberately generous — samples across the blades and a bit ahead of
 // them — so working the edge rows of a field isn't fiddly.
 function implementOverField() {
-  const cos = Math.cos(tractor.angle);
-  const sin = Math.sin(tractor.angle);
+  const pose = implementPose();
+  const cos = Math.cos(pose.angle);
+  const sin = Math.sin(pose.angle);
   const points = [
     [-9.8, -4],
     [-9.8, 0],
@@ -759,8 +794,8 @@ function implementOverField() {
     [-6, 0],
   ];
   for (const [lx, ly] of points) {
-    const wx = tractor.x + lx * cos - ly * sin;
-    const wy = tractor.y + lx * sin + ly * cos;
+    const wx = pose.x + lx * cos - ly * sin;
+    const wy = pose.y + lx * sin + ly * cos;
     if (tileTypeAt(wx, wy) >= 1) return true;
   }
   return false;
@@ -809,8 +844,10 @@ function update(dt) {
   const turnRate =
     Math.min(Math.abs(tractor.speed) / TURN_RADIUS, MAX_TURN_RATE) *
     Math.sign(tractor.speed);
-  if (keys.ArrowLeft) tractor.angle -= turnRate * dt;
-  if (keys.ArrowRight) tractor.angle += turnRate * dt;
+  let angVel = 0;
+  if (keys.ArrowLeft) angVel -= turnRate;
+  if (keys.ArrowRight) angVel += turnRate;
+  tractor.angle += angVel * dt;
 
   // Move on the ground plane
   tractor.x += cos * tractor.speed * dt;
@@ -820,6 +857,21 @@ function update(dt) {
   const margin = 12;
   tractor.x = Math.max(margin, Math.min(MAP_SIZE - margin, tractor.x));
   tractor.y = Math.max(margin, Math.min(MAP_SIZE - margin, tractor.y));
+
+  // A towed implement's wheels roll rather than skid, so the hitch's
+  // sideways motion swings its heading toward the tractor's over time
+  if (imp.towed) {
+    let rel = tractor.angle - tractor.implAngle;
+    rel = Math.atan2(Math.sin(rel), Math.cos(rel)); // wrap to (-pi, pi]
+    rel -=
+      ((tractor.speed * Math.sin(rel) + HITCH_X * angVel * Math.cos(rel)) /
+        imp.towLength) *
+      dt;
+    rel = Math.max(-MAX_HITCH_ANGLE, Math.min(MAX_HITCH_ANGLE, rel));
+    tractor.implAngle = tractor.angle - rel;
+  } else {
+    tractor.implAngle = tractor.angle;
+  }
 
   // Hydraulic lift eases the implement up or down
   let liftTarget = tractor.implDown ? 0 : 1;
@@ -834,10 +886,13 @@ function update(dt) {
 
   // Field work under the implement while it's down and moving
   if (imp.liftable && tractor.implLift < 0.3 && Math.abs(tractor.speed) > 2) {
-    const alongX = Math.abs(cos) > Math.abs(sin);
+    const pose = implementPose();
+    const pcos = Math.cos(pose.angle);
+    const psin = Math.sin(pose.angle);
+    const alongX = Math.abs(pcos) > Math.abs(psin);
     for (const oy of [-3.5, 0, 3.5]) {
-      const wx = tractor.x - 9.8 * cos - oy * sin;
-      const wy = tractor.y - 9.8 * sin + oy * cos;
+      const wx = pose.x - 9.8 * pcos - oy * psin;
+      const wy = pose.y - 9.8 * psin + oy * pcos;
       if (tractor.implement === "plow") plowTileAt(wx, wy, alongX);
       else if (tractor.implement === "seeder") seedTileAt(wx, wy);
       else if (tractor.implement === "harvester") harvestTileAt(wx, wy);
@@ -846,8 +901,9 @@ function update(dt) {
 
   // The trailer scoops up grain sacks it passes over
   if (tractor.implement === "trailer") {
-    const bx = tractor.x - 11 * cos;
-    const by = tractor.y - 11 * sin;
+    const pose = implementPose();
+    const bx = pose.x - 16 * Math.cos(pose.angle);
+    const by = pose.y - 16 * Math.sin(pose.angle);
     for (let i = sacks.length - 1; i >= 0 && cargo < TRAILER_CAP; i--) {
       if (Math.hypot(sacks[i].wx - bx, sacks[i].wy - by) < 9) {
         sacks.splice(i, 1);
@@ -870,7 +926,8 @@ function update(dt) {
       cash += cargo * SACK_PRICE;
       sold += cargo;
       cargo = 0;
-      spawnChaff(tractor.x - 11 * cos, tractor.y - 11 * sin);
+      const pose = implementPose();
+      spawnChaff(pose.x - 16 * Math.cos(pose.angle), pose.y - 16 * Math.sin(pose.angle));
     }
   }
 
