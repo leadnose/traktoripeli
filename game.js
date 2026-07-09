@@ -630,8 +630,21 @@ function makeMap() {
     // Nearest point on the patch rectangle grown by a road's berth
     const ax = Math.max(p.px * TILE - 14, Math.min((p.px + p.pw) * TILE + 14, from.x));
     const ay = Math.max(p.py * TILE - 14, Math.min((p.py + p.ph) * TILE + 14, from.y));
-    if (Math.hypot(ax - from.x, ay - from.y) < 10) continue; // already by a road
-    traceRoad(from, ax, ay, 2.0);
+    if (Math.hypot(ax - from.x, ay - from.y) >= 10) traceRoad(from, ax, ay, 2.0);
+
+    // Short straight entry path from the road up to the field's edge
+    const gate = nearestRoadPoint(c.x, c.y);
+    const bx = Math.max(p.px * TILE, Math.min((p.px + p.pw) * TILE, gate.x));
+    const by = Math.max(p.py * TILE, Math.min((p.py + p.ph) * TILE, gate.y));
+    const len = Math.hypot(bx - gate.x, by - gate.y);
+    if (len > 2 && len < 45) {
+      const dir = Math.atan2(by - gate.y, bx - gate.x);
+      const pts = [];
+      for (let s = 3; s < len; s += 3)
+        pts.push({ x: gate.x + Math.cos(dir) * s, y: gate.y + Math.sin(dir) * s, dir });
+      pts.push({ x: bx, y: by, dir });
+      roads.push({ pts, r: 1.6, entry: true });
+    }
   }
 
   // Roads arriving from outside the map: they enter at the edge and merge
@@ -664,6 +677,7 @@ function makeMap() {
       roadSamples.push(p);
       for (const dx of [-5, 0, 5])
         for (const dy of [-5, 0, 5]) roadTiles.add(tileKey(p.x + dx, p.y + dy));
+      if (road.entry) continue; // entry paths touch the field edge on purpose
       for (const dx of [-4, 0, 4]) {
         for (const dy of [-4, 0, 4]) {
           const tx = ((p.x + dx) / TILE) | 0;
