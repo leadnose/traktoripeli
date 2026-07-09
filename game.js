@@ -49,6 +49,136 @@ const rand = (function mulberry32(a) {
 console.log(`map seed: ${SEED_TEXT} — reload with ?seed=${SEED_TEXT} to reproduce`);
 
 // ---------------------------------------------------------------------------
+// Sound: synthesized with the Web Audio API. A continuous engine loop follows
+// the throttle, ground work rumbles through a per-implement bandpass, and the
+// hydraulic lift whines. Created on the first keypress (autoplay policy).
+// ---------------------------------------------------------------------------
+
+let audio = null;
+let muted = false;
+
+function initAudio() {
+  if (audio) return;
+  const ac = new (window.AudioContext || window.webkitAudioContext)();
+  const master = ac.createGain();
+  master.gain.value = muted ? 0 : 0.5;
+  master.connect(ac.destination);
+
+  // Engine: two oscillators an octave apart through a lowpass, with an
+  // LFO chopping the gain at the firing rate for the putt-putt
+  const engineGain = ac.createGain();
+  engineGain.gain.value = 0;
+  const engineFilter = ac.createBiquadFilter();
+  engineFilter.type = "lowpass";
+  engineFilter.frequency.value = 320;
+  const osc1 = ac.createOscillator();
+  osc1.type = "sawtooth";
+  osc1.frequency.value = 55;
+  const osc2 = ac.createOscillator();
+  osc2.type = "square";
+  osc2.frequency.value = 28;
+  const osc2Gain = ac.createGain();
+  osc2Gain.gain.value = 0.5;
+  osc1.connect(engineFilter);
+  osc2.connect(osc2Gain);
+  osc2Gain.connect(engineFilter);
+  engineFilter.connect(engineGain);
+  engineGain.connect(master);
+  const lfo = ac.createOscillator();
+  lfo.frequency.value = 12;
+  const lfoGain = ac.createGain();
+  lfoGain.gain.value = 0.06; // putt-putt depth on top of the base gain
+  lfo.connect(lfoGain);
+  lfoGain.connect(engineGain.gain);
+  osc1.start();
+  osc2.start();
+  lfo.start();
+
+  // Ground work: looped white noise through a bandpass whose center moves
+  // with the implement (plow scrape low, harvester threshing high)
+  const noiseBuf = ac.createBuffer(1, ac.sampleRate, ac.sampleRate);
+  const data = noiseBuf.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  const noise = ac.createBufferSource();
+  noise.buffer = noiseBuf;
+  noise.loop = true;
+  const workFilter = ac.createBiquadFilter();
+  workFilter.type = "bandpass";
+  workFilter.frequency.value = 300;
+  workFilter.Q.value = 0.8;
+  const workGain = ac.createGain();
+  workGain.gain.value = 0;
+  noise.connect(workFilter);
+  workFilter.connect(workGain);
+  workGain.connect(master);
+  noise.start();
+
+  audio = { ac, master, engineGain, osc1, osc2, lfo, workFilter, workGain };
+}
+
+const WORK_NOISE = { plow: [220, 0.16], seeder: [480, 0.14], harvester: [1100, 0.22] };
+
+function updateAudio() {
+  if (!audio) return;
+  const t = audio.ac.currentTime;
+  const set = (param, v, tc) => param.setTargetAtTime(v, t, tc);
+
+  // Engine pitch and volume track speed, with a bump while throttling
+  const throttle = !gameOver && (keys.ArrowUp || keys.ArrowDown) ? 1 : 0;
+  const rpm = gameOver
+    ? 0
+    : 0.25 + 0.55 * Math.min(1, Math.abs(tractor.speed) / GEAR_FAST) + 0.2 * throttle;
+  set(audio.osc1.frequency, 50 + rpm * 60, 0.08);
+  set(audio.osc2.frequency, 25 + rpm * 30, 0.08);
+  set(audio.lfo.frequency, 7 + rpm * 20, 0.1);
+  set(audio.engineGain.gain, gameOver ? 0 : 0.1 + rpm * 0.1, 0.1);
+
+  // Ground work noise while a lowered implement is moving
+  const imp = IMPLEMENTS[tractor.implement];
+  const working =
+    !gameOver && imp.liftable && tractor.implLift < 0.3 && Math.abs(tractor.speed) > 2;
+  const [center, level] = WORK_NOISE[tractor.implement] || [300, 0.15];
+  set(audio.workFilter.frequency, center, 0.1);
+  set(audio.workGain.gain, working ? level : 0, 0.15);
+}
+
+// Hydraulic whine when the lift moves; pitch falls when dropping, rises
+// when raising
+function playHydraulic(downward) {
+  if (!audio) return;
+  const t = audio.ac.currentTime;
+  const o = audio.ac.createOscillator();
+  o.type = "triangle";
+  const g = audio.ac.createGain();
+  o.connect(g);
+  g.connect(audio.master);
+  o.frequency.setValueAtTime(downward ? 900 : 500, t);
+  o.frequency.linearRampToValueAtTime(downward ? 500 : 900, t + 0.25);
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.linearRampToValueAtTime(0.12, t + 0.03);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
+  o.start(t);
+  o.stop(t + 0.32);
+}
+
+// Dull metallic thud when an implement is hitched on
+function playClunk() {
+  if (!audio) return;
+  const t = audio.ac.currentTime;
+  const o = audio.ac.createOscillator();
+  o.type = "sine";
+  const g = audio.ac.createGain();
+  o.connect(g);
+  g.connect(audio.master);
+  o.frequency.setValueAtTime(160, t);
+  o.frequency.exponentialRampToValueAtTime(50, t + 0.12);
+  g.gain.setValueAtTime(0.25, t);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
+  o.start(t);
+  o.stop(t + 0.16);
+}
+
+// ---------------------------------------------------------------------------
 // Input
 // ---------------------------------------------------------------------------
 
@@ -56,6 +186,9 @@ const keys = {};
 const IMPLEMENT_KEYS = { 1: "plow", 2: "seeder", 3: "harvester", 4: "trailer" };
 
 window.addEventListener("keydown", (e) => {
+  // Browsers only allow audio after a user gesture
+  initAudio();
+  if (audio.ac.state === "suspended") audio.ac.resume();
   if (e.key.startsWith("Arrow")) e.preventDefault();
   keys[e.key] = true;
   if (e.key === " " && !e.repeat) {
@@ -66,14 +199,21 @@ window.addEventListener("keydown", (e) => {
       tractor.implFlash = 0.9; // the trailer has no lift
     } else if (tractor.implDown) {
       tractor.implDown = false;
+      playHydraulic(false);
     } else if (tractor.fastGear) {
       tractor.gearFlash = 0.9; // refused: too fast — flash the HUD, no movement
     } else if (!implementOverField()) {
       tractor.implBounce = 0.6; // it tries, catches, and springs back up
+      playHydraulic(true);
     } else {
       tractor.implDown = true;
       tractor.implBounce = 0;
+      playHydraulic(true);
     }
+  }
+  if ((e.key === "m" || e.key === "M") && !e.repeat) {
+    muted = !muted;
+    audio.master.gain.setTargetAtTime(muted ? 0 : 0.5, audio.ac.currentTime, 0.02);
   }
   if (e.key === "Shift" && !e.repeat) {
     tractor.fastGear = !tractor.fastGear;
@@ -100,6 +240,7 @@ window.addEventListener("keydown", (e) => {
         tractor.implement = IMPLEMENT_KEYS[e.key];
         tractor.implDown = false;
         tractor.implLift = 1;
+        playClunk();
       }
     } else {
       tractor.implFlash = 0.9;
@@ -2026,7 +2167,11 @@ function draw() {
   // Seed readout, so a nice map can be shared via ?seed=
   screenCtx.font = "11px monospace";
   screenCtx.fillStyle = "rgba(255,255,255,0.6)";
-  screenCtx.fillText(`SEED ${SEED_TEXT}   [N] NEW MAP  [S] SET SEED  [R] RESTART`, 12, 20);
+  screenCtx.fillText(
+    `SEED ${SEED_TEXT}   [N] NEW MAP  [S] SET SEED  [R] RESTART  [M] ${muted ? "UNMUTE" : "MUTE"}`,
+    12,
+    20
+  );
   screenCtx.fillText(`${fps.toFixed(0)} FPS`, 12, 36);
 
   // Season calendar instead of a clock: the current date counts from spring
@@ -2134,6 +2279,7 @@ function loop(now) {
   // Smoothed over ~20 frames so the readout doesn't flicker
   if (frameMs > 0) fps += (1000 / frameMs - fps) * 0.05;
   update(dt);
+  updateAudio();
   updateCamera(dt);
   draw();
   requestAnimationFrame(loop);
