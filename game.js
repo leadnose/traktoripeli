@@ -87,6 +87,12 @@ window.addEventListener("keydown", (e) => {
     const s = prompt("Map seed:", SEED_TEXT);
     if (s) location.search = "?seed=" + encodeURIComponent(s);
   }
+  // Restart the current map (same seed, fresh round)
+  if ((e.key === "r" || e.key === "R") && !e.repeat) {
+    const target = "?seed=" + encodeURIComponent(SEED_TEXT);
+    if (location.search === target) location.reload();
+    else location.search = target;
+  }
   if (IMPLEMENT_KEYS[e.key] && !e.repeat) {
     // Implements are swapped at the farmyard
     if (nearFarm()) {
@@ -1481,7 +1487,7 @@ const smoke = [];
 let smokeTimer = 0;
 
 function updateSmoke(dt) {
-  if (keys.ArrowUp || Math.abs(tractor.speed) > 5) {
+  if (!gameOver && (keys.ArrowUp || Math.abs(tractor.speed) > 5)) {
     smokeTimer -= dt;
     if (smokeTimer <= 0) {
       smokeTimer = keys.ArrowUp ? 0.07 : 0.18;
@@ -1546,7 +1552,38 @@ const TRAILER_CAP = 12; // sacks the trailer can carry
 const SEED_PRICE = 2; // € per seed, bought automatically at the farm
 const SACK_PRICE = 10; // € earned per sack of grain sold
 
-let cash = 100; // € — enough starting capital for the first bag of seeds
+// Rounds are timed; the score is the profit made before time runs out.
+// The five best scores are kept in localStorage.
+const ROUND_TIME = 300; // seconds
+const START_CASH = 100;
+const SCORES_KEY = "traktoripeli.best";
+let timeLeft = ROUND_TIME;
+let gameOver = false;
+let bestScores = [];
+let finalRank = -1; // this round's place in the best list, -1 if none
+
+function endRound() {
+  gameOver = true;
+  tractor.speed = 0;
+  const entry = { score: cash - START_CASH, seed: SEED_TEXT, date: Date.now() };
+  let scores;
+  try {
+    scores = JSON.parse(localStorage.getItem(SCORES_KEY)) || [];
+  } catch {
+    scores = [];
+  }
+  scores.push(entry);
+  scores.sort((a, b) => b.score - a.score);
+  bestScores = scores.slice(0, 5);
+  finalRank = bestScores.indexOf(entry);
+  try {
+    localStorage.setItem(SCORES_KEY, JSON.stringify(bestScores));
+  } catch {
+    // private browsing etc: scores just aren't persisted
+  }
+}
+
+let cash = START_CASH; // € — enough starting capital for the first bag of seeds
 let seeds = 0; // start empty: buy seeds at the farm
 let cargo = 0; // sacks on the trailer
 let sold = 0; // total sacks delivered to the farm
@@ -1617,6 +1654,18 @@ function implementOverField() {
 }
 
 function update(dt) {
+  // Ambient life keeps moving even after the round ends
+  worldTime += dt;
+  updateSmoke(dt);
+  updateButterflies(dt);
+  if (gameOver) return;
+
+  timeLeft = Math.max(0, timeLeft - dt);
+  if (timeLeft === 0) {
+    endRound();
+    return;
+  }
+
   const imp = IMPLEMENTS[tractor.implement];
 
   // Throttle / brake
@@ -1749,10 +1798,7 @@ function update(dt) {
     }
   }
 
-  worldTime += dt;
   updateTracks(dt);
-  updateSmoke(dt);
-  updateButterflies(dt);
   updateCrops(dt);
 }
 
@@ -1823,8 +1869,48 @@ function draw() {
   // Seed readout, so a nice map can be shared via ?seed=
   screenCtx.font = "11px monospace";
   screenCtx.fillStyle = "rgba(255,255,255,0.6)";
-  screenCtx.fillText(`SEED ${SEED_TEXT}   [N] NEW MAP  [S] SET SEED`, 12, 20);
+  screenCtx.fillText(`SEED ${SEED_TEXT}   [N] NEW MAP  [S] SET SEED  [R] RESTART`, 12, 20);
   screenCtx.fillText(`${fps.toFixed(0)} FPS`, 12, 36);
+
+  // Round timer, centered up top; flashes red for the last 30 seconds
+  const mins = Math.floor(timeLeft / 60);
+  const secs = Math.floor(timeLeft % 60);
+  screenCtx.font = "bold 16px monospace";
+  screenCtx.textAlign = "center";
+  screenCtx.fillStyle =
+    timeLeft < 30 && ((timeLeft * 2) | 0) % 2 === 0 ? "#ff5040" : "#ffffff";
+  screenCtx.fillText(`${mins}:${String(secs).padStart(2, "0")}`, screenCanvas.width / 2, 26);
+  screenCtx.textAlign = "left";
+
+  // Game over: final score and the all-time best list
+  if (gameOver) {
+    const w = 440;
+    const h = 250;
+    const x = (screenCanvas.width - w) / 2;
+    const y = (screenCanvas.height - h) / 2;
+    const cx = screenCanvas.width / 2;
+    screenCtx.fillStyle = "rgba(10,20,30,0.8)";
+    screenCtx.fillRect(x, y, w, h);
+    screenCtx.textAlign = "center";
+    screenCtx.font = "bold 24px monospace";
+    screenCtx.fillStyle = "#ffe66b";
+    screenCtx.fillText("TIME'S UP!", cx, y + 40);
+    screenCtx.font = "bold 18px monospace";
+    screenCtx.fillStyle = "#e8e8d8";
+    screenCtx.fillText(`PROFIT: €${cash - START_CASH}`, cx, y + 72);
+    screenCtx.font = "13px monospace";
+    bestScores.forEach((entry, i) => {
+      screenCtx.fillStyle = i === finalRank ? "#ffe66b" : "#c8c8b8";
+      screenCtx.fillText(
+        `${i + 1}.  €${entry.score}   (seed ${entry.seed})`,
+        cx,
+        y + 104 + i * 20
+      );
+    });
+    screenCtx.fillStyle = "#a8e0a0";
+    screenCtx.fillText("[R] RETRY MAP    [N] NEW MAP", cx, y + h - 18);
+    screenCtx.textAlign = "left";
+  }
 
   // Minimap panel in the top-right corner
   const mmScale = 2;
