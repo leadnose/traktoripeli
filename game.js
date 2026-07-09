@@ -20,6 +20,35 @@ view.height = VIEW_H;
 const ctx = view.getContext("2d");
 
 // ---------------------------------------------------------------------------
+// Seeded RNG: the whole world is generated through rand(), so the same seed
+// always produces the same map. Pick a map with ?seed=anything in the URL.
+// ---------------------------------------------------------------------------
+
+const SEED_TEXT =
+  new URLSearchParams(location.search).get("seed") ||
+  String((Math.random() * 1e9) | 0);
+
+function hashSeed(str) {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+const rand = (function mulberry32(a) {
+  return function () {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+})(hashSeed(SEED_TEXT));
+
+console.log(`map seed: ${SEED_TEXT} — reload with ?seed=${SEED_TEXT} to reproduce`);
+
+// ---------------------------------------------------------------------------
 // Input
 // ---------------------------------------------------------------------------
 
@@ -49,6 +78,14 @@ window.addEventListener("keydown", (e) => {
   if (e.key === "Shift" && !e.repeat) {
     tractor.fastGear = !tractor.fastGear;
     if (tractor.fastGear) tractor.implDown = false; // lift before shifting up
+  }
+  // New map: N rolls a fresh seed, S asks for one; both reload via the URL
+  if ((e.key === "n" || e.key === "N") && !e.repeat) {
+    location.search = "?seed=" + ((Math.random() * 1e9) | 0);
+  }
+  if ((e.key === "s" || e.key === "S") && !e.repeat) {
+    const s = prompt("Map seed:", SEED_TEXT);
+    if (s) location.search = "?seed=" + encodeURIComponent(s);
   }
   if (IMPLEMENT_KEYS[e.key] && !e.repeat) {
     // Implements are swapped at the farmyard
@@ -90,7 +127,13 @@ function projY(wx, wy, wz) {
 // Farmyard location (needed by the terrain: the yard sits on a flat pad)
 // ---------------------------------------------------------------------------
 
-const FARM = { x: MAP_SIZE / 2, y: MAP_SIZE - 72 };
+// The farmyard lands somewhere different on every map, kept well away from
+// the edges, and the buildings face a random way
+const FARM = {
+  x: MAP_SIZE * (0.2 + rand() * 0.6),
+  y: MAP_SIZE * (0.2 + rand() * 0.6),
+  angle: rand() * Math.PI * 2,
+};
 const FARM_RADIUS = 40; // within this distance farm services are available
 
 function nearFarm() {
@@ -105,10 +148,10 @@ function nearFarm() {
 const HILLS = [];
 for (let i = 0; i < 40; i++) {
   HILLS.push({
-    cx: MAP_SIZE * (0.1 + Math.random() * 0.8),
-    cy: MAP_SIZE * (0.1 + Math.random() * 0.8),
-    r: 60 + Math.random() * 100,
-    h: 10 + Math.random() * 16,
+    cx: MAP_SIZE * (0.1 + rand() * 0.8),
+    cy: MAP_SIZE * (0.1 + rand() * 0.8),
+    r: 60 + rand() * 100,
+    h: 10 + rand() * 16,
   });
 }
 
@@ -347,20 +390,20 @@ function paintTile(tx, ty) {
 
     // Speckles: grass tufts
     for (let i = 0; i < 8; i++) {
-      const p = mp((tx + Math.random()) * TILE, (ty + Math.random()) * TILE);
-      mapCtx.fillStyle = shade(GRASS_DOTS[(Math.random() * GRASS_DOTS.length) | 0], kc);
+      const p = mp((tx + rand()) * TILE, (ty + rand()) * TILE);
+      mapCtx.fillStyle = shade(GRASS_DOTS[(rand() * GRASS_DOTS.length) | 0], kc);
       mapCtx.fillRect(Math.round(p.x), Math.round(p.y), 1, 1);
     }
 
     // Little meadow flowers: four petals around a yellow heart
-    if (Math.random() < 0.5) {
+    if (rand() < 0.5) {
       const p = mp(
-        (tx + 0.2 + Math.random() * 0.6) * TILE,
-        (ty + 0.2 + Math.random() * 0.6) * TILE
+        (tx + 0.2 + rand() * 0.6) * TILE,
+        (ty + 0.2 + rand() * 0.6) * TILE
       );
       const x = Math.round(p.x);
       const y = Math.round(p.y);
-      mapCtx.fillStyle = shade(FLOWER_COLORS[(Math.random() * FLOWER_COLORS.length) | 0], kc);
+      mapCtx.fillStyle = shade(FLOWER_COLORS[(rand() * FLOWER_COLORS.length) | 0], kc);
       mapCtx.fillRect(x - 1, y, 1, 1);
       mapCtx.fillRect(x + 1, y, 1, 1);
       mapCtx.fillRect(x, y - 1, 1, 1);
@@ -457,8 +500,8 @@ function paintTile(tx, ty) {
   } else {
     // Speckles: dirt clods
     for (let i = 0; i < 8; i++) {
-      const p = mp((tx + Math.random()) * TILE, (ty + Math.random()) * TILE);
-      mapCtx.fillStyle = shade(DIRT_DOTS[(Math.random() * DIRT_DOTS.length) | 0], kc);
+      const p = mp((tx + rand()) * TILE, (ty + rand()) * TILE);
+      mapCtx.fillStyle = shade(DIRT_DOTS[(rand() * DIRT_DOTS.length) | 0], kc);
       mapCtx.fillRect(Math.round(p.x), Math.round(p.y), 1, 1);
     }
   }
@@ -536,10 +579,10 @@ function makeMap() {
   const targetFieldTiles = MAP_TILES * MAP_TILES * 0.53;
   let fieldTiles = 0;
   for (let i = 0; i < 400 && fieldTiles < targetFieldTiles; i++) {
-    const px = 1 + ((Math.random() * (MAP_TILES - 13)) | 0);
-    const py = 1 + ((Math.random() * (MAP_TILES - 13)) | 0);
-    const pw = 5 + ((Math.random() * 7) | 0);
-    const ph = 5 + ((Math.random() * 7) | 0);
+    const px = 1 + ((rand() * (MAP_TILES - 13)) | 0);
+    const py = 1 + ((rand() * (MAP_TILES - 13)) | 0);
+    const pw = 5 + ((rand() * 7) | 0);
+    const ph = 5 + ((rand() * 7) | 0);
     patches.push({ px, py, pw, ph });
     for (let ty = py; ty < py + ph; ty++)
       for (let tx = px; tx < px + pw; tx++)
@@ -570,7 +613,7 @@ function makeMap() {
         ? { ux: Math.sign(dx), uy: 0, len: Math.abs(dx) - diag }
         : { ux: 0, uy: Math.sign(dy), len: Math.abs(dy) - diag },
     ];
-    if (Math.random() < 0.5) legs.reverse(); // bend early or bend late
+    if (rand() < 0.5) legs.reverse(); // bend early or bend late
     const pts = [];
     let x = from.x;
     let y = from.y;
@@ -665,10 +708,10 @@ function makeMap() {
 
   // Link roads between distant parts of the network: junctions and loops
   for (let i = 0; i < 4; i++) {
-    const a = net[(Math.random() * net.length) | 0];
+    const a = net[(rand() * net.length) | 0];
     let b = null;
     for (let tries = 0; tries < 30 && !b; tries++) {
-      const cand = net[(Math.random() * net.length) | 0];
+      const cand = net[(rand() * net.length) | 0];
       const d = Math.hypot(cand.x - a.x, cand.y - a.y);
       if (d > 90 && d < 260) b = cand;
     }
@@ -735,8 +778,8 @@ function makeMap() {
     for (let i = 0; i < road.pts.length; i += 3) {
       const p = road.pts[i];
       const c = mp(
-        p.x + (Math.random() - 0.5) * road.r,
-        p.y + (Math.random() - 0.5) * road.r
+        p.x + (rand() - 0.5) * road.r,
+        p.y + (rand() - 0.5) * road.r
       );
       mapCtx.fillRect(Math.round(c.x), Math.round(c.y), 1, 1);
     }
@@ -751,8 +794,8 @@ function makeMap() {
   mapCtx.fill();
   mapCtx.fillStyle = "#8f6940";
   for (let i = 0; i < 40; i++) {
-    const a = Math.random() * Math.PI * 2;
-    const r = Math.sqrt(Math.random());
+    const a = rand() * Math.PI * 2;
+    const r = Math.sqrt(rand());
     mapCtx.fillRect(
       Math.round(fc.x + Math.cos(a) * r * FARM_RADIUS * 1.7),
       Math.round(fc.y + Math.sin(a) * r * FARM_RADIUS * 0.85),
@@ -845,13 +888,13 @@ const TREE_BLOBS = [
 
 const trees = [];
 for (let attempts = 0; trees.length < 150 && attempts < 6000; attempts++) {
-  const wx = 24 + Math.random() * (MAP_SIZE - 48);
-  const wy = 24 + Math.random() * (MAP_SIZE - 48);
+  const wx = 24 + rand() * (MAP_SIZE - 48);
+  const wy = 24 + rand() * (MAP_SIZE - 48);
   if (tileTypeAt(wx, wy) !== 0) continue; // grass only, never on a field
   if (roadTiles.has(tileKey(wx, wy))) continue; // and never on a road
   if (Math.hypot(wx - FARM.x, wy - FARM.y) < FARM_RADIUS + 30) continue;
   if (trees.some((t) => Math.hypot(t.wx - wx, t.wy - wy) < 20)) continue;
-  trees.push({ wx, wy, angle: Math.random() * Math.PI * 2 });
+  trees.push({ wx, wy, angle: rand() * Math.PI * 2 });
 }
 
 // ---------------------------------------------------------------------------
@@ -861,14 +904,14 @@ for (let attempts = 0; trees.length < 150 && attempts < 6000; attempts++) {
 const BUSH_COLORS = ["#3f9e3e", "#4fae4a", "#379139"];
 const bushes = [];
 for (let attempts = 0; bushes.length < 110 && attempts < 6000; attempts++) {
-  const wx = 20 + Math.random() * (MAP_SIZE - 40);
-  const wy = 20 + Math.random() * (MAP_SIZE - 40);
+  const wx = 20 + rand() * (MAP_SIZE - 40);
+  const wy = 20 + rand() * (MAP_SIZE - 40);
   if (tileTypeAt(wx, wy) !== 0) continue;
   if (roadTiles.has(tileKey(wx, wy))) continue;
   if (Math.hypot(wx - FARM.x, wy - FARM.y) < FARM_RADIUS + 12) continue;
   if (trees.some((t) => Math.hypot(t.wx - wx, t.wy - wy) < 8)) continue;
   if (bushes.some((b) => Math.hypot(b.wx - wx, b.wy - wy) < 10)) continue;
-  const r = 1.6 + Math.random();
+  const r = 1.6 + rand();
   bushes.push({
     wx,
     wy,
@@ -880,7 +923,7 @@ for (let attempts = 0; bushes.length < 110 && attempts < 6000; attempts++) {
         y: 0,
         z: r * 0.9,
         r,
-        color: BUSH_COLORS[(Math.random() * BUSH_COLORS.length) | 0],
+        color: BUSH_COLORS[(rand() * BUSH_COLORS.length) | 0],
       },
     ],
   });
@@ -901,16 +944,16 @@ for (const p of patches) {
     [x0 - off, y0, x0 - off, y1],
     [x1 + off, y0, x1 + off, y1],
   ]) {
-    if (Math.random() > 0.3) continue; // roughly one side per field
+    if (rand() > 0.3) continue; // roughly one side per field
     const len = Math.hypot(ex - sx, ey - sy);
     for (let s = 2; s < len - 1; s += 6.5) {
-      const wx = sx + ((ex - sx) * s) / len + (Math.random() - 0.5) * 1.5;
-      const wy = sy + ((ey - sy) * s) / len + (Math.random() - 0.5) * 1.5;
+      const wx = sx + ((ex - sx) * s) / len + (rand() - 0.5) * 1.5;
+      const wy = sy + ((ey - sy) * s) / len + (rand() - 0.5) * 1.5;
       if (wx < 16 || wy < 16 || wx > MAP_SIZE - 16 || wy > MAP_SIZE - 16) continue;
       if (tileTypeAt(wx, wy) !== 0) continue; // not on another field
       if (roadTiles.has(tileKey(wx, wy))) continue; // keep the gates open
       if (Math.hypot(wx - FARM.x, wy - FARM.y) < FARM_RADIUS + 12) continue;
-      const r = 1.7 + Math.random() * 0.8;
+      const r = 1.7 + rand() * 0.8;
       bushes.push({
         wx,
         wy,
@@ -922,7 +965,7 @@ for (const p of patches) {
             y: 0,
             z: r * 0.9,
             r,
-            color: HEDGE_COLORS[(Math.random() * HEDGE_COLORS.length) | 0],
+            color: HEDGE_COLORS[(rand() * HEDGE_COLORS.length) | 0],
           },
         ],
       });
@@ -1231,8 +1274,8 @@ function drawScene(camX, camY) {
   makeRoundItems(items, TRACTOR_SHAPES, tractor.x, tractor.y, tractor.angle, 0, camX, camY);
   makeItems(items, impBoxes, pose.x, pose.y, pose.angle, liftZ, camX, camY);
   makeWheels(items, imp.wheels, pose.x, pose.y, pose.angle, liftZ, camX, camY);
-  makeItems(items, FARM_BOXES, FARM.x, FARM.y, 0, 0, camX, camY);
-  makeRoundItems(items, FARM_SHAPES, FARM.x, FARM.y, 0, 0, camX, camY);
+  makeItems(items, FARM_BOXES, FARM.x, FARM.y, FARM.angle, 0, camX, camY);
+  makeRoundItems(items, FARM_SHAPES, FARM.x, FARM.y, FARM.angle, 0, camX, camY);
   for (const t of trees) {
     if (!onScreen(t.wx, t.wy, camX, camY)) continue;
     makeItems(items, TREE_BOXES, t.wx, t.wy, t.angle, 0, camX, camY);
@@ -1361,11 +1404,11 @@ function drawSun() {
 const CLOUDS = [];
 for (let i = 0; i < 9; i++) {
   CLOUDS.push({
-    x: Math.random() * (VIEW_W + 240),
-    y: Math.random() * (VIEW_H + 200),
-    speed: 2 + Math.random() * 3,
-    scale: 0.7 + Math.random() * 0.9,
-    par: 0.15 + Math.random() * 0.25, // parallax: far clouds track the camera less
+    x: rand() * (VIEW_W + 240),
+    y: rand() * (VIEW_H + 200),
+    speed: 2 + rand() * 3,
+    scale: 0.7 + rand() * 0.9,
+    par: 0.15 + rand() * 0.25, // parallax: far clouds track the camera less
   });
 }
 
@@ -1393,17 +1436,17 @@ const BUTTERFLY_COLORS = ["#ff9ed2", "#ffd94f", "#ffffff", "#b8a6ff"];
 const butterflies = [];
 for (let i = 0; i < 40; i++) {
   butterflies.push({
-    wx: Math.random() * MAP_SIZE,
-    wy: Math.random() * MAP_SIZE,
-    a: Math.random() * Math.PI * 2,
-    phase: Math.random() * 10,
+    wx: rand() * MAP_SIZE,
+    wy: rand() * MAP_SIZE,
+    a: rand() * Math.PI * 2,
+    phase: rand() * 10,
     color: BUTTERFLY_COLORS[i % BUTTERFLY_COLORS.length],
   });
 }
 
 function updateButterflies(dt) {
   for (const b of butterflies) {
-    b.a += (Math.random() - 0.5) * 4 * dt;
+    b.a += (rand() - 0.5) * 4 * dt;
     b.wx += Math.cos(b.a) * 7 * dt;
     b.wy += Math.sin(b.a) * 7 * dt;
     if (b.wx < 16 || b.wx > MAP_SIZE - 16 || b.wy < 16 || b.wy > MAP_SIZE - 16) {
@@ -1459,8 +1502,8 @@ function updateSmoke(dt) {
     const p = smoke[i];
     p.life -= dt;
     p.wz += 16 * dt;
-    p.wx += (Math.random() - 0.5) * 8 * dt;
-    p.wy += (Math.random() - 0.5) * 8 * dt;
+    p.wx += (rand() - 0.5) * 8 * dt;
+    p.wy += (rand() - 0.5) * 8 * dt;
     if (p.life <= 0) smoke.splice(i, 1);
   }
 }
@@ -1469,11 +1512,11 @@ function updateSmoke(dt) {
 function spawnChaff(wx, wy) {
   const base = terrainHeight(wx, wy);
   for (let i = 0; i < 8; i++) {
-    const life = 0.5 + Math.random() * 0.4;
+    const life = 0.5 + rand() * 0.4;
     smoke.push({
-      wx: wx + (Math.random() - 0.5) * 10,
-      wy: wy + (Math.random() - 0.5) * 10,
-      wz: base + 2 + Math.random() * 4,
+      wx: wx + (rand() - 0.5) * 10,
+      wy: wy + (rand() - 0.5) * 10,
+      wz: base + 2 + rand() * 4,
       life,
       maxLife: life,
       gold: true,
@@ -1776,6 +1819,11 @@ function draw() {
   seg(`CASH: €${cash}   `, cash < SEED_PRICE ? RED : null);
   seg(`SOLD: ${sold}   `);
   seg(`@FARM 1:PLOW 2:SEED 3:HARVEST 4:TRAILER`, "#a8a898");
+
+  // Seed readout, so a nice map can be shared via ?seed=
+  screenCtx.font = "11px monospace";
+  screenCtx.fillStyle = "rgba(255,255,255,0.6)";
+  screenCtx.fillText(`SEED ${SEED_TEXT}   [N] NEW MAP  [S] SET SEED`, 12, 20);
 
   // Minimap panel in the top-right corner
   const mmScale = 2;
