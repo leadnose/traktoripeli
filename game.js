@@ -515,19 +515,164 @@ function updateCrops(dt) {
   }
 }
 
+// Roads are generated inside makeMap; the samples and covered tiles are kept
+// so field patches, trees and bushes can stay off them.
+const roadSamples = [];
+const roadTiles = new Set();
+const tileKey = (wx, wy) => ((wy / TILE) | 0) * MAP_TILES + ((wx / TILE) | 0);
+
 function makeMap() {
   for (let ty = 0; ty < MAP_TILES; ty++) {
     tiles.push(new Array(MAP_TILES).fill(0));
     dirs.push(new Array(MAP_TILES).fill(0));
     growth.push(new Array(MAP_TILES).fill(0));
   }
+
+  // Field patches first: the road network is routed to them afterwards
+  const patches = [];
   for (let i = 0; i < 40; i++) {
     const px = 1 + ((Math.random() * (MAP_TILES - 7)) | 0);
     const py = 1 + ((Math.random() * (MAP_TILES - 7)) | 0);
     const pw = 2 + ((Math.random() * 4) | 0);
     const ph = 2 + ((Math.random() * 4) | 0);
+    patches.push({ px, py, pw, ph });
     for (let ty = py; ty < py + ph; ty++)
       for (let tx = px; tx < px + pw; tx++) tiles[ty][tx] = 1;
+  }
+
+  // Road network: main roads from the farm out to the map edges, then a spur
+  // from the nearest existing road to each field. Roads steer like a vehicle
+  // with a capped turning rate, so they come out as fixed-radius arcs joined
+  // by straights instead of aimless wiggle.
+  const roads = [];
+  const net = [{ x: FARM.x, y: FARM.y, dir: undefined }];
+
+  const angDiff = (a, b) => Math.atan2(Math.sin(a - b), Math.cos(a - b));
+
+  const traceRoad = (from, tx, ty, r) => {
+    const direct = Math.atan2(ty - from.y, tx - from.x);
+    let dir = direct;
+    if (from.dir !== undefined) {
+      // Branch off a junction along the road, whichever way points closer
+      dir =
+        Math.abs(angDiff(from.dir, direct)) <= Math.PI / 2
+          ? from.dir
+          : from.dir + Math.PI;
+    }
+    const pts = [];
+    let x = from.x;
+    let y = from.y;
+    let bestDist = Infinity;
+    let stall = 0;
+    for (let i = 0; i < 600; i++) {
+      const dist = Math.hypot(tx - x, ty - y);
+      if (dist < 6) break;
+      // If the target sits inside the turning circle the road would orbit
+      // it forever; give up once we stop getting closer
+      if (dist < bestDist - 0.5) {
+        bestDist = dist;
+        stall = 0;
+      } else if (++stall > 40) break;
+      const d = angDiff(Math.atan2(ty - y, tx - x), dir);
+      const turn = dist < 25 ? 0.15 : 0.05; // broad arcs; tighter close in
+      if (Math.abs(d) > 0.05) dir += Math.max(-turn, Math.min(turn, d));
+      x += Math.cos(dir) * 3;
+      y += Math.sin(dir) * 3;
+      // Roads may run a little past the map edge; painting clips them there
+      if (x < -24 || x > MAP_SIZE + 24 || y < -24 || y > MAP_SIZE + 24) break;
+      pts.push({ x, y, dir });
+    }
+    if (pts.length) {
+      roads.push({ pts, r });
+      net.push(...pts);
+    }
+  };
+
+  const nearestRoadPoint = (x, y) => {
+    let best = net[0];
+    let bd = Infinity;
+    for (const s of net) {
+      const d = Math.hypot(s.x - x, s.y - y);
+      if (d < bd) {
+        bd = d;
+        best = s;
+      }
+    }
+    return best;
+  };
+
+  // Main roads out of the farm, exiting past the map edges
+  for (const [tx, ty] of [
+    [MAP_SIZE * 0.3, -16],
+    [MAP_SIZE + 16, MAP_SIZE * 0.3],
+    [-16, MAP_SIZE * 0.25],
+  ]) {
+    traceRoad(net[0], tx, ty, 3.0);
+  }
+
+  // Field spurs, nearest fields first so far ones can chain off their roads.
+  // Each spur aims for a point just outside its field's edge.
+  const patchCenter = (p) => ({
+    x: (p.px + p.pw / 2) * TILE,
+    y: (p.py + p.ph / 2) * TILE,
+  });
+  patches.sort((a, b) => {
+    const ca = patchCenter(a);
+    const cb = patchCenter(b);
+    return (
+      Math.hypot(ca.x - FARM.x, ca.y - FARM.y) -
+      Math.hypot(cb.x - FARM.x, cb.y - FARM.y)
+    );
+  });
+  for (const p of patches) {
+    const c = patchCenter(p);
+    const from = nearestRoadPoint(c.x, c.y);
+    // Nearest point on the patch rectangle grown by a road's berth
+    const ax = Math.max(p.px * TILE - 14, Math.min((p.px + p.pw) * TILE + 14, from.x));
+    const ay = Math.max(p.py * TILE - 14, Math.min((p.py + p.ph) * TILE + 14, from.y));
+    if (Math.hypot(ax - from.x, ay - from.y) < 10) continue; // already by a road
+    traceRoad(from, ax, ay, 2.0);
+  }
+
+  // Roads arriving from outside the map: they enter at the edge and merge
+  // into the nearest road, forming a junction
+  for (const [ex, ey] of [
+    [MAP_SIZE * 0.7, -16],
+    [-16, MAP_SIZE * 0.6],
+    [MAP_SIZE + 16, MAP_SIZE * 0.7],
+  ]) {
+    const join = nearestRoadPoint(ex, ey);
+    traceRoad({ x: ex, y: ey, dir: undefined }, join.x, join.y, 3.0);
+  }
+
+  // Link roads between distant parts of the network: junctions and loops
+  for (let i = 0; i < 4; i++) {
+    const a = net[(Math.random() * net.length) | 0];
+    let b = null;
+    for (let tries = 0; tries < 30 && !b; tries++) {
+      const cand = net[(Math.random() * net.length) | 0];
+      const d = Math.hypot(cand.x - a.x, cand.y - a.y);
+      if (d > 90 && d < 260) b = cand;
+    }
+    if (b) traceRoad(a, b.x, b.y, 2.4);
+  }
+
+  // Register road coverage (for vegetation and the minimap) and carve the
+  // roads through any field they cross
+  for (const road of roads) {
+    for (const p of road.pts) {
+      roadSamples.push(p);
+      for (const dx of [-5, 0, 5])
+        for (const dy of [-5, 0, 5]) roadTiles.add(tileKey(p.x + dx, p.y + dy));
+      for (const dx of [-4, 0, 4]) {
+        for (const dy of [-4, 0, 4]) {
+          const tx = ((p.x + dx) / TILE) | 0;
+          const ty = ((p.y + dy) / TILE) | 0;
+          if (tx >= 0 && ty >= 0 && tx < MAP_TILES && ty < MAP_TILES && tiles[ty][tx] === 1)
+            tiles[ty][tx] = 0;
+        }
+      }
+    }
   }
 
   // Keep the farmyard clear of fields
@@ -545,6 +690,39 @@ function makeMap() {
       paintTile(s - ty, ty);
     }
   }
+
+  // Roads: stamped as overlapping ground ellipses so they follow the hills,
+  // shaded like the terrain under them. Clipped to the map diamond so roads
+  // running past the edge are cut off cleanly, as if continuing beyond.
+  mapCtx.save();
+  mapCtx.beginPath();
+  for (const [ex, ey] of [[0, 0], [MAP_SIZE, 0], [MAP_SIZE, MAP_SIZE], [0, MAP_SIZE]]) {
+    const c = mp(ex, ey);
+    if (ex === 0 && ey === 0) mapCtx.moveTo(c.x, c.y);
+    else mapCtx.lineTo(c.x, c.y);
+  }
+  mapCtx.closePath();
+  mapCtx.clip();
+  for (const road of roads) {
+    for (const p of road.pts) {
+      const c = mp(p.x, p.y);
+      mapCtx.fillStyle = shade("#c09a66", groundShade(p.x, p.y));
+      mapCtx.beginPath();
+      mapCtx.ellipse(c.x, c.y, road.r * 1.5, road.r * 0.75, 0, 0, Math.PI * 2);
+      mapCtx.fill();
+    }
+    // Wheel-worn speckles along the middle
+    mapCtx.fillStyle = "#a37e4e";
+    for (let i = 0; i < road.pts.length; i += 3) {
+      const p = road.pts[i];
+      const c = mp(
+        p.x + (Math.random() - 0.5) * road.r,
+        p.y + (Math.random() - 0.5) * road.r
+      );
+      mapCtx.fillRect(Math.round(c.x), Math.round(c.y), 1, 1);
+    }
+  }
+  mapCtx.restore();
 
   // Trodden dirt yard around the farm buildings
   const fc = mp(FARM.x, FARM.y);
@@ -612,6 +790,16 @@ makeMap();
 for (let ty = 0; ty < MAP_TILES; ty++)
   for (let tx = 0; tx < MAP_TILES; tx++) minimapTile(tx, ty);
 
+// Roads (never under field tiles, so tile updates can't erase them)
+minimapCtx.fillStyle = "#c09a66";
+for (const p of roadSamples)
+  minimapCtx.fillRect(
+    Math.round((p.x - p.y) / TILE) + MAP_TILES,
+    Math.round((p.x + p.y) / (2 * TILE)),
+    1,
+    1
+  );
+
 // Farm marker
 minimapCtx.fillStyle = "#e04030";
 minimapCtx.fillRect(
@@ -637,13 +825,46 @@ const TREE_BLOBS = [
 ];
 
 const trees = [];
-for (let attempts = 0; trees.length < 60 && attempts < 2000; attempts++) {
+for (let attempts = 0; trees.length < 150 && attempts < 6000; attempts++) {
   const wx = 24 + Math.random() * (MAP_SIZE - 48);
   const wy = 24 + Math.random() * (MAP_SIZE - 48);
   if (tileTypeAt(wx, wy) !== 0) continue; // grass only, never on a field
+  if (roadTiles.has(tileKey(wx, wy))) continue; // and never on a road
   if (Math.hypot(wx - FARM.x, wy - FARM.y) < FARM_RADIUS + 30) continue;
-  if (trees.some((t) => Math.hypot(t.wx - wx, t.wy - wy) < 30)) continue;
+  if (trees.some((t) => Math.hypot(t.wx - wx, t.wy - wy) < 20)) continue;
   trees.push({ wx, wy, angle: Math.random() * Math.PI * 2 });
+}
+
+// ---------------------------------------------------------------------------
+// Bushes: little round shrubs on the meadows
+// ---------------------------------------------------------------------------
+
+const BUSH_COLORS = ["#3f9e3e", "#4fae4a", "#379139"];
+const bushes = [];
+for (let attempts = 0; bushes.length < 110 && attempts < 6000; attempts++) {
+  const wx = 20 + Math.random() * (MAP_SIZE - 40);
+  const wy = 20 + Math.random() * (MAP_SIZE - 40);
+  if (tileTypeAt(wx, wy) !== 0) continue;
+  if (roadTiles.has(tileKey(wx, wy))) continue;
+  if (Math.hypot(wx - FARM.x, wy - FARM.y) < FARM_RADIUS + 12) continue;
+  if (trees.some((t) => Math.hypot(t.wx - wx, t.wy - wy) < 8)) continue;
+  if (bushes.some((b) => Math.hypot(b.wx - wx, b.wy - wy) < 10)) continue;
+  const r = 1.6 + Math.random();
+  bushes.push({
+    wx,
+    wy,
+    r,
+    shapes: [
+      {
+        blob: true,
+        x: 0,
+        y: 0,
+        z: r * 0.9,
+        r,
+        color: BUSH_COLORS[(Math.random() * BUSH_COLORS.length) | 0],
+      },
+    ],
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -887,6 +1108,13 @@ function makeWheels(items, wheels, ox, oy, angle, liftZ, camX, camY) {
   makeRoundItems(items, shapes, ox, oy, angle, liftZ, camX, camY);
 }
 
+// Coarse visibility test for scattered scenery (trees, bushes, sacks)
+function onScreen(wx, wy, camX, camY) {
+  const x = projX(wx, wy) - camX;
+  const y = projY(wx, wy, 0) - camY;
+  return x > -40 && x < VIEW_W + 40 && y > -80 && y < VIEW_H + 80;
+}
+
 function drawScene(camX, camY) {
   const pose = implementPose();
 
@@ -917,10 +1145,18 @@ function drawScene(camX, camY) {
   shadowQuad(tractor.x, tractor.y, tractor.angle, -6, 8.5, 5.5);
   shadowQuad(pose.x, pose.y, pose.angle, impRear, -6.5, 6);
   for (const t of trees) {
+    if (!onScreen(t.wx, t.wy, camX, camY)) continue;
     const sx = Math.round(projX(t.wx, t.wy) - camX);
     const sy = Math.round(projY(t.wx, t.wy, terrainHeight(t.wx, t.wy)) - camY);
     ctx.moveTo(sx + 6, sy);
     ctx.ellipse(sx, sy, 6, 3, 0, 0, Math.PI * 2);
+  }
+  for (const b of bushes) {
+    if (!onScreen(b.wx, b.wy, camX, camY)) continue;
+    const sx = Math.round(projX(b.wx, b.wy) - camX);
+    const sy = Math.round(projY(b.wx, b.wy, terrainHeight(b.wx, b.wy)) - camY);
+    ctx.moveTo(sx + b.r * 1.6, sy);
+    ctx.ellipse(sx, sy, b.r * 1.6, b.r * 0.8, 0, 0, Math.PI * 2);
   }
   ctx.fill();
 
@@ -935,10 +1171,18 @@ function drawScene(camX, camY) {
   makeItems(items, FARM_BOXES, FARM.x, FARM.y, 0, 0, camX, camY);
   makeRoundItems(items, FARM_SHAPES, FARM.x, FARM.y, 0, 0, camX, camY);
   for (const t of trees) {
+    if (!onScreen(t.wx, t.wy, camX, camY)) continue;
     makeItems(items, TREE_BOXES, t.wx, t.wy, t.angle, 0, camX, camY);
     makeRoundItems(items, TREE_BLOBS, t.wx, t.wy, t.angle, 0, camX, camY);
   }
-  for (const s of sacks) makeRoundItems(items, SACK_SHAPES, s.wx, s.wy, 0, 0, camX, camY);
+  for (const b of bushes) {
+    if (!onScreen(b.wx, b.wy, camX, camY)) continue;
+    makeRoundItems(items, b.shapes, b.wx, b.wy, 0, 0, camX, camY);
+  }
+  for (const s of sacks) {
+    if (!onScreen(s.wx, s.wy, camX, camY)) continue;
+    makeRoundItems(items, SACK_SHAPES, s.wx, s.wy, 0, 0, camX, camY);
+  }
   items.sort((a, b) => a.depth - b.depth);
 
   for (const item of items) {
@@ -1294,6 +1538,9 @@ function update(dt) {
     (imp.liftable ? 1 - 0.35 * (1 - tractor.implLift) : 1);
   let maxReverse = MAX_REVERSE;
 
+  // Packed dirt roads are ~30% faster than driving across the meadows
+  if (roadTiles.has(tileKey(tractor.x, tractor.y))) maxForward *= 1.3;
+
   // A lowered implement digging into unbroken ground bogs the tractor down
   if (imp.liftable && tractor.implLift < 0.5 && !implementOverField()) {
     maxForward = 3;
@@ -1455,6 +1702,9 @@ function draw() {
   const RED = "#ff5040";
   const flashGear = tractor.gearFlash > 0 && ((tractor.gearFlash * 8) | 0) % 2 === 0;
   const flashImpl = tractor.implFlash > 0 && ((tractor.implFlash * 8) | 0) % 2 === 0;
+  // One world unit is ~0.3 m, so units/s * 3.6 * 0.3 gives km/h
+  const kmh = Math.abs(tractor.speed) * 1.08;
+  seg(`${kmh.toFixed(0).padStart(2)} KM/H   `);
   seg(`GEAR: ${tractor.fastGear ? "FAST" : "SLOW"} [Shift]   `, flashGear ? RED : null);
   const state = imp.liftable ? (tractor.implDown ? " DOWN" : " UP") : "";
   seg(`${imp.label}${state} [Space]   `, flashImpl ? RED : null);
