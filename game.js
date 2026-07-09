@@ -265,8 +265,10 @@ function tileTypeAt(wx, wy) {
   return tiles[ty][tx];
 }
 
-const GRASS = "#65bd4c";
-const GRASS_DOTS = ["#55ab3e", "#7dd463", "#8adf70", "#48993a"];
+// Ground colors are seasonal: these are the spring values, and
+// updateSeason() rewrites them as the round progresses
+let GRASS = "#72ca55";
+const GRASS_DOTS = ["#5fb944", "#8adf70", "#97e87e", "#52a63f"];
 const DIRT = "#a87e50";
 const DIRT_DOTS = ["#8f6940", "#bb9264"];
 const FLOWER_COLORS = ["#ff9ed2", "#ffffff", "#c9a6ff", "#ffb27d"];
@@ -339,21 +341,117 @@ function fieldPath(P, rounded) {
   return path;
 }
 
+// Crop sprites for a seeded tile; the caller must have clipped to the
+// tile's field outline so plants never poke into the surrounding grass
+function drawCropsOn(tx, ty, kc) {
+  const alongX = dirs[ty][tx] === 1;
+  const stage = cropStage(growth[ty][tx]);
+  for (const s of [0.25, 0.5, 0.75]) {
+    for (const t of [0.15, 0.38, 0.62, 0.85]) {
+      const p = alongX
+        ? mp((tx + t) * TILE, (ty + s) * TILE)
+        : mp((tx + s) * TILE, (ty + t) * TILE);
+      const x = Math.round(p.x);
+      const y = Math.round(p.y);
+      if (stage === 0) {
+        mapCtx.fillStyle = shade("#6b5228", kc); // seed spot
+        mapCtx.fillRect(x, y, 1, 1);
+      } else if (stage === 1) {
+        mapCtx.fillStyle = shade("#8ee06a", kc); // sprout
+        mapCtx.fillRect(x, y - 2, 1, 2);
+      } else if (stage === 2) {
+        mapCtx.fillStyle = shade("#5cbf47", kc); // young plant
+        mapCtx.fillRect(x, y - 3, 1, 3);
+      } else {
+        mapCtx.fillStyle = shade("#c2a044", kc); // mature stalk
+        mapCtx.fillRect(x, y - 3, 1, 3);
+        mapCtx.fillStyle = shade("#f5d96b", kc); // grain head
+        mapCtx.fillRect(x, y - 5, 1, 2);
+      }
+    }
+  }
+}
+
 // Repaint one tile, then re-dither just that neighborhood of the map canvas
 function drawTile(tx, ty) {
   paintTile(tx, ty);
   minimapTile(tx, ty);
+
+  // Crop sprites lean a few pixels above their ground point, so at build
+  // time the back-to-front order lets them paint over the tile behind.
+  // Repainting this tile just erased any such overhang from the tiles in
+  // front of it: redraw their crops.
+  for (const [nx, ny] of [[tx + 1, ty], [tx, ty + 1], [tx + 1, ty + 1]]) {
+    if (nx >= MAP_TILES || ny >= MAP_TILES || tiles[ny][nx] !== 3) continue;
+    const g = fieldGeometry(nx, ny);
+    mapCtx.save();
+    mapCtx.clip(fieldPath(g.P, g.rounded));
+    drawCropsOn(nx, ny, groundShade((nx + 0.5) * TILE, (ny + 0.5) * TILE));
+    mapCtx.restore();
+  }
+
+  // Restore any road surface crossing this tile: roads live on top of the
+  // tiles, so the repaint just erased them here
+  const stamps = roadStamps.get(ty * MAP_TILES + tx);
+  if (stamps) {
+    mapCtx.save();
+    mapCtx.beginPath();
+    for (const [ex, ey] of [[0, 0], [MAP_SIZE, 0], [MAP_SIZE, MAP_SIZE], [0, MAP_SIZE]]) {
+      const c = mp(ex, ey);
+      if (ex === 0 && ey === 0) mapCtx.moveTo(c.x, c.y);
+      else mapCtx.lineTo(c.x, c.y);
+    }
+    mapCtx.closePath();
+    mapCtx.clip();
+    for (const s of stamps) {
+      const c = mp(s.x, s.y);
+      mapCtx.fillStyle = shade(ROAD_COLOR, groundShade(s.x, s.y));
+      mapCtx.beginPath();
+      mapCtx.ellipse(c.x, c.y, s.r * 1.5, s.r * 0.75, 0, 0, Math.PI * 2);
+      mapCtx.fill();
+    }
+    mapCtx.restore();
+  }
+
+  // Restore the farmyard's trodden dirt if this tile is anywhere near it.
+  // The whole yard is repainted unclipped — its pixels are deterministic, so
+  // overpainting neighbors is a no-op, and clipping to the tile would leave
+  // antialiasing seams across the yard.
+  const nearYard =
+    Math.hypot((tx + 0.5) * TILE - FARM.x, (ty + 0.5) * TILE - FARM.y) <
+    FARM_RADIUS * 2.2;
+  const fc = mp(FARM.x, FARM.y);
+  if (nearYard) {
+    mapCtx.fillStyle = "#a87e50";
+    mapCtx.beginPath();
+    mapCtx.ellipse(fc.x, fc.y, FARM_RADIUS * 1.8, FARM_RADIUS * 0.9, 0, 0, Math.PI * 2);
+    mapCtx.fill();
+    mapCtx.fillStyle = "#8f6940";
+    for (const p of yardPixels) mapCtx.fillRect(p.x, p.y, 1, 1);
+  }
+
+  // Re-dither everything that was repainted: the 2x2 block covering this
+  // tile and the front neighbors whose crops were redrawn, with a margin for
+  // road stamps that stick out, plus the yard when it was redrawn
   const c = [
     mp(tx * TILE, ty * TILE),
-    mp((tx + 1) * TILE, ty * TILE),
-    mp((tx + 1) * TILE, (ty + 1) * TILE),
-    mp(tx * TILE, (ty + 1) * TILE),
+    mp((tx + 2) * TILE, ty * TILE),
+    mp((tx + 2) * TILE, (ty + 2) * TILE),
+    mp(tx * TILE, (ty + 2) * TILE),
   ];
   const xs = c.map((p) => p.x);
   const ys = c.map((p) => p.y);
-  const x0 = Math.min(...xs) - 2;
-  const y0 = Math.min(...ys) - 8; // crops draw a few pixels above the ground
-  ditherRegion(mapCtx, x0, y0, Math.max(...xs) - x0 + 4, Math.max(...ys) - y0 + 4);
+  let x0 = Math.min(...xs) - 8;
+  let y0 = Math.min(...ys) - 10; // crops draw a few pixels above the ground
+  let x1 = Math.max(...xs) + 8;
+  let y1 = Math.max(...ys) + 8;
+  if (nearYard) {
+    x0 = Math.min(x0, fc.x - FARM_RADIUS * 1.8 - 2);
+    x1 = Math.max(x1, fc.x + FARM_RADIUS * 1.8 + 2);
+    y0 = Math.min(y0, fc.y - FARM_RADIUS * 0.9 - 2);
+    y1 = Math.max(y1, fc.y + FARM_RADIUS * 0.9 + 2);
+  }
+  ditherRegion(mapCtx, x0, y0, x1 - x0, y1 - y0);
 }
 
 function paintTile(tx, ty) {
@@ -476,33 +574,7 @@ function paintTile(tx, ty) {
     }
 
     // Seeds / crops in rows along the furrows
-    if (type === 3) {
-      const stage = cropStage(growth[ty][tx]);
-      for (const s of [0.25, 0.5, 0.75]) {
-        for (const t of [0.15, 0.38, 0.62, 0.85]) {
-          const p = alongX
-            ? mp((tx + t) * TILE, (ty + s) * TILE)
-            : mp((tx + s) * TILE, (ty + t) * TILE);
-          const x = Math.round(p.x);
-          const y = Math.round(p.y);
-          if (stage === 0) {
-            mapCtx.fillStyle = shade("#6b5228", kc); // seed spot
-            mapCtx.fillRect(x, y, 1, 1);
-          } else if (stage === 1) {
-            mapCtx.fillStyle = shade("#8ee06a", kc); // sprout
-            mapCtx.fillRect(x, y - 2, 1, 2);
-          } else if (stage === 2) {
-            mapCtx.fillStyle = shade("#5cbf47", kc); // young plant
-            mapCtx.fillRect(x, y - 3, 1, 3);
-          } else {
-            mapCtx.fillStyle = shade("#c2a044", kc); // mature stalk
-            mapCtx.fillRect(x, y - 3, 1, 3);
-            mapCtx.fillStyle = shade("#f5d96b", kc); // grain head
-            mapCtx.fillRect(x, y - 5, 1, 2);
-          }
-        }
-      }
-    }
+    if (type === 3) drawCropsOn(tx, ty, kc);
   } else {
     // Speckles: dirt clods
     for (let i = 0; i < 8; i++) {
@@ -571,6 +643,13 @@ const roadSamples = [];
 const roadTiles = new Set();
 const patches = [];
 const tileKey = (wx, wy) => ((wy / TILE) | 0) * MAP_TILES + ((wx / TILE) | 0);
+const ROAD_COLOR = "#c09a66";
+// Road stamps by tile index: roads are painted over the tiles, so whenever a
+// tile repaints (field work, seasons) its road surface must be restored
+const roadStamps = new Map();
+// Same for the farmyard's trodden dirt: its speckles are kept so the yard
+// can be redrawn identically over a repainted tile
+const yardPixels = [];
 
 function makeMap() {
   for (let ty = 0; ty < MAP_TILES; ty++) {
@@ -731,6 +810,14 @@ function makeMap() {
       roadSamples.push(p);
       for (const dx of [-5, 0, 5])
         for (const dy of [-5, 0, 5]) roadTiles.add(tileKey(p.x + dx, p.y + dy));
+      // Remember the stamp on every tile its ellipse touches
+      const touched = new Set();
+      for (const dx of [-road.r, road.r])
+        for (const dy of [-road.r, road.r]) touched.add(tileKey(p.x + dx, p.y + dy));
+      for (const k of touched) {
+        if (!roadStamps.has(k)) roadStamps.set(k, []);
+        roadStamps.get(k).push({ x: p.x, y: p.y, r: road.r });
+      }
       if (road.entry) continue; // entry paths touch the field edge on purpose
       for (const dx of [-4, 0, 4]) {
         for (const dy of [-4, 0, 4]) {
@@ -774,7 +861,7 @@ function makeMap() {
   for (const road of roads) {
     for (const p of road.pts) {
       const c = mp(p.x, p.y);
-      mapCtx.fillStyle = shade("#c09a66", groundShade(p.x, p.y));
+      mapCtx.fillStyle = shade(ROAD_COLOR, groundShade(p.x, p.y));
       mapCtx.beginPath();
       mapCtx.ellipse(c.x, c.y, road.r * 1.5, road.r * 0.75, 0, 0, Math.PI * 2);
       mapCtx.fill();
@@ -802,12 +889,10 @@ function makeMap() {
   for (let i = 0; i < 40; i++) {
     const a = rand() * Math.PI * 2;
     const r = Math.sqrt(rand());
-    mapCtx.fillRect(
-      Math.round(fc.x + Math.cos(a) * r * FARM_RADIUS * 1.7),
-      Math.round(fc.y + Math.sin(a) * r * FARM_RADIUS * 0.85),
-      1,
-      1
-    );
+    const px = Math.round(fc.x + Math.cos(a) * r * FARM_RADIUS * 1.7);
+    const py = Math.round(fc.y + Math.sin(a) * r * FARM_RADIUS * 0.85);
+    yardPixels.push({ x: px, y: py });
+    mapCtx.fillRect(px, py, 1, 1);
   }
 
   // Dirt cliffs along the two near (bottom) edges of the map diamond
@@ -885,11 +970,12 @@ const TREE_BOXES = [
   { x0: -0.9, x1: 0.9, y0: -0.9, y1: 0.9, z0: 0.0, z1: 4.5, color: "#8a5a36" }, // trunk
 ];
 
-// Cloud-shaped canopy: one big blob with two smaller ones tucked against it
+// Cloud-shaped canopy: one big blob with two smaller ones tucked against it.
+// Spring colors; updateSeason() recolors them through summer into autumn.
 const TREE_BLOBS = [
-  { blob: true, x: 0, y: 0, z: 7.2, r: 4.2, color: "#4fae4a" },
-  { blob: true, x: 1.5, y: -1.5, z: 9.6, r: 2.7, color: "#5fc257", bias: 0.05 },
-  { blob: true, x: -1.3, y: 1.3, z: 10.2, r: 2.1, color: "#72d367", bias: 0.1 },
+  { blob: true, x: 0, y: 0, z: 7.2, r: 4.2, color: "#57b754" },
+  { blob: true, x: 1.5, y: -1.5, z: 9.6, r: 2.7, color: "#68c765", bias: 0.05 },
+  { blob: true, x: -1.3, y: 1.3, z: 10.2, r: 2.1, color: "#7cd678", bias: 0.1 },
 ];
 
 const trees = [];
@@ -907,7 +993,12 @@ for (let attempts = 0; trees.length < 150 && attempts < 6000; attempts++) {
 // Bushes: little round shrubs on the meadows
 // ---------------------------------------------------------------------------
 
-const BUSH_COLORS = ["#3f9e3e", "#4fae4a", "#379139"];
+// Each variant is [spring, summer, autumn]
+const BUSH_COLORS = [
+  ["#4db554", "#3f9e3e", "#b07a35"],
+  ["#5cc25f", "#4fae4a", "#c08d3a"],
+  ["#45a94b", "#379139", "#9c6a2e"],
+];
 const bushes = [];
 for (let attempts = 0; bushes.length < 110 && attempts < 6000; attempts++) {
   const wx = 20 + rand() * (MAP_SIZE - 40);
@@ -918,26 +1009,24 @@ for (let attempts = 0; bushes.length < 110 && attempts < 6000; attempts++) {
   if (trees.some((t) => Math.hypot(t.wx - wx, t.wy - wy) < 8)) continue;
   if (bushes.some((b) => Math.hypot(b.wx - wx, b.wy - wy) < 10)) continue;
   const r = 1.6 + rand();
+  const seasonColors = BUSH_COLORS[(rand() * BUSH_COLORS.length) | 0];
   bushes.push({
     wx,
     wy,
     r,
-    shapes: [
-      {
-        blob: true,
-        x: 0,
-        y: 0,
-        z: r * 0.9,
-        r,
-        color: BUSH_COLORS[(rand() * BUSH_COLORS.length) | 0],
-      },
-    ],
+    seasonColors,
+    shapes: [{ blob: true, x: 0, y: 0, z: r * 0.9, r, color: seasonColors[0] }],
   });
 }
 
 // Hedgerows: rows of darker shrubs along some field edges. Gaps open up
 // wherever a road or driveway passes.
-const HEDGE_COLORS = ["#357f36", "#3d8f3c", "#2f7531"];
+// Each variant is [spring, summer, autumn]
+const HEDGE_COLORS = [
+  ["#3f9440", "#357f36", "#96612d"],
+  ["#489e45", "#3d8f3c", "#a5722f"],
+  ["#3a8a3c", "#2f7531", "#8a5c2a"],
+];
 for (const p of patches) {
   const x0 = p.px * TILE;
   const x1 = (p.px + p.pw) * TILE;
@@ -960,20 +1049,13 @@ for (const p of patches) {
       if (roadTiles.has(tileKey(wx, wy))) continue; // keep the gates open
       if (Math.hypot(wx - FARM.x, wy - FARM.y) < FARM_RADIUS + 12) continue;
       const r = 1.7 + rand() * 0.8;
+      const seasonColors = HEDGE_COLORS[(rand() * HEDGE_COLORS.length) | 0];
       bushes.push({
         wx,
         wy,
         r,
-        shapes: [
-          {
-            blob: true,
-            x: 0,
-            y: 0,
-            z: r * 0.9,
-            r,
-            color: HEDGE_COLORS[(rand() * HEDGE_COLORS.length) | 0],
-          },
-        ],
+        seasonColors,
+        shapes: [{ blob: true, x: 0, y: 0, z: r * 0.9, r, color: seasonColors[0] }],
       });
     }
   }
@@ -1289,6 +1371,7 @@ function drawScene(camX, camY) {
   }
   for (const b of bushes) {
     if (!onScreen(b.wx, b.wy, camX, camY)) continue;
+    b.shapes[0].color = seasonHex(b.seasonColors);
     makeRoundItems(items, b.shapes, b.wx, b.wy, 0, 0, camX, camY);
   }
   for (const s of sacks) {
@@ -1377,24 +1460,92 @@ function updateTracks(dt) {
 }
 
 // ---------------------------------------------------------------------------
+// Seasons: the round runs from spring through summer into autumn. Colors
+// interpolate through three keyframes, and the ground takes the new colors
+// gradually as a few random tiles repaint every frame.
+// ---------------------------------------------------------------------------
+
+const GRASS_SEASONS = ["#72ca55", "#55b043", "#bda355"];
+const GRASS_DOT_SEASONS = [
+  ["#5fb944", "#47a136", "#a89043"],
+  ["#8adf70", "#6cc957", "#cdb45e"],
+  ["#97e87e", "#78d364", "#d9c06a"],
+  ["#52a63f", "#3f8f31", "#96813c"],
+];
+const TREE_BLOB_SEASONS = [
+  ["#57b754", "#4fae4a", "#c67b2e"],
+  ["#68c765", "#5fc257", "#d99a33"],
+  ["#7cd678", "#72d367", "#e8b84a"],
+];
+const SKY_TOP_SEASONS = ["#7ac9ef", "#6fc3e8", "#8fb8d8"];
+const SKY_BOTTOM_SEASONS = ["#c8ecf8", "#c2e8f2", "#ecdcc0"];
+
+let seasonQ = 0; // 0 = spring, 0.5 = summer, 1 = autumn (quantized)
+let seasonStep = -1;
+
+const mixCache = {};
+function mixHex(a, b, t) {
+  const key = a + b + ((t * 64) | 0);
+  if (mixCache[key]) return mixCache[key];
+  const va = parseInt(a.slice(1), 16);
+  const vb = parseInt(b.slice(1), 16);
+  let out = "#";
+  for (const shift of [16, 8, 0]) {
+    const v = Math.round(((va >> shift) & 255) * (1 - t) + ((vb >> shift) & 255) * t);
+    out += v.toString(16).padStart(2, "0");
+  }
+  return (mixCache[key] = out);
+}
+
+function seasonHex(triple) {
+  return seasonQ < 0.5
+    ? mixHex(triple[0], triple[1], seasonQ * 2)
+    : mixHex(triple[1], triple[2], (seasonQ - 0.5) * 2);
+}
+
+function updateSeason() {
+  const t = Math.min(1, Math.max(0, 1 - timeLeft / ROUND_TIME));
+  const step = Math.min(32, (t * 33) | 0);
+  if (step !== seasonStep) {
+    seasonStep = step;
+    seasonQ = step / 32;
+    GRASS = seasonHex(GRASS_SEASONS);
+    for (let i = 0; i < GRASS_DOTS.length; i++)
+      GRASS_DOTS[i] = seasonHex(GRASS_DOT_SEASONS[i]);
+    for (let i = 0; i < TREE_BLOBS.length; i++)
+      TREE_BLOBS[i].color = seasonHex(TREE_BLOB_SEASONS[i]);
+    paintSky();
+  }
+  // The ground turns gradually: a few random tiles repaint per frame with
+  // the current colors (as a side effect, old wheel tracks slowly fade)
+  for (let i = 0; i < 8; i++) {
+    drawTile((rand() * MAP_TILES) | 0, (rand() * MAP_TILES) | 0);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Sky: gradient, a friendly sun, and puffy clouds drifting past the island
 // ---------------------------------------------------------------------------
 
 let worldTime = 0;
 
-// The sky gradient is prerendered once so it can be dithered
+// The sky gradient is prerendered so it can be dithered, and repainted
+// whenever the season shifts its colors
 const skyCanvas = document.createElement("canvas");
 skyCanvas.width = VIEW_W;
 skyCanvas.height = VIEW_H;
-{
-  const skyCtx = skyCanvas.getContext("2d");
+const skyCtx = skyCanvas.getContext("2d");
+
+function paintSky() {
   const g = skyCtx.createLinearGradient(0, 0, 0, VIEW_H);
-  g.addColorStop(0, "#7ac9ef");
-  g.addColorStop(1, "#c8ecf8");
+  g.addColorStop(0, seasonHex(SKY_TOP_SEASONS));
+  g.addColorStop(1, seasonHex(SKY_BOTTOM_SEASONS));
   skyCtx.fillStyle = g;
   skyCtx.fillRect(0, 0, VIEW_W, VIEW_H);
   ditherRegion(skyCtx, 0, 0, VIEW_W, VIEW_H);
 }
+
+paintSky();
 
 function drawSun() {
   ctx.fillStyle = "rgba(255,240,170,0.4)";
@@ -1658,6 +1809,7 @@ function update(dt) {
   worldTime += dt;
   updateSmoke(dt);
   updateButterflies(dt);
+  updateSeason();
   if (gameOver) return;
 
   timeLeft = Math.max(0, timeLeft - dt);
@@ -1880,6 +2032,13 @@ function draw() {
   screenCtx.fillStyle =
     timeLeft < 30 && ((timeLeft * 2) | 0) % 2 === 0 ? "#ff5040" : "#ffffff";
   screenCtx.fillText(`${mins}:${String(secs).padStart(2, "0")}`, screenCanvas.width / 2, 26);
+  screenCtx.font = "11px monospace";
+  screenCtx.fillStyle = "rgba(255,255,255,0.7)";
+  screenCtx.fillText(
+    seasonQ < 0.25 ? "SPRING" : seasonQ < 0.7 ? "SUMMER" : "AUTUMN",
+    screenCanvas.width / 2,
+    42
+  );
   screenCtx.textAlign = "left";
 
   // Game over: final score and the all-time best list
