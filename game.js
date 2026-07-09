@@ -178,10 +178,11 @@ function tileTypeAt(wx, wy) {
   return tiles[ty][tx];
 }
 
-const GRASS = ["#4a8f3c", "#478a39", "#4d9340", "#458738"];
-const GRASS_DOTS = ["#3f7d33", "#55a046", "#5aab4b", "#2f6427"];
-const DIRT = ["#8a6b42", "#84663e", "#8f7046"];
-const DIRT_DOTS = ["#755833", "#96774d"];
+const GRASS = ["#68c14f", "#63bb4a", "#6ec754", "#5eb545"];
+const GRASS_DOTS = ["#55ab3e", "#7dd463", "#8adf70", "#48993a"];
+const DIRT = ["#a87e50", "#a1784b", "#ae8356"];
+const DIRT_DOTS = ["#8f6940", "#bb9264"];
+const FLOWER_COLORS = ["#ff9ed2", "#ffffff", "#c9a6ff", "#ffb27d"];
 
 const mp = (wx, wy) => ({
   x: projX(wx, wy) + MAP_OFFSET_X,
@@ -219,7 +220,7 @@ function drawTile(tx, ty) {
   if (type >= 2) {
     // Furrow lines parallel to the direction the tile was plowed in
     const alongX = dirs[ty][tx] === 1;
-    mapCtx.strokeStyle = shade("#6d5230", k);
+    mapCtx.strokeStyle = shade("#8a6540", k);
     mapCtx.lineWidth = 1;
     for (const s of [0.25, 0.5, 0.75]) {
       const a = alongX
@@ -245,18 +246,18 @@ function drawTile(tx, ty) {
           const x = Math.round(p.x);
           const y = Math.round(p.y);
           if (stage === 0) {
-            mapCtx.fillStyle = shade("#54401f", k); // seed spot
+            mapCtx.fillStyle = shade("#6b5228", k); // seed spot
             mapCtx.fillRect(x, y, 1, 1);
           } else if (stage === 1) {
-            mapCtx.fillStyle = shade("#7bc95e", k); // sprout
+            mapCtx.fillStyle = shade("#8ee06a", k); // sprout
             mapCtx.fillRect(x, y - 1, 1, 1);
           } else if (stage === 2) {
-            mapCtx.fillStyle = shade("#4e9c3a", k); // young plant
+            mapCtx.fillStyle = shade("#5cbf47", k); // young plant
             mapCtx.fillRect(x, y - 2, 1, 2);
           } else {
-            mapCtx.fillStyle = shade("#a3843a", k); // mature stalk
+            mapCtx.fillStyle = shade("#c2a044", k); // mature stalk
             mapCtx.fillRect(x, y - 2, 1, 2);
-            mapCtx.fillStyle = shade("#e3c964", k); // grain head
+            mapCtx.fillStyle = shade("#f5d96b", k); // grain head
             mapCtx.fillRect(x, y - 3, 1, 1);
           }
         }
@@ -269,6 +270,23 @@ function drawTile(tx, ty) {
       const p = mp((tx + Math.random()) * TILE, (ty + Math.random()) * TILE);
       mapCtx.fillStyle = shade(dots[(Math.random() * dots.length) | 0], k);
       mapCtx.fillRect(Math.round(p.x), Math.round(p.y), 1, 1);
+    }
+
+    // Little meadow flowers: four petals around a yellow heart
+    if (type === 0 && Math.random() < 0.4) {
+      const p = mp(
+        (tx + 0.2 + Math.random() * 0.6) * TILE,
+        (ty + 0.2 + Math.random() * 0.6) * TILE
+      );
+      const x = Math.round(p.x);
+      const y = Math.round(p.y);
+      mapCtx.fillStyle = shade(FLOWER_COLORS[(Math.random() * FLOWER_COLORS.length) | 0], k);
+      mapCtx.fillRect(x - 1, y, 1, 1);
+      mapCtx.fillRect(x + 1, y, 1, 1);
+      mapCtx.fillRect(x, y - 1, 1, 1);
+      mapCtx.fillRect(x, y + 1, 1, 1);
+      mapCtx.fillStyle = shade("#ffd94f", k);
+      mapCtx.fillRect(x, y, 1, 1);
     }
   }
 }
@@ -355,11 +373,11 @@ function makeMap() {
 
   // Trodden dirt yard around the farm buildings
   const fc = mp(FARM.x, FARM.y);
-  mapCtx.fillStyle = "#8a6b42";
+  mapCtx.fillStyle = "#a87e50";
   mapCtx.beginPath();
   mapCtx.ellipse(fc.x, fc.y, FARM_RADIUS * 1.8, FARM_RADIUS * 0.9, 0, 0, Math.PI * 2);
   mapCtx.fill();
-  mapCtx.fillStyle = "#755833";
+  mapCtx.fillStyle = "#8f6940";
   for (let i = 0; i < 40; i++) {
     const a = Math.random() * Math.PI * 2;
     const r = Math.sqrt(Math.random());
@@ -376,8 +394,8 @@ function makeMap() {
   const south = mp(MAP_SIZE, MAP_SIZE);
   const west = mp(0, MAP_SIZE);
   for (const [a, b, color] of [
-    [east, south, "#6b4f2e"],
-    [south, west, "#57401f"],
+    [east, south, "#8a6540"],
+    [south, west, "#6f4d2c"],
   ]) {
     mapCtx.fillStyle = color;
     mapCtx.beginPath();
@@ -393,20 +411,46 @@ function makeMap() {
 makeMap();
 
 // ---------------------------------------------------------------------------
+// Lollipop trees scattered over the meadows
+// ---------------------------------------------------------------------------
+
+const TREE_BOXES = [
+  { x0: -0.9, x1: 0.9, y0: -0.9, y1: 0.9, z0: 0.0, z1: 3.5, color: "#8a5a36" }, // trunk
+  { x0: -3.4, x1: 3.4, y0: -3.4, y1: 3.4, z0: 3.5, z1: 7.5, color: "#4fae4a" }, // canopy
+  { x0: -2.4, x1: 2.4, y0: -2.4, y1: 2.4, z0: 7.5, z1: 10.0, color: "#5fc257" },
+  { x0: -1.3, x1: 1.3, y0: -1.3, y1: 1.3, z0: 10.0, z1: 11.6, color: "#72d367" },
+];
+
+const trees = [];
+for (let attempts = 0; trees.length < 12 && attempts < 400; attempts++) {
+  const wx = 24 + Math.random() * (MAP_SIZE - 48);
+  const wy = 24 + Math.random() * (MAP_SIZE - 48);
+  if (tileTypeAt(wx, wy) !== 0) continue; // grass only, never on a field
+  if (Math.hypot(wx - FARM.x, wy - FARM.y) < FARM_RADIUS + 30) continue;
+  if (trees.some((t) => Math.hypot(t.wx - wx, t.wy - wy) < 30)) continue;
+  trees.push({ wx, wy, angle: Math.random() * Math.PI * 2 });
+}
+
+// ---------------------------------------------------------------------------
 // Box models: everything solid is axis-aligned boxes in local space
 // (+x = forward, z = up), rotated around z and projected each frame.
 // ---------------------------------------------------------------------------
 
 const BOXES = [
-  { x0: -7.0, x1: 3.0, y0: -3.0, y1: 3.0, z0: 2.5, z1: 6.0, color: "#c8402a" }, // chassis
-  { x0: 3.0, x1: 7.0, y0: -2.2, y1: 2.2, z0: 2.5, z1: 5.5, color: "#c8402a" }, // hood
-  { x0: -6.5, x1: -1.0, y0: -2.6, y1: 2.6, z0: 6.0, z1: 10.0, color: "#9ad1e0" }, // cab glass
-  { x0: -7.0, x1: -0.5, y0: -3.0, y1: 3.0, z0: 10.0, z1: 11.0, color: "#a32f1e" }, // roof
-  { x0: 1.5, x1: 2.5, y0: -0.5, y1: 0.5, z0: 5.5, z1: 9.5, color: "#6b6b6b" }, // exhaust
-  { x0: -7.0, x1: -2.0, y0: 3.0, y1: 5.0, z0: 0.0, z1: 5.0, color: "#2b2b2b" }, // rear wheel L
-  { x0: -7.0, x1: -2.0, y0: -5.0, y1: -3.0, z0: 0.0, z1: 5.0, color: "#2b2b2b" }, // rear wheel R
-  { x0: 3.5, x1: 6.5, y0: 2.3, y1: 3.9, z0: 0.0, z1: 3.2, color: "#2b2b2b" }, // front wheel L
-  { x0: 3.5, x1: 6.5, y0: -3.9, y1: -2.3, z0: 0.0, z1: 3.2, color: "#2b2b2b" }, // front wheel R
+  { x0: -7.0, x1: 3.0, y0: -3.0, y1: 3.0, z0: 2.5, z1: 6.0, color: "#f25c3f" }, // chassis
+  { x0: 3.0, x1: 7.0, y0: -2.2, y1: 2.2, z0: 2.5, z1: 5.5, color: "#f25c3f" }, // hood
+  { x0: -6.5, x1: -1.0, y0: -2.6, y1: 2.6, z0: 6.0, z1: 10.0, color: "#bfeaf5" }, // cab glass
+  { x0: -7.0, x1: -0.5, y0: -3.0, y1: 3.0, z0: 10.0, z1: 11.0, color: "#d94a2e" }, // roof
+  { x0: -5.4, x1: -4.4, y0: -0.5, y1: 0.5, z0: 11.0, z1: 12.1, color: "#ffb433" }, // beacon light
+  { x0: 1.5, x1: 2.5, y0: -0.5, y1: 0.5, z0: 5.5, z1: 9.5, color: "#7a7a7a" }, // exhaust
+  { x0: -7.0, x1: -2.0, y0: 3.0, y1: 5.0, z0: 0.0, z1: 5.0, color: "#33363d" }, // rear wheel L
+  { x0: -7.0, x1: -2.0, y0: -5.0, y1: -3.0, z0: 0.0, z1: 5.0, color: "#33363d" }, // rear wheel R
+  { x0: -5.2, x1: -3.8, y0: 5.0, y1: 5.4, z0: 1.8, z1: 3.2, color: "#f7e8b8" }, // rear hubcap L
+  { x0: -5.2, x1: -3.8, y0: -5.4, y1: -5.0, z0: 1.8, z1: 3.2, color: "#f7e8b8" }, // rear hubcap R
+  { x0: 3.5, x1: 6.5, y0: 2.3, y1: 3.9, z0: 0.0, z1: 3.2, color: "#33363d" }, // front wheel L
+  { x0: 3.5, x1: 6.5, y0: -3.9, y1: -2.3, z0: 0.0, z1: 3.2, color: "#33363d" }, // front wheel R
+  { x0: 4.5, x1: 5.5, y0: 3.9, y1: 4.2, z0: 1.1, z1: 2.1, color: "#f7e8b8" }, // front hubcap L
+  { x0: 4.5, x1: 5.5, y0: -4.2, y1: -3.9, z0: 1.1, z1: 2.1, color: "#f7e8b8" }, // front hubcap R
 ];
 
 // Implements hang behind the tractor; liftable ones get a z offset from the
@@ -415,7 +459,7 @@ const IMPLEMENT_LIFT_HEIGHT = 3.5;
 
 const PLOW_BOXES = [
   { x0: -8.6, x1: -7.2, y0: -0.9, y1: 0.9, z0: 3.2, z1: 4.2, color: "#6b6b6b" }, // drawbar
-  { x0: -10.2, x1: -8.8, y0: -4.6, y1: 4.6, z0: 3.4, z1: 4.6, color: "#a32f1e" }, // beam
+  { x0: -10.2, x1: -8.8, y0: -4.6, y1: 4.6, z0: 3.4, z1: 4.6, color: "#d94a2e" }, // beam
 ];
 for (const yc of [-3.4, -1.1, 1.2, 3.5]) {
   PLOW_BOXES.push({
@@ -426,10 +470,10 @@ for (const yc of [-3.4, -1.1, 1.2, 3.5]) {
 
 const SEEDER_BOXES = [
   { x0: -8.6, x1: -7.2, y0: -0.9, y1: 0.9, z0: 3.2, z1: 4.2, color: "#6b6b6b" }, // drawbar
-  { x0: -10.4, x1: -8.6, y0: -4.6, y1: 4.6, z0: 3.2, z1: 4.4, color: "#d8a020" }, // frame
-  { x0: -10.2, x1: -8.8, y0: -3.9, y1: -1.7, z0: 4.4, z1: 6.4, color: "#e6b83c" }, // hopper
-  { x0: -10.2, x1: -8.8, y0: -1.1, y1: 1.1, z0: 4.4, z1: 6.4, color: "#e6b83c" }, // hopper
-  { x0: -10.2, x1: -8.8, y0: 1.7, y1: 3.9, z0: 4.4, z1: 6.4, color: "#e6b83c" }, // hopper
+  { x0: -10.4, x1: -8.6, y0: -4.6, y1: 4.6, z0: 3.2, z1: 4.4, color: "#f0b322" }, // frame
+  { x0: -10.2, x1: -8.8, y0: -3.9, y1: -1.7, z0: 4.4, z1: 6.4, color: "#ffd04a" }, // hopper
+  { x0: -10.2, x1: -8.8, y0: -1.1, y1: 1.1, z0: 4.4, z1: 6.4, color: "#ffd04a" }, // hopper
+  { x0: -10.2, x1: -8.8, y0: 1.7, y1: 3.9, z0: 4.4, z1: 6.4, color: "#ffd04a" }, // hopper
 ];
 for (const yc of [-3.4, -1.1, 1.2, 3.5]) {
   SEEDER_BOXES.push({
@@ -440,22 +484,22 @@ for (const yc of [-3.4, -1.1, 1.2, 3.5]) {
 
 const HARVESTER_BOXES = [
   { x0: -8.6, x1: -7.2, y0: -0.9, y1: 0.9, z0: 3.2, z1: 4.2, color: "#6b6b6b" }, // drawbar
-  { x0: -13.0, x1: -8.6, y0: -4.8, y1: 4.8, z0: 2.2, z1: 8.0, color: "#3d8c40" }, // body
-  { x0: -12.4, x1: -11.2, y0: -4.2, y1: 4.2, z0: 8.0, z1: 9.4, color: "#2f6f33" }, // grain tank
-  { x0: -8.6, x1: -7.4, y0: -4.8, y1: 4.8, z0: 0.4, z1: 2.6, color: "#8a2f22" }, // header reel
-  { x0: -12.6, x1: -9.4, y0: 4.8, y1: 6.0, z0: 0.0, z1: 3.6, color: "#2b2b2b" }, // wheel L
-  { x0: -12.6, x1: -9.4, y0: -6.0, y1: -4.8, z0: 0.0, z1: 3.6, color: "#2b2b2b" }, // wheel R
+  { x0: -13.0, x1: -8.6, y0: -4.8, y1: 4.8, z0: 2.2, z1: 8.0, color: "#4cae4f" }, // body
+  { x0: -12.4, x1: -11.2, y0: -4.2, y1: 4.2, z0: 8.0, z1: 9.4, color: "#3c8c40" }, // grain tank
+  { x0: -8.6, x1: -7.4, y0: -4.8, y1: 4.8, z0: 0.4, z1: 2.6, color: "#d94a2e" }, // header reel
+  { x0: -12.6, x1: -9.4, y0: 4.8, y1: 6.0, z0: 0.0, z1: 3.6, color: "#33363d" }, // wheel L
+  { x0: -12.6, x1: -9.4, y0: -6.0, y1: -4.8, z0: 0.0, z1: 3.6, color: "#33363d" }, // wheel R
 ];
 
 const TRAILER_BOXES = [
   { x0: -11.5, x1: -7.0, y0: -0.7, y1: 0.7, z0: 2.6, z1: 3.6, color: "#6b6b6b" }, // long drawbar
-  { x0: -21.0, x1: -11.5, y0: -4.2, y1: 4.2, z0: 3.0, z1: 7.0, color: "#7a5a34" }, // wooden bed
+  { x0: -21.0, x1: -11.5, y0: -4.2, y1: 4.2, z0: 3.0, z1: 7.0, color: "#9a7442" }, // wooden bed
 ];
 // Tandem axles: two pairs of wheels under the rear half of the bed
 for (const [wx0, wx1] of [[-16.6, -13.8], [-20.0, -17.2]]) {
   TRAILER_BOXES.push(
-    { x0: wx0, x1: wx1, y0: 4.2, y1: 5.4, z0: 0.0, z1: 3.4, color: "#2b2b2b" }, // wheel L
-    { x0: wx0, x1: wx1, y0: -5.4, y1: -4.2, z0: 0.0, z1: 3.4, color: "#2b2b2b" } // wheel R
+    { x0: wx0, x1: wx1, y0: 4.2, y1: 5.4, z0: 0.0, z1: 3.4, color: "#33363d" }, // wheel L
+    { x0: wx0, x1: wx1, y0: -5.4, y1: -4.2, z0: 0.0, z1: 3.4, color: "#33363d" } // wheel R
   );
 }
 
@@ -464,7 +508,7 @@ function trailerBoxes() {
   // Grain heap grows with the load
   const h = 0.8 + 2.4 * (cargo / TRAILER_CAP);
   return TRAILER_BOXES.concat([
-    { x0: -20.5, x1: -12.0, y0: -3.6, y1: 3.6, z0: 7.0, z1: 7.0 + h, color: "#d9b84a" },
+    { x0: -20.5, x1: -12.0, y0: -3.6, y1: 3.6, z0: 7.0, z1: 7.0 + h, color: "#f0cf5e" },
   ]);
 }
 
@@ -479,15 +523,16 @@ const IMPLEMENTS = {
 
 // Farm buildings, local to FARM
 const FARM_BOXES = [
-  { x0: -16.0, x1: 2.0, y0: -12.0, y1: 2.0, z0: 0.0, z1: 9.0, color: "#a34026" }, // barn
-  { x0: -17.5, x1: 3.5, y0: -13.5, y1: 3.5, z0: 9.0, z1: 12.0, color: "#5b3a28" }, // barn roof
-  { x0: 8.0, x1: 17.0, y0: -9.0, y1: 0.0, z0: 0.0, z1: 20.0, color: "#9aa0a6" }, // silo
-  { x0: 9.0, x1: 16.0, y0: -8.0, y1: -1.0, z0: 20.0, z1: 22.0, color: "#6b7075" }, // silo cap
+  { x0: -16.0, x1: 2.0, y0: -12.0, y1: 2.0, z0: 0.0, z1: 9.0, color: "#d15845" }, // barn
+  { x0: -17.5, x1: 3.5, y0: -13.5, y1: 3.5, z0: 9.0, z1: 12.0, color: "#7a4a32" }, // barn roof
+  { x0: -7.5, x1: -3.5, y0: 1.9, y1: 2.3, z0: 0.0, z1: 6.0, color: "#f7e8d8" }, // barn door
+  { x0: 8.0, x1: 17.0, y0: -9.0, y1: 0.0, z0: 0.0, z1: 20.0, color: "#c6ced6" }, // silo
+  { x0: 9.0, x1: 16.0, y0: -8.0, y1: -1.0, z0: 20.0, z1: 22.0, color: "#d94a2e" }, // silo cap
 ];
 
 // Grain sacks dropped by the harvester
 const SACK_BOXES = [
-  { x0: -1.6, x1: 1.6, y0: -1.6, y1: 1.6, z0: 0.0, z1: 2.8, color: "#d9b84a" },
+  { x0: -1.6, x1: 1.6, y0: -1.6, y1: 1.6, z0: 0.0, z1: 2.8, color: "#f0cf5e" },
 ];
 
 // Faces of a unit box; corner index = xi*4 + yi*2 + zi. Windings are chosen
@@ -581,6 +626,12 @@ function drawScene(camX, camY) {
   ctx.beginPath();
   shadowQuad(tractor.x, tractor.y, tractor.angle, -6, 8.5, 5.5);
   shadowQuad(pose.x, pose.y, pose.angle, impRear, -6.5, 6);
+  for (const t of trees) {
+    const sx = Math.round(projX(t.wx, t.wy) - camX);
+    const sy = Math.round(projY(t.wx, t.wy, terrainHeight(t.wx, t.wy)) - camY);
+    ctx.moveTo(sx + 6, sy);
+    ctx.ellipse(sx, sy, 6, 3, 0, 0, Math.PI * 2);
+  }
   ctx.fill();
 
   // Painter's algorithm: depth along the view axis is wx + wy + wz.
@@ -597,6 +648,7 @@ function drawScene(camX, camY) {
     camY
   );
   makeItems(items, FARM_BOXES, FARM.x, FARM.y, 0, 0, camX, camY);
+  for (const t of trees) makeItems(items, TREE_BOXES, t.wx, t.wy, t.angle, 0, camX, camY);
   for (const s of sacks) makeItems(items, SACK_BOXES, s.wx, s.wy, 0, 0, camX, camY);
   items.sort((a, b) => a.depth - b.depth);
 
@@ -616,7 +668,7 @@ function drawScene(camX, camY) {
       for (const p of pts.slice(1)) ctx.lineTo(p.x, p.y);
       ctx.closePath();
       ctx.fill();
-      ctx.strokeStyle = "rgba(0,0,0,0.25)";
+      ctx.strokeStyle = "rgba(40,30,45,0.18)";
       ctx.lineWidth = 1;
       ctx.stroke();
     }
@@ -650,8 +702,101 @@ function updateTracks(dt) {
     if (tileTypeAt(wx, wy) !== 1) continue; // marks only on unplowed field dirt
     const px = Math.round(projX(wx, wy) + MAP_OFFSET_X);
     const py = Math.round(projY(wx, wy, terrainHeight(wx, wy)) + MAP_OFFSET_Y);
-    mapCtx.fillStyle = "rgba(54,38,20,0.45)";
+    mapCtx.fillStyle = "rgba(94,66,38,0.45)";
     mapCtx.fillRect(px - (wheel.w >> 1), py, wheel.w, 1);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Sky: gradient, a friendly sun, and puffy clouds drifting past the island
+// ---------------------------------------------------------------------------
+
+let worldTime = 0;
+
+const SKY = ctx.createLinearGradient(0, 0, 0, VIEW_H);
+SKY.addColorStop(0, "#7ac9ef");
+SKY.addColorStop(1, "#c8ecf8");
+
+function drawSun() {
+  ctx.fillStyle = "rgba(255,240,170,0.4)";
+  ctx.beginPath();
+  ctx.arc(42, 34, 15, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#ffe66b";
+  ctx.beginPath();
+  ctx.arc(42, 34, 10, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+const CLOUDS = [];
+for (let i = 0; i < 9; i++) {
+  CLOUDS.push({
+    x: Math.random() * (VIEW_W + 240),
+    y: Math.random() * (VIEW_H + 200),
+    speed: 2 + Math.random() * 3,
+    scale: 0.7 + Math.random() * 0.9,
+    par: 0.15 + Math.random() * 0.25, // parallax: far clouds track the camera less
+  });
+}
+
+function drawClouds(camX, camY) {
+  const wrapX = VIEW_W + 240;
+  const wrapY = VIEW_H + 200;
+  ctx.fillStyle = "rgba(255,255,255,0.92)";
+  for (const c of CLOUDS) {
+    const sx = ((((c.x + worldTime * c.speed - camX * c.par) % wrapX) + wrapX) % wrapX) - 120;
+    const sy = ((((c.y - camY * c.par) % wrapY) + wrapY) % wrapY) - 100;
+    const s = c.scale;
+    ctx.beginPath();
+    ctx.arc(sx, sy, 7 * s, 0, Math.PI * 2);
+    ctx.arc(sx - 8 * s, sy + 2 * s, 5 * s, 0, Math.PI * 2);
+    ctx.arc(sx + 8 * s, sy + 2 * s, 5 * s, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Butterflies fluttering over the meadows
+// ---------------------------------------------------------------------------
+
+const BUTTERFLY_COLORS = ["#ff9ed2", "#ffd94f", "#ffffff", "#b8a6ff"];
+const butterflies = [];
+for (let i = 0; i < 14; i++) {
+  butterflies.push({
+    wx: Math.random() * MAP_SIZE,
+    wy: Math.random() * MAP_SIZE,
+    a: Math.random() * Math.PI * 2,
+    phase: Math.random() * 10,
+    color: BUTTERFLY_COLORS[i % BUTTERFLY_COLORS.length],
+  });
+}
+
+function updateButterflies(dt) {
+  for (const b of butterflies) {
+    b.a += (Math.random() - 0.5) * 4 * dt;
+    b.wx += Math.cos(b.a) * 7 * dt;
+    b.wy += Math.sin(b.a) * 7 * dt;
+    if (b.wx < 16 || b.wx > MAP_SIZE - 16 || b.wy < 16 || b.wy > MAP_SIZE - 16) {
+      b.wx = Math.max(16, Math.min(MAP_SIZE - 16, b.wx));
+      b.wy = Math.max(16, Math.min(MAP_SIZE - 16, b.wy));
+      b.a = Math.atan2(MAP_SIZE / 2 - b.wy, MAP_SIZE / 2 - b.wx);
+    }
+  }
+}
+
+function drawButterflies(camX, camY) {
+  for (const b of butterflies) {
+    const wz = terrainHeight(b.wx, b.wy) + 4 + Math.sin(worldTime * 3 + b.phase) * 1.5;
+    const x = Math.round(projX(b.wx, b.wy) - camX);
+    const y = Math.round(projY(b.wx, b.wy, wz) - camY);
+    if (x < -2 || x > VIEW_W + 2 || y < -2 || y > VIEW_H + 2) continue;
+    ctx.fillStyle = b.color;
+    if (Math.sin(worldTime * 14 + b.phase) > 0) {
+      ctx.fillRect(x - 1, y, 1, 1); // wings spread
+      ctx.fillRect(x + 1, y, 1, 1);
+    } else {
+      ctx.fillRect(x, y - 1, 1, 2); // wings folded
+    }
   }
 }
 
@@ -712,7 +857,7 @@ function drawSmoke(camX, camY) {
     const size = 1 + Math.round(t * 3);
     ctx.fillStyle = p.gold
       ? `rgba(219,186,84,${(0.8 * (1 - t)).toFixed(2)})`
-      : `rgba(160,160,160,${(0.6 * (1 - t)).toFixed(2)})`;
+      : `rgba(235,235,235,${(0.7 * (1 - t)).toFixed(2)})`;
     ctx.fillRect(
       Math.round(projX(p.wx, p.wy) - camX - size / 2),
       Math.round(projY(p.wx, p.wy, p.wz) - camY - size / 2),
@@ -931,8 +1076,10 @@ function update(dt) {
     }
   }
 
+  worldTime += dt;
   updateTracks(dt);
   updateSmoke(dt);
+  updateButterflies(dt);
   updateCrops(dt);
 }
 
@@ -961,13 +1108,16 @@ function draw() {
   const camX = Math.round(cam.x);
   const camY = Math.round(cam.y);
 
-  // Void beyond the map edges
-  ctx.fillStyle = "#10141a";
+  // Sky beyond the map edges: the farm floats like a little island
+  ctx.fillStyle = SKY;
   ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  drawSun();
+  drawClouds(camX, camY);
 
   ctx.drawImage(mapCanvas, -MAP_OFFSET_X - camX, -MAP_OFFSET_Y - camY);
   drawScene(camX, camY);
   drawSmoke(camX, camY);
+  drawButterflies(camX, camY);
 
   screenCtx.drawImage(view, 0, 0, screenCanvas.width, screenCanvas.height);
 
