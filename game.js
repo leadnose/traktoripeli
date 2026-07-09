@@ -799,8 +799,9 @@ function paintTile(tx, ty) {
       mapCtx.fillRect(Math.round(p.x), Math.round(p.y), 1, 1);
     }
 
-    // Little meadow flowers: four petals around a yellow heart
-    if (rand() < 0.5) {
+    // Little meadow flowers: four petals around a yellow heart; forests
+    // keep their floor bare
+    if (!forestTiles.has(ty * MAP_TILES + tx) && rand() < 0.5) {
       const p = mp(
         (tx + 0.2 + rand() * 0.6) * TILE,
         (ty + 0.2 + rand() * 0.6) * TILE
@@ -996,6 +997,7 @@ function updateCrops(dt) {
 const roadSamples = [];
 const roadTiles = new Set();
 const patches = [];
+const forestTiles = new Set(); // tile indexes under forest stands
 const tileKey = (wx, wy) => ((wy / TILE) | 0) * MAP_TILES + ((wx / TILE) | 0);
 const ROAD_COLOR = "#c09a66";
 const BRIDGE_COLOR = "#9a7442"; // road surface where it crosses water
@@ -1145,9 +1147,9 @@ function makeMap() {
   }
 
   // Field patches next: the road network is routed to them afterwards.
-  // Patches are added until fields cover about half the dry land (a little
-  // over, since the farm clearing and road carving eat some back).
-  const targetFieldTiles = (MAP_TILES * MAP_TILES - waterTiles) * 0.53;
+  // How much of the dry land is farmed varies per seed; the farm clearing
+  // and road carving eat a little of it back.
+  const targetFieldTiles = (MAP_TILES * MAP_TILES - waterTiles) * (0.2 + rand() * 0.45);
   let fieldTiles = 0;
   for (let i = 0; i < 400 && fieldTiles < targetFieldTiles; i++) {
     const px = 1 + ((rand() * (MAP_TILES - 13)) | 0);
@@ -1358,6 +1360,27 @@ function makeMap() {
     }
   }
 
+  // Forest stands: how much of the land is forested varies per seed. Blobs
+  // grow on free grass; only the tiles are marked here (darker floor and
+  // minimap color) — the trees themselves are planted after the map exists.
+  const forestTarget = (MAP_TILES * MAP_TILES - waterTiles) * (0.08 + rand() * 0.35);
+  for (let tries = 0; forestTiles.size < forestTarget && tries < 600; tries++) {
+    const cx = 2 + ((rand() * (MAP_TILES - 4)) | 0);
+    const cy = 2 + ((rand() * (MAP_TILES - 4)) | 0);
+    if (tiles[cy][cx] !== 0) continue;
+    if (Math.hypot((cx + 0.5) * TILE - FARM.x, (cy + 0.5) * TILE - FARM.y) < FARM_RADIUS + 40)
+      continue;
+    const r = 2.5 + rand() * 4;
+    for (let ty = Math.max(0, Math.floor(cy - r)); ty <= Math.min(MAP_TILES - 1, Math.ceil(cy + r)); ty++)
+      for (let tx = Math.max(0, Math.floor(cx - r)); tx <= Math.min(MAP_TILES - 1, Math.ceil(cx + r)); tx++)
+        if (
+          tiles[ty][tx] === 0 &&
+          Math.hypot(tx - cx, ty - cy) < r * (0.7 + rand() * 0.6) &&
+          Math.hypot((tx + 0.5) * TILE - FARM.x, (ty + 0.5) * TILE - FARM.y) > FARM_RADIUS + 40
+        )
+          forestTiles.add(ty * MAP_TILES + tx);
+  }
+
   // Back-to-front so nearer hills paint over the ones behind them. paintTile
   // skips the per-tile dithering: the whole canvas gets one pass at the end.
   for (let s = 0; s <= 2 * (MAP_TILES - 1); s++) {
@@ -1465,6 +1488,7 @@ const MINIMAP_COLORS = ["#4fa83e", "#a87e50", "#8a6540", "#90c83c", "#3d7dc4"];
 function minimapTile(tx, ty) {
   const type = tiles[ty][tx];
   let color = MINIMAP_COLORS[type];
+  if (type === 0 && forestTiles.has(ty * MAP_TILES + tx)) color = "#2f7a2c";
   if (type === 3 && cropStage(growth[ty][tx]) >= 3) color = "#e3c355";
   minimapCtx.fillStyle = color;
   minimapCtx.fillRect(tx - ty + MAP_TILES - 1, (tx + ty) >> 1, 2, 1);
@@ -1510,15 +1534,72 @@ const TREE_BLOBS = [
   { blob: true, x: -1.3, y: 1.3, z: 10.2, r: 2.1, color: "#7cd678", bias: 0.1 },
 ];
 
+// Conifers are evergreen: their colors stay put through the seasons.
+// Spruce: a tall narrow cone of tapering tiers.
+const CONIFER_BOXES = [
+  { x0: -0.7, x1: 0.7, y0: -0.7, y1: 0.7, z0: 0.0, z1: 2.4, color: "#7a4f30" }, // trunk
+];
+const SPRUCE_BLOBS = [
+  { blob: true, x: 0, y: 0, z: 3.0, r: 2.6, color: "#2c6330" },
+  { blob: true, x: 0, y: 0, z: 5.6, r: 2.0, color: "#316936", bias: 0.05 },
+  { blob: true, x: 0, y: 0, z: 7.9, r: 1.5, color: "#376f3a", bias: 0.1 },
+  { blob: true, x: 0, y: 0, z: 9.9, r: 1.0, color: "#3d753e", bias: 0.15 },
+  { blob: true, x: 0, y: 0, z: 11.4, r: 0.55, color: "#427a42", bias: 0.2 },
+];
+// Fir: broader and softer, with a blue-green cast
+const FIR_BLOBS = [
+  { blob: true, x: 0, y: 0, z: 3.0, r: 3.2, color: "#35714b" },
+  { blob: true, x: 0, y: 0, z: 5.8, r: 2.5, color: "#3a7850", bias: 0.05 },
+  { blob: true, x: 0, y: 0, z: 8.3, r: 1.8, color: "#407e54", bias: 0.1 },
+  { blob: true, x: 0, y: 0, z: 10.3, r: 1.0, color: "#468457", bias: 0.15 },
+];
+
+const TREE_KINDS = [
+  { boxes: TREE_BOXES, blobs: TREE_BLOBS }, // deciduous, turns with the seasons
+  { boxes: CONIFER_BOXES, blobs: SPRUCE_BLOBS },
+  { boxes: CONIFER_BOXES, blobs: FIR_BLOBS },
+];
+
 const trees = [];
-for (let attempts = 0; trees.length < 150 && attempts < 6000; attempts++) {
+
+// Dense stands on the forest tiles; roads passing through keep clearings
+for (const k of forestTiles) {
+  const ftx = k % MAP_TILES;
+  const fty = (k / MAP_TILES) | 0;
+  const n = 2 + ((rand() * 2) | 0);
+  for (let i = 0; i < n; i++) {
+    const wx = (ftx + 0.05 + rand() * 0.9) * TILE;
+    const wy = (fty + 0.05 + rand() * 0.9) * TILE;
+    if (roadTiles.has(tileKey(wx, wy))) continue;
+    // Forests are conifer-heavy: birches among the spruce and fir
+    const r = rand();
+    trees.push({
+      wx,
+      wy,
+      angle: rand() * Math.PI * 2,
+      kind: r < 0.35 ? 0 : r < 0.7 ? 1 : 2,
+    });
+  }
+}
+
+// Lone trees scattered over the open meadows
+const loneTarget = trees.length + 70;
+for (let attempts = 0; trees.length < loneTarget && attempts < 5000; attempts++) {
   const wx = 24 + rand() * (MAP_SIZE - 48);
   const wy = 24 + rand() * (MAP_SIZE - 48);
   if (tileTypeAt(wx, wy) !== 0) continue; // grass only, never on a field
+  if (forestTiles.has(tileKey(wx, wy))) continue; // stands are planted above
   if (roadTiles.has(tileKey(wx, wy))) continue; // and never on a road
   if (Math.hypot(wx - FARM.x, wy - FARM.y) < FARM_RADIUS + 30) continue;
   if (trees.some((t) => Math.hypot(t.wx - wx, t.wy - wy) < 20)) continue;
-  trees.push({ wx, wy, angle: rand() * Math.PI * 2 });
+  // Open meadows favor lone deciduous trees, with the odd conifer
+  const r = rand();
+  trees.push({
+    wx,
+    wy,
+    angle: rand() * Math.PI * 2,
+    kind: r < 0.6 ? 0 : r < 0.85 ? 1 : 2,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1898,8 +1979,9 @@ function drawScene(camX, camY) {
   makeRoundItems(items, FARM_SHAPES, FARM.x, FARM.y, FARM.angle, 0, camX, camY);
   for (const t of trees) {
     if (!onScreen(t.wx, t.wy, camX, camY)) continue;
-    makeItems(items, TREE_BOXES, t.wx, t.wy, t.angle, 0, camX, camY);
-    makeRoundItems(items, TREE_BLOBS, t.wx, t.wy, t.angle, 0, camX, camY);
+    const kind = TREE_KINDS[t.kind];
+    makeItems(items, kind.boxes, t.wx, t.wy, t.angle, 0, camX, camY);
+    makeRoundItems(items, kind.blobs, t.wx, t.wy, t.angle, 0, camX, camY);
   }
   for (const b of bushes) {
     if (!onScreen(b.wx, b.wy, camX, camY)) continue;
