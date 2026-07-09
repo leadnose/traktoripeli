@@ -144,6 +144,44 @@ function shade(color, k) {
 }
 
 // ---------------------------------------------------------------------------
+// Ordered dithering: posterize colors to coarse levels and dither between
+// them with a Bayer matrix, the classic pixel-art way to draw gradients.
+// ---------------------------------------------------------------------------
+
+const BAYER = [
+  [0, 8, 2, 10],
+  [12, 4, 14, 6],
+  [3, 11, 1, 9],
+  [15, 7, 13, 5],
+];
+const DITHER_STEP = 24; // size of one posterized color level
+
+function ditherRegion(c2d, x, y, w, h) {
+  x = Math.max(0, Math.floor(x));
+  y = Math.max(0, Math.floor(y));
+  w = Math.min(c2d.canvas.width - x, Math.ceil(w));
+  h = Math.min(c2d.canvas.height - y, Math.ceil(h));
+  if (w <= 0 || h <= 0) return;
+  const img = c2d.getImageData(x, y, w, h);
+  const data = img.data;
+  for (let py = 0; py < h; py++) {
+    for (let px = 0; px < w; px++) {
+      const i = (py * w + px) * 4;
+      if (data[i + 3] === 0) continue;
+      // Threshold from the absolute canvas position, so re-dithering a
+      // repainted region is stable and lines up with its surroundings
+      const t = ((BAYER[(y + py) & 3][(x + px) & 3] + 0.5) / 16) * DITHER_STEP;
+      for (let ch = 0; ch < 3; ch++) {
+        const v = data[i + ch];
+        const base = Math.floor(v / DITHER_STEP) * DITHER_STEP;
+        data[i + ch] = Math.min(255, base + (v - base > t ? DITHER_STEP : 0));
+      }
+    }
+  }
+  c2d.putImageData(img, x, y);
+}
+
+// ---------------------------------------------------------------------------
 // Ground map (prerendered once)
 // ---------------------------------------------------------------------------
 
@@ -252,7 +290,23 @@ function fieldPath(P, rounded) {
   return path;
 }
 
+// Repaint one tile, then re-dither just that neighborhood of the map canvas
 function drawTile(tx, ty) {
+  paintTile(tx, ty);
+  const c = [
+    mp(tx * TILE, ty * TILE),
+    mp((tx + 1) * TILE, ty * TILE),
+    mp((tx + 1) * TILE, (ty + 1) * TILE),
+    mp(tx * TILE, (ty + 1) * TILE),
+  ];
+  const xs = c.map((p) => p.x);
+  const ys = c.map((p) => p.y);
+  const x0 = Math.min(...xs) - 2;
+  const y0 = Math.min(...ys) - 8; // crops draw a few pixels above the ground
+  ditherRegion(mapCtx, x0, y0, Math.max(...xs) - x0 + 4, Math.max(...ys) - y0 + 4);
+}
+
+function paintTile(tx, ty) {
   const type = tiles[ty][tx];
   const kc = groundShade((tx + 0.5) * TILE, (ty + 0.5) * TILE);
 
@@ -525,6 +579,10 @@ function makeMap() {
     mapCtx.closePath();
     mapCtx.fill();
   }
+
+  // Dither everything painted after the tiles (yard, cliffs); tiles are
+  // already dithered and the pass leaves them unchanged
+  ditherRegion(mapCtx, 0, 0, mapCanvas.width, mapCanvas.height);
 }
 
 makeMap();
@@ -934,9 +992,19 @@ function updateTracks(dt) {
 
 let worldTime = 0;
 
-const SKY = ctx.createLinearGradient(0, 0, 0, VIEW_H);
-SKY.addColorStop(0, "#7ac9ef");
-SKY.addColorStop(1, "#c8ecf8");
+// The sky gradient is prerendered once so it can be dithered
+const skyCanvas = document.createElement("canvas");
+skyCanvas.width = VIEW_W;
+skyCanvas.height = VIEW_H;
+{
+  const skyCtx = skyCanvas.getContext("2d");
+  const g = skyCtx.createLinearGradient(0, 0, 0, VIEW_H);
+  g.addColorStop(0, "#7ac9ef");
+  g.addColorStop(1, "#c8ecf8");
+  skyCtx.fillStyle = g;
+  skyCtx.fillRect(0, 0, VIEW_W, VIEW_H);
+  ditherRegion(skyCtx, 0, 0, VIEW_W, VIEW_H);
+}
 
 function drawSun() {
   ctx.fillStyle = "rgba(255,240,170,0.4)";
@@ -1327,8 +1395,7 @@ function draw() {
   const camY = Math.round(cam.y);
 
   // Sky beyond the map edges: the farm floats like a little island
-  ctx.fillStyle = SKY;
-  ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  ctx.drawImage(skyCanvas, 0, 0);
   drawSun();
   drawClouds(camX, camY);
 
