@@ -583,24 +583,31 @@ function groundShade(wx, wy) {
 
 function isField(tx, ty) {
   if (tx < 0 || ty < 0 || tx >= MAP_TILES || ty >= MAP_TILES) return false;
-  return tiles[ty][tx] >= 1;
+  const t = tiles[ty][tx];
+  return t >= 1 && t <= 3;
 }
 
-// Corners of a field tile that are outer corners of the whole patch
-// (everything around them is grass); those corners get rounded off.
-function fieldGeometry(tx, ty) {
+function isWater(tx, ty) {
+  if (tx < 0 || ty < 0 || tx >= MAP_TILES || ty >= MAP_TILES) return false;
+  return tiles[ty][tx] === 4;
+}
+
+// Corners of a tile that are outer corners of its patch (nothing of the same
+// kind around them); those corners get rounded off. Works for both field
+// patches and water bodies via the `same` predicate.
+function tileGeometry(tx, ty, same) {
   const P = [
     mp(tx * TILE, ty * TILE),
     mp((tx + 1) * TILE, ty * TILE),
     mp((tx + 1) * TILE, (ty + 1) * TILE),
     mp(tx * TILE, (ty + 1) * TILE),
   ];
-  const grass = (ax, ay) => !isField(ax, ay);
+  const other = (ax, ay) => !same(ax, ay);
   const rounded = [
-    grass(tx, ty - 1) && grass(tx - 1, ty) && grass(tx - 1, ty - 1),
-    grass(tx, ty - 1) && grass(tx + 1, ty) && grass(tx + 1, ty - 1),
-    grass(tx + 1, ty) && grass(tx, ty + 1) && grass(tx + 1, ty + 1),
-    grass(tx - 1, ty) && grass(tx, ty + 1) && grass(tx - 1, ty + 1),
+    other(tx, ty - 1) && other(tx - 1, ty) && other(tx - 1, ty - 1),
+    other(tx, ty - 1) && other(tx + 1, ty) && other(tx + 1, ty - 1),
+    other(tx + 1, ty) && other(tx, ty + 1) && other(tx + 1, ty + 1),
+    other(tx - 1, ty) && other(tx, ty + 1) && other(tx - 1, ty + 1),
   ];
   return { P, rounded };
 }
@@ -676,7 +683,7 @@ function drawTile(tx, ty) {
   // front of it: redraw their crops.
   for (const [nx, ny] of [[tx + 1, ty], [tx, ty + 1], [tx + 1, ty + 1]]) {
     if (nx >= MAP_TILES || ny >= MAP_TILES || tiles[ny][nx] !== 3) continue;
-    const g = fieldGeometry(nx, ny);
+    const g = tileGeometry(nx, ny, isField);
     mapCtx.save();
     mapCtx.clip(fieldPath(g.P, g.rounded));
     drawCropsOn(nx, ny, groundShade((nx + 0.5) * TILE, (ny + 0.5) * TILE));
@@ -698,7 +705,7 @@ function drawTile(tx, ty) {
     mapCtx.clip();
     for (const s of stamps) {
       const c = mp(s.x, s.y);
-      mapCtx.fillStyle = shade(ROAD_COLOR, groundShade(s.x, s.y));
+      mapCtx.fillStyle = shade(s.color, groundShade(s.x, s.y));
       mapCtx.beginPath();
       mapCtx.ellipse(c.x, c.y, s.r * 1.5, s.r * 0.75, 0, 0, Math.PI * 2);
       mapCtx.fill();
@@ -811,6 +818,60 @@ function paintTile(tx, ty) {
     return;
   }
 
+  if (type === 4) {
+    // Water: a level fill across the whole tile, self-stroked so borders
+    // between water tiles stay seam-free, with grass crescents rounding the
+    // shore corners and pale ripple flecks on top
+    const w0 = mp(tx * TILE, ty * TILE);
+    const w1 = mp((tx + 1) * TILE, ty * TILE);
+    const w2 = mp((tx + 1) * TILE, (ty + 1) * TILE);
+    const w3 = mp(tx * TILE, (ty + 1) * TILE);
+    mapCtx.fillStyle = "#3d7dc4";
+    mapCtx.beginPath();
+    mapCtx.moveTo(w0.x, w0.y);
+    mapCtx.lineTo(w1.x, w1.y);
+    mapCtx.lineTo(w2.x, w2.y);
+    mapCtx.lineTo(w3.x, w3.y);
+    mapCtx.closePath();
+    mapCtx.fill();
+    mapCtx.strokeStyle = mapCtx.fillStyle;
+    mapCtx.lineWidth = 1;
+    mapCtx.stroke();
+
+    mapCtx.fillStyle = "#6fa9dd"; // ripples
+    for (let i = 0; i < 5; i++) {
+      const p = mp((tx + 0.15 + rand() * 0.7) * TILE, (ty + 0.15 + rand() * 0.7) * TILE);
+      mapCtx.fillRect(Math.round(p.x), Math.round(p.y), 2, 1);
+    }
+
+    const { P, rounded } = tileGeometry(tx, ty, isWater);
+    const cornerTile = [[tx, ty], [tx + 1, ty], [tx + 1, ty + 1], [tx, ty + 1]];
+    for (let i = 0; i < 4; i++) {
+      if (!rounded[i]) continue;
+      const cur = P[i];
+      const prev = P[(i + 3) % 4];
+      const next = P[(i + 1) % 4];
+      const ax = cur.x + (prev.x - cur.x) * CORNER_T;
+      const ay = cur.y + (prev.y - cur.y) * CORNER_T;
+      const bx = cur.x + (next.x - cur.x) * CORNER_T;
+      const by = cur.y + (next.y - cur.y) * CORNER_T;
+      mapCtx.fillStyle = shade(
+        GRASS,
+        groundShade(cornerTile[i][0] * TILE, cornerTile[i][1] * TILE)
+      );
+      mapCtx.beginPath();
+      mapCtx.moveTo(ax, ay);
+      mapCtx.quadraticCurveTo(cur.x, cur.y, bx, by);
+      mapCtx.lineTo(cur.x, cur.y);
+      mapCtx.closePath();
+      mapCtx.fill();
+      mapCtx.strokeStyle = mapCtx.fillStyle;
+      mapCtx.lineWidth = 1;
+      mapCtx.stroke();
+    }
+    return;
+  }
+
   // Field tile: dirt across the whole tile, seamless against neighboring
   // dirt tiles thanks to the sub-quads' own outline overdraw
   subQuads(DIRT);
@@ -818,7 +879,7 @@ function paintTile(tx, ty) {
   // Round the patch's outer corners by painting the cut crescents back to
   // grass; their outer edges only ever border grass tiles, so the overdraw
   // never bleeds onto dirt
-  const { P, rounded } = fieldGeometry(tx, ty);
+  const { P, rounded } = tileGeometry(tx, ty, isField);
   const cornerTile = [[tx, ty], [tx + 1, ty], [tx + 1, ty + 1], [tx, ty + 1]];
   for (let i = 0; i < 4; i++) {
     if (!rounded[i]) continue;
@@ -937,9 +998,21 @@ const roadTiles = new Set();
 const patches = [];
 const tileKey = (wx, wy) => ((wy / TILE) | 0) * MAP_TILES + ((wx / TILE) | 0);
 const ROAD_COLOR = "#c09a66";
-// Road stamps by tile index: roads are painted over the tiles, so whenever a
-// tile repaints (field work, seasons) its road surface must be restored
+const BRIDGE_COLOR = "#9a7442"; // road surface where it crosses water
+const DITCH_COLOR = "#3a6ea8"; // water-filled drainage ditches
+// Stamps by tile index: roads and ditches are painted over the tiles, so
+// whenever a tile repaints (field work, seasons) they must be restored
 const roadStamps = new Map();
+
+function addStamp(x, y, r, color) {
+  const touched = new Set();
+  for (const dx of [-r, r])
+    for (const dy of [-r, r]) touched.add(tileKey(x + dx, y + dy));
+  for (const k of touched) {
+    if (!roadStamps.has(k)) roadStamps.set(k, []);
+    roadStamps.get(k).push({ x, y, r, color });
+  }
+}
 // Same for the farmyard's trodden dirt: its speckles are kept so the yard
 // can be redrawn identically over a repainted tile
 const yardPixels = [];
@@ -951,16 +1024,141 @@ function makeMap() {
     growth.push(new Array(MAP_TILES).fill(0));
   }
 
-  // Field patches first: the road network is routed to them afterwards.
-  // Patches are added until fields cover about half the map (a little over,
-  // since the farm clearing and road carving eat some back).
-  const targetFieldTiles = MAP_TILES * MAP_TILES * 0.53;
+  // Water first: seas flood low corners, lakes and ponds sit in hollows,
+  // and rivers wander across following the low ground
+  const lowEnough = (tx, ty, limit = 3.5) =>
+    terrainHeight((tx + 0.5) * TILE, (ty + 0.5) * TILE) < limit;
+  const awayFromFarm = (tx, ty) =>
+    Math.hypot((tx + 0.5) * TILE - FARM.x, (ty + 0.5) * TILE - FARM.y) >
+    FARM_RADIUS + 48;
+  let waterTiles = 0;
+  const setWater = (tx, ty) => {
+    if (tx < 0 || ty < 0 || tx >= MAP_TILES || ty >= MAP_TILES) return;
+    if (!awayFromFarm(tx, ty)) return;
+    if (tiles[ty][tx] === 4) return;
+    tiles[ty][tx] = 4;
+    waterTiles++;
+  };
+  // How watery this map is varies per seed, anywhere up to ~60%
+  const waterTarget = MAP_TILES * MAP_TILES * (0.05 + rand() * 0.55);
+
+  // Seas: each corner has a chance of flooding its low ground
+  for (const [cx, cy] of [
+    [0, 0],
+    [MAP_TILES - 1, 0],
+    [0, MAP_TILES - 1],
+    [MAP_TILES - 1, MAP_TILES - 1],
+  ]) {
+    if (rand() < 0.5) continue;
+    const reach = 7 + rand() * 6;
+    for (let ty = 0; ty < MAP_TILES; ty++)
+      for (let tx = 0; tx < MAP_TILES; tx++)
+        if (Math.hypot(tx - cx, ty - cy) < reach * (0.75 + rand() * 0.5) && lowEnough(tx, ty))
+          setWater(tx, ty);
+  }
+
+  // Lakes: irregular blobs in hollows. The first is a big one — several
+  // overlapping blobs around a center — the rest are ordinary.
+  for (let lakes = 0, tries = 0; lakes < 4 && tries < 400; tries++) {
+    const big = lakes === 0;
+    const cx = 6 + ((rand() * (MAP_TILES - 12)) | 0);
+    const cy = 6 + ((rand() * (MAP_TILES - 12)) | 0);
+    if (!lowEnough(cx, cy) || !awayFromFarm(cx, cy)) continue;
+    for (let blob = 0; blob < (big ? 5 : 1); blob++) {
+      const bx = cx + (big ? (rand() - 0.5) * 8 : 0);
+      const by = cy + (big ? (rand() - 0.5) * 8 : 0);
+      const r = (big ? 3.5 : 2) + rand() * 2.5;
+      for (let ty = Math.floor(by - r - 1); ty <= by + r + 1; ty++)
+        for (let tx = Math.floor(bx - r - 1); tx <= bx + r + 1; tx++)
+          if (Math.hypot(tx - bx, ty - by) < r * (0.7 + rand() * 0.6) && lowEnough(tx, ty))
+            setWater(tx, ty);
+    }
+    lakes++;
+  }
+
+  // Ponds: little one-or-two tile dots
+  for (let ponds = 0, tries = 0; ponds < 5 && tries < 200; tries++) {
+    const tx = 2 + ((rand() * (MAP_TILES - 4)) | 0);
+    const ty = 2 + ((rand() * (MAP_TILES - 4)) | 0);
+    if (!lowEnough(tx, ty) || !awayFromFarm(tx, ty) || tiles[ty][tx] === 4) continue;
+    setWater(tx, ty);
+    if (rand() < 0.5) setWater(tx + 1, ty);
+    ponds++;
+  }
+
+  // Rivers: continuous channels that enter at one edge and flow across,
+  // steering toward low ground with a capped turn rate. The channel is a
+  // smooth world-space curve — free to run diagonally — and every tile it
+  // touches becomes water, so the course stays connected the whole way.
+  for (let i = 0; i < 2; i++) {
+    let x, y, dir0;
+    if (rand() < 0.5) {
+      x = MAP_SIZE * (0.15 + rand() * 0.7);
+      y = 2;
+      dir0 = Math.PI / 2; // enters the top edge, flows south
+    } else {
+      x = 2;
+      y = MAP_SIZE * (0.15 + rand() * 0.7);
+      dir0 = 0; // enters the left edge, flows east
+    }
+    let dir = dir0;
+    const halfW = 9 + rand() * 5;
+    for (let step = 0; step < 400; step++) {
+      // Flood the channel's width around this point
+      for (let oy = -halfW; oy <= halfW; oy += 8)
+        for (let ox = -halfW; ox <= halfW; ox += 8)
+          if (Math.hypot(ox, oy) <= halfW)
+            setWater(((x + ox) / TILE) | 0, ((y + oy) / TILE) | 0);
+      // Steer toward the lowest ground ahead, but never double back
+      let bestDir = dir;
+      let bestScore = Infinity;
+      for (const dd of [-0.3, 0, 0.3]) {
+        const nd = dir + dd;
+        const score = terrainHeight(x + Math.cos(nd) * 24, y + Math.sin(nd) * 24) + rand() * 2;
+        if (score < bestScore) {
+          bestScore = score;
+          bestDir = nd;
+        }
+      }
+      dir += Math.max(-0.12, Math.min(0.12, bestDir - dir));
+      const dev = Math.atan2(Math.sin(dir - dir0), Math.cos(dir - dir0));
+      if (dev > 0.9) dir = dir0 + 0.9;
+      else if (dev < -0.9) dir = dir0 - 0.9;
+      x += Math.cos(dir) * 6;
+      y += Math.sin(dir) * 6;
+      if (x < -8 || x > MAP_SIZE + 8 || y < -8 || y > MAP_SIZE + 8) break;
+    }
+  }
+
+  // More lakes until this map's water share is reached; late attempts
+  // accept ever higher ground so even waterlogged targets fill up
+  for (let tries = 0; waterTiles < waterTarget && tries < 600; tries++) {
+    const limit = 3.5 + (tries / 600) * 14;
+    const cx = 3 + ((rand() * (MAP_TILES - 6)) | 0);
+    const cy = 3 + ((rand() * (MAP_TILES - 6)) | 0);
+    if (!lowEnough(cx, cy, limit) || !awayFromFarm(cx, cy)) continue;
+    const r = 2.5 + rand() * 3.5;
+    for (let ty = Math.floor(cy - r - 1); ty <= cy + r + 1; ty++)
+      for (let tx = Math.floor(cx - r - 1); tx <= cx + r + 1; tx++)
+        if (Math.hypot(tx - cx, ty - cy) < r * (0.7 + rand() * 0.6) && lowEnough(tx, ty, limit))
+          setWater(tx, ty);
+  }
+
+  // Field patches next: the road network is routed to them afterwards.
+  // Patches are added until fields cover about half the dry land (a little
+  // over, since the farm clearing and road carving eat some back).
+  const targetFieldTiles = (MAP_TILES * MAP_TILES - waterTiles) * 0.53;
   let fieldTiles = 0;
   for (let i = 0; i < 400 && fieldTiles < targetFieldTiles; i++) {
     const px = 1 + ((rand() * (MAP_TILES - 13)) | 0);
     const py = 1 + ((rand() * (MAP_TILES - 13)) | 0);
     const pw = 5 + ((rand() * 7) | 0);
     const ph = 5 + ((rand() * 7) | 0);
+    let wet = false;
+    for (let ty = py; ty < py + ph && !wet; ty++)
+      for (let tx = px; tx < px + pw && !wet; tx++)
+        if (tiles[ty][tx] === 4) wet = true;
+    if (wet) continue; // fields keep out of the water
     patches.push({ px, py, pw, ph });
     for (let ty = py; ty < py + ph; ty++)
       for (let tx = px; tx < px + pw; tx++)
@@ -968,6 +1166,35 @@ function makeMap() {
           tiles[ty][tx] = 1;
           fieldTiles++;
         }
+  }
+
+  // Water-filled drainage ditches along some field edges; roads painted
+  // over them later read as culverts. Registered as stamps so tile
+  // repaints restore them.
+  const ditchSamples = [];
+  for (const p of patches) {
+    const x0 = p.px * TILE;
+    const x1 = (p.px + p.pw) * TILE;
+    const y0 = p.py * TILE;
+    const y1 = (p.py + p.ph) * TILE;
+    const off = 4.5;
+    for (const [sx, sy, ex, ey] of [
+      [x0, y0 - off, x1, y0 - off],
+      [x0, y1 + off, x1, y1 + off],
+      [x0 - off, y0, x0 - off, y1],
+      [x1 + off, y0, x1 + off, y1],
+    ]) {
+      if (rand() > 0.4) continue;
+      const len = Math.hypot(ex - sx, ey - sy);
+      for (let s = 0; s <= len; s += 1.6) {
+        const wx = sx + ((ex - sx) * s) / len;
+        const wy = sy + ((ey - sy) * s) / len;
+        if (tileTypeAt(wx, wy) !== 0) continue; // never across fields or water
+        if (Math.hypot(wx - FARM.x, wy - FARM.y) < FARM_RADIUS * 1.9) continue;
+        ditchSamples.push({ x: wx, y: wy });
+        addStamp(wx, wy, 1.1, DITCH_COLOR);
+      }
+    }
   }
 
   // Road network: main roads from the farm out to the map edges, then a spur
@@ -1103,14 +1330,14 @@ function makeMap() {
       roadSamples.push(p);
       for (const dx of [-5, 0, 5])
         for (const dy of [-5, 0, 5]) roadTiles.add(tileKey(p.x + dx, p.y + dy));
-      // Remember the stamp on every tile its ellipse touches
-      const touched = new Set();
-      for (const dx of [-road.r, road.r])
-        for (const dy of [-road.r, road.r]) touched.add(tileKey(p.x + dx, p.y + dy));
-      for (const k of touched) {
-        if (!roadStamps.has(k)) roadStamps.set(k, []);
-        roadStamps.get(k).push({ x: p.x, y: p.y, r: road.r });
-      }
+      // Remember the stamp on every tile its ellipse touches; over water the
+      // surface is bridge planks instead of packed dirt
+      addStamp(
+        p.x,
+        p.y,
+        road.r,
+        tileTypeAt(p.x, p.y) === 4 ? BRIDGE_COLOR : ROAD_COLOR
+      );
       if (road.entry) continue; // entry paths touch the field edge on purpose
       for (const dx of [-4, 0, 4]) {
         for (const dy of [-4, 0, 4]) {
@@ -1127,7 +1354,7 @@ function makeMap() {
   for (let ty = 0; ty < MAP_TILES; ty++) {
     for (let tx = 0; tx < MAP_TILES; tx++) {
       const d = Math.hypot((tx + 0.5) * TILE - FARM.x, (ty + 0.5) * TILE - FARM.y);
-      if (d < FARM_RADIUS + 24) tiles[ty][tx] = 0;
+      if (d < FARM_RADIUS + 24 && tiles[ty][tx] !== 4) tiles[ty][tx] = 0;
     }
   }
 
@@ -1137,6 +1364,15 @@ function makeMap() {
     for (let ty = Math.max(0, s - MAP_TILES + 1); ty <= Math.min(MAP_TILES - 1, s); ty++) {
       paintTile(s - ty, ty);
     }
+  }
+
+  // Ditches go down before the roads, so crossings read as culverts
+  for (const d of ditchSamples) {
+    const c = mp(d.x, d.y);
+    mapCtx.fillStyle = shade(DITCH_COLOR, groundShade(d.x, d.y));
+    mapCtx.beginPath();
+    mapCtx.ellipse(c.x, c.y, 1.1 * 1.5, 1.1 * 0.75, 0, 0, Math.PI * 2);
+    mapCtx.fill();
   }
 
   // Roads: stamped as overlapping ground ellipses so they follow the hills,
@@ -1154,7 +1390,10 @@ function makeMap() {
   for (const road of roads) {
     for (const p of road.pts) {
       const c = mp(p.x, p.y);
-      mapCtx.fillStyle = shade(ROAD_COLOR, groundShade(p.x, p.y));
+      mapCtx.fillStyle = shade(
+        tileTypeAt(p.x, p.y) === 4 ? BRIDGE_COLOR : ROAD_COLOR,
+        groundShade(p.x, p.y)
+      );
       mapCtx.beginPath();
       mapCtx.ellipse(c.x, c.y, road.r * 1.5, road.r * 0.75, 0, 0, Math.PI * 2);
       mapCtx.fill();
@@ -1220,8 +1459,8 @@ minimapCanvas.width = MAP_TILES * 2;
 minimapCanvas.height = MAP_TILES;
 const minimapCtx = minimapCanvas.getContext("2d");
 
-// grass, field, plowed, seeded; ripe crops turn gold
-const MINIMAP_COLORS = ["#4fa83e", "#a87e50", "#8a6540", "#90c83c"];
+// grass, field, plowed, seeded, water; ripe crops turn gold
+const MINIMAP_COLORS = ["#4fa83e", "#a87e50", "#8a6540", "#90c83c", "#3d7dc4"];
 
 function minimapTile(tx, ty) {
   const type = tiles[ty][tx];
@@ -2097,7 +2336,8 @@ function implementOverField() {
   for (const [lx, ly] of points) {
     const wx = pose.x + lx * cos - ly * sin;
     const wy = pose.y + lx * sin + ly * cos;
-    if (tileTypeAt(wx, wy) >= 1) return true;
+    const tt = tileTypeAt(wx, wy);
+    if (tt >= 1 && tt <= 3) return true;
   }
   return false;
 }
@@ -2167,6 +2407,8 @@ function update(dt) {
   tractor.angle += angVel * dt;
 
   // Move on the ground plane
+  const prevX = tractor.x;
+  const prevY = tractor.y;
   tractor.x += cos * tractor.speed * dt;
   tractor.y += sin * tractor.speed * dt;
 
@@ -2174,6 +2416,16 @@ function update(dt) {
   const margin = 12;
   tractor.x = Math.max(margin, Math.min(MAP_SIZE - margin, tractor.x));
   tractor.y = Math.max(margin, Math.min(MAP_SIZE - margin, tractor.y));
+
+  // Water blocks the tractor, except where a road bridges it
+  if (
+    tileTypeAt(tractor.x, tractor.y) === 4 &&
+    !roadTiles.has(tileKey(tractor.x, tractor.y))
+  ) {
+    tractor.x = prevX;
+    tractor.y = prevY;
+    tractor.speed = 0;
+  }
 
   // A towed implement's wheels roll rather than skid, so the hitch's
   // sideways motion swings its heading toward the tractor's over time
