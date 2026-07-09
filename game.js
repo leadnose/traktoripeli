@@ -1483,6 +1483,11 @@ const SKY_BOTTOM_SEASONS = ["#c8ecf8", "#c2e8f2", "#ecdcc0"];
 let seasonQ = 0; // 0 = spring, 0.5 = summer, 1 = autumn (quantized)
 let seasonStep = -1;
 
+// The round is presented as a calendar: April 1st through October 31st
+const MONTH_NAMES = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+const SEASON_DAYS = 213; // days from Apr 1 to Oct 31
+const SEASON_BAR_COLORS = ["#6fce58", "#4fae4a", "#d99a33"];
+
 const mixCache = {};
 function mixHex(a, b, t) {
   const key = a + b + ((t * 64) | 0);
@@ -2024,22 +2029,33 @@ function draw() {
   screenCtx.fillText(`SEED ${SEED_TEXT}   [N] NEW MAP  [S] SET SEED  [R] RESTART`, 12, 20);
   screenCtx.fillText(`${fps.toFixed(0)} FPS`, 12, 36);
 
-  // Round timer, centered up top; flashes red for the last 30 seconds
-  const mins = Math.floor(timeLeft / 60);
-  const secs = Math.floor(timeLeft % 60);
-  screenCtx.font = "bold 16px monospace";
-  screenCtx.textAlign = "center";
-  screenCtx.fillStyle =
-    timeLeft < 30 && ((timeLeft * 2) | 0) % 2 === 0 ? "#ff5040" : "#ffffff";
-  screenCtx.fillText(`${mins}:${String(secs).padStart(2, "0")}`, screenCanvas.width / 2, 26);
-  screenCtx.font = "11px monospace";
-  screenCtx.fillStyle = "rgba(255,255,255,0.7)";
+  // Season calendar instead of a clock: the current date counts from spring
+  // toward the end date, with a progress bar in between. Flashes red for
+  // the last 30 seconds of the round.
+  const progress = 1 - timeLeft / ROUND_TIME;
+  const date = new Date(
+    2000, 3, 1 + Math.min(SEASON_DAYS, Math.floor(progress * (SEASON_DAYS + 1)))
+  );
+  const barW = 170;
+  const barH = 8;
+  const bx = (screenCanvas.width - barW) / 2;
+  const by = 14;
+  const flash = timeLeft < 30 && ((timeLeft * 2) | 0) % 2 === 0;
+  screenCtx.font = "bold 13px monospace";
+  screenCtx.textAlign = "right";
+  screenCtx.fillStyle = flash ? "#ff5040" : "#ffffff";
   screenCtx.fillText(
-    seasonQ < 0.25 ? "SPRING" : seasonQ < 0.7 ? "SUMMER" : "AUTUMN",
-    screenCanvas.width / 2,
-    42
+    `${MONTH_NAMES[date.getMonth()]} ${date.getDate()}`,
+    bx - 10,
+    by + barH
   );
   screenCtx.textAlign = "left";
+  screenCtx.fillStyle = "rgba(255,255,255,0.7)";
+  screenCtx.fillText("OCT 31", bx + barW + 10, by + barH);
+  screenCtx.fillStyle = "rgba(10,20,30,0.55)";
+  screenCtx.fillRect(bx - 1, by - 1, barW + 2, barH + 2);
+  screenCtx.fillStyle = flash ? "#ff5040" : seasonHex(SEASON_BAR_COLORS);
+  screenCtx.fillRect(bx, by, Math.round(barW * progress), barH);
 
   // Game over: final score and the all-time best list
   if (gameOver) {
@@ -2053,7 +2069,7 @@ function draw() {
     screenCtx.textAlign = "center";
     screenCtx.font = "bold 24px monospace";
     screenCtx.fillStyle = "#ffe66b";
-    screenCtx.fillText("TIME'S UP!", cx, y + 40);
+    screenCtx.fillText("OCT 31 — SEASON'S END", cx, y + 40);
     screenCtx.font = "bold 18px monospace";
     screenCtx.fillStyle = "#e8e8d8";
     screenCtx.fillText(`PROFIT: €${cash - START_CASH}`, cx, y + 72);
