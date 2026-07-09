@@ -150,14 +150,42 @@ function initAudio() {
 // ---------------------------------------------------------------------------
 
 const MUSIC_BASE = 440; // arpeggio around A4; the bass sits two octaves down
-const MUSIC_CHORDS = [
-  { root: 0, minor: false }, // A
-  { root: -3, minor: true }, // F#m
-  { root: -7, minor: false }, // D
-  { root: -5, minor: false }, // E
-];
 const ARP_PATTERN = [0, 1, 2, 3, 1, 2, 3, 2];
-const MUSIC_STEP_DUR = 60 / 104 / 2; // eighth notes at 104 BPM
+
+// The tune follows the season: spring is quick and bright, summer eases
+// into the familiar lazy progression, autumn slows down and turns minor
+const MUSIC_SEASONS = [
+  {
+    bpm: 112,
+    dur: 0.4,
+    chords: [
+      { root: 0, minor: false }, // A
+      { root: -7, minor: false }, // D
+      { root: 0, minor: false }, // A
+      { root: -5, minor: false }, // E
+    ],
+  },
+  {
+    bpm: 104,
+    dur: 0.5,
+    chords: [
+      { root: 0, minor: false }, // A
+      { root: -3, minor: true }, // F#m
+      { root: -7, minor: false }, // D
+      { root: -5, minor: false }, // E
+    ],
+  },
+  {
+    bpm: 88,
+    dur: 0.75,
+    chords: [
+      { root: -3, minor: true }, // F#m
+      { root: -7, minor: false }, // D
+      { root: 2, minor: true }, // Bm
+      { root: -5, minor: false }, // E
+    ],
+  },
+];
 
 function musicNote(freq, at, dur, vol) {
   const o = audio.ac.createOscillator();
@@ -181,15 +209,20 @@ function scheduleMusic() {
   while (audio.musicTime < audio.ac.currentTime + 0.25) {
     const step = audio.musicStep;
     const at = audio.musicTime;
-    const chord = MUSIC_CHORDS[((step / 8) | 0) % MUSIC_CHORDS.length];
+    // The season's arrangement is picked up at bar boundaries
+    if (step % 8 === 0 || !audio.musicSeason) {
+      audio.musicSeason = MUSIC_SEASONS[seasonQ < 0.33 ? 0 : seasonQ < 0.72 ? 1 : 2];
+    }
+    const cfg = audio.musicSeason;
+    const chord = cfg.chords[((step / 8) | 0) % cfg.chords.length];
     const tones = [0, 7, 12, 12 + (chord.minor ? 3 : 4)];
     const st = chord.root + tones[ARP_PATTERN[step % 8]];
-    musicNote(MUSIC_BASE * Math.pow(2, st / 12), at, 0.5, 0.055);
+    musicNote(MUSIC_BASE * Math.pow(2, st / 12), at, cfg.dur, 0.055);
     if (step % 4 === 0) {
-      musicNote((MUSIC_BASE / 4) * Math.pow(2, chord.root / 12), at, 0.9, 0.09);
+      musicNote((MUSIC_BASE / 4) * Math.pow(2, chord.root / 12), at, cfg.dur * 1.8, 0.09);
     }
     audio.musicStep++;
-    audio.musicTime += MUSIC_STEP_DUR;
+    audio.musicTime += 60 / cfg.bpm / 2;
   }
 }
 
