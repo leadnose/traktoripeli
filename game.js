@@ -454,6 +454,8 @@ for (let i = 0; i < 40; i++) {
   });
 }
 
+// No flattening under the farmyard: the buildings drape over the natural
+// terrain like everything else
 function terrainHeight(wx, wy) {
   let h = 0;
   for (const hill of HILLS) {
@@ -463,10 +465,7 @@ function terrainHeight(wx, wy) {
   h = 40 * Math.tanh(h / 40); // soft cap where hills stack
   const m = Math.min(wx, wy, MAP_SIZE - wx, MAP_SIZE - wy);
   const t = Math.max(0, Math.min(1, m / 40));
-  // Flat pad under the farmyard so the buildings sit level
-  const df = Math.hypot(wx - FARM.x, wy - FARM.y);
-  const tf = Math.max(0, Math.min(1, (df - FARM_RADIUS - 8) / 30));
-  return h * t * t * (3 - 2 * t) * tf * tf * (3 - 2 * tf);
+  return h * t * t * (3 - 2 * t);
 }
 
 // ---------------------------------------------------------------------------
