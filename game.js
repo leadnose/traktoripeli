@@ -530,58 +530,62 @@ function makeMap() {
     growth.push(new Array(MAP_TILES).fill(0));
   }
 
-  // Field patches first: the road network is routed to them afterwards
-  for (let i = 0; i < 40; i++) {
-    const px = 1 + ((Math.random() * (MAP_TILES - 7)) | 0);
-    const py = 1 + ((Math.random() * (MAP_TILES - 7)) | 0);
-    const pw = 2 + ((Math.random() * 4) | 0);
-    const ph = 2 + ((Math.random() * 4) | 0);
+  // Field patches first: the road network is routed to them afterwards.
+  // Patches are added until fields cover about half the map (a little over,
+  // since the farm clearing and road carving eat some back).
+  const targetFieldTiles = MAP_TILES * MAP_TILES * 0.53;
+  let fieldTiles = 0;
+  for (let i = 0; i < 400 && fieldTiles < targetFieldTiles; i++) {
+    const px = 1 + ((Math.random() * (MAP_TILES - 13)) | 0);
+    const py = 1 + ((Math.random() * (MAP_TILES - 13)) | 0);
+    const pw = 5 + ((Math.random() * 7) | 0);
+    const ph = 5 + ((Math.random() * 7) | 0);
     patches.push({ px, py, pw, ph });
     for (let ty = py; ty < py + ph; ty++)
-      for (let tx = px; tx < px + pw; tx++) tiles[ty][tx] = 1;
+      for (let tx = px; tx < px + pw; tx++)
+        if (tiles[ty][tx] === 0) {
+          tiles[ty][tx] = 1;
+          fieldTiles++;
+        }
   }
 
   // Road network: main roads from the farm out to the map edges, then a spur
-  // from the nearest existing road to each field. Roads steer like a vehicle
-  // with a capped turning rate, so they come out as fixed-radius arcs joined
-  // by straights instead of aimless wiggle.
+  // from the nearest existing road to each field. Roads run octilinearly —
+  // one 45-degree diagonal leg and one axis-aligned leg, in either order —
+  // like grid-country farm roads.
   const roads = [];
-  const net = [{ x: FARM.x, y: FARM.y, dir: undefined }];
-
-  const angDiff = (a, b) => Math.atan2(Math.sin(a - b), Math.cos(a - b));
+  const net = [{ x: FARM.x, y: FARM.y }];
 
   const traceRoad = (from, tx, ty, r) => {
-    const direct = Math.atan2(ty - from.y, tx - from.x);
-    let dir = direct;
-    if (from.dir !== undefined) {
-      // Branch off a junction along the road, whichever way points closer
-      dir =
-        Math.abs(angDiff(from.dir, direct)) <= Math.PI / 2
-          ? from.dir
-          : from.dir + Math.PI;
-    }
+    const dx = tx - from.x;
+    const dy = ty - from.y;
+    const diag = Math.min(Math.abs(dx), Math.abs(dy));
+    const legs = [
+      {
+        ux: Math.sign(dx) * Math.SQRT1_2,
+        uy: Math.sign(dy) * Math.SQRT1_2,
+        len: diag * Math.SQRT2,
+      },
+      Math.abs(dx) > Math.abs(dy)
+        ? { ux: Math.sign(dx), uy: 0, len: Math.abs(dx) - diag }
+        : { ux: 0, uy: Math.sign(dy), len: Math.abs(dy) - diag },
+    ];
+    if (Math.random() < 0.5) legs.reverse(); // bend early or bend late
     const pts = [];
     let x = from.x;
     let y = from.y;
-    let bestDist = Infinity;
-    let stall = 0;
-    for (let i = 0; i < 600; i++) {
-      const dist = Math.hypot(tx - x, ty - y);
-      if (dist < 6) break;
-      // If the target sits inside the turning circle the road would orbit
-      // it forever; give up once we stop getting closer
-      if (dist < bestDist - 0.5) {
-        bestDist = dist;
-        stall = 0;
-      } else if (++stall > 40) break;
-      const d = angDiff(Math.atan2(ty - y, tx - x), dir);
-      const turn = dist < 25 ? 0.15 : 0.05; // broad arcs; tighter close in
-      if (Math.abs(d) > 0.05) dir += Math.max(-turn, Math.min(turn, d));
-      x += Math.cos(dir) * 3;
-      y += Math.sin(dir) * 3;
-      // Roads may run a little past the map edge; painting clips them there
-      if (x < -24 || x > MAP_SIZE + 24 || y < -24 || y > MAP_SIZE + 24) break;
-      pts.push({ x, y, dir });
+    outer: for (const leg of legs) {
+      if (leg.len < 1) continue;
+      const dir = Math.atan2(leg.uy, leg.ux);
+      for (let done = 0; done < leg.len; ) {
+        const step = Math.min(3, leg.len - done);
+        done += step;
+        x += leg.ux * step;
+        y += leg.uy * step;
+        // Roads may run a little past the map edge; painting clips them there
+        if (x < -24 || x > MAP_SIZE + 24 || y < -24 || y > MAP_SIZE + 24) break outer;
+        pts.push({ x, y, dir });
+      }
     }
     if (pts.length) {
       roads.push({ pts, r });
@@ -656,7 +660,7 @@ function makeMap() {
     [MAP_SIZE + 16, MAP_SIZE * 0.7],
   ]) {
     const join = nearestRoadPoint(ex, ey);
-    traceRoad({ x: ex, y: ey, dir: undefined }, join.x, join.y, 3.0);
+    traceRoad({ x: ex, y: ey }, join.x, join.y, 3.0);
   }
 
   // Link roads between distant parts of the network: junctions and loops
