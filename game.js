@@ -10,7 +10,7 @@ screenCtx.imageSmoothingEnabled = false;
 
 // Everything is drawn to a low-res buffer and scaled up, so polygons come out
 // as chunky pixels instead of smooth edges.
-const PIXEL = 3;
+const PIXEL = 2;
 const VIEW_W = screenCanvas.width / PIXEL; // 320
 const VIEW_H = screenCanvas.height / PIXEL; // 200
 
@@ -178,9 +178,9 @@ function tileTypeAt(wx, wy) {
   return tiles[ty][tx];
 }
 
-const GRASS = ["#68c14f", "#63bb4a", "#6ec754", "#5eb545"];
+const GRASS = "#65bd4c";
 const GRASS_DOTS = ["#55ab3e", "#7dd463", "#8adf70", "#48993a"];
-const DIRT = ["#a87e50", "#a1784b", "#ae8356"];
+const DIRT = "#a87e50";
 const DIRT_DOTS = ["#8f6940", "#bb9264"];
 const FLOWER_COLORS = ["#ff9ed2", "#ffffff", "#c9a6ff", "#ffb27d"];
 
@@ -189,38 +189,139 @@ const mp = (wx, wy) => ({
   y: projY(wx, wy, terrainHeight(wx, wy)) + MAP_OFFSET_Y,
 });
 
-function drawTile(tx, ty) {
-  const type = tiles[ty][tx];
-  const c0 = mp(tx * TILE, ty * TILE);
-  const c1 = mp((tx + 1) * TILE, ty * TILE);
-  const c2 = mp((tx + 1) * TILE, (ty + 1) * TILE);
-  const c3 = mp(tx * TILE, (ty + 1) * TILE);
-
-  // Slope shading: brightness from the tile normal against the light
-  const h00 = terrainHeight(tx * TILE, ty * TILE);
-  const h10 = terrainHeight((tx + 1) * TILE, ty * TILE);
-  const h11 = terrainHeight((tx + 1) * TILE, (ty + 1) * TILE);
-  const h01 = terrainHeight(tx * TILE, (ty + 1) * TILE);
-  const dzdx = (h10 + h11 - h00 - h01) / (2 * TILE);
-  const dzdy = (h01 + h11 - h00 - h10) / (2 * TILE);
+// Brightness at a world point from the terrain normal against the light
+function groundShade(wx, wy) {
+  const d = 4;
+  const dzdx = (terrainHeight(wx + d, wy) - terrainHeight(wx - d, wy)) / (2 * d);
+  const dzdy = (terrainHeight(wx, wy + d) - terrainHeight(wx, wy - d)) / (2 * d);
   const len = Math.hypot(dzdx, dzdy, 1);
   const dot = (-dzdx * LIGHT.x - dzdy * LIGHT.y + LIGHT.z) / len;
-  const k = Math.max(0.4, Math.min(1.25, 0.3 + dot));
+  return Math.max(0.4, Math.min(1.25, 0.3 + dot));
+}
 
-  const base = type === 0 ? GRASS : DIRT;
-  mapCtx.fillStyle = shade(base[(Math.random() * base.length) | 0], k);
-  mapCtx.beginPath();
-  mapCtx.moveTo(c0.x, c0.y);
-  mapCtx.lineTo(c1.x, c1.y);
-  mapCtx.lineTo(c2.x, c2.y);
-  mapCtx.lineTo(c3.x, c3.y);
-  mapCtx.closePath();
-  mapCtx.fill();
+function isField(tx, ty) {
+  if (tx < 0 || ty < 0 || tx >= MAP_TILES || ty >= MAP_TILES) return false;
+  return tiles[ty][tx] >= 1;
+}
+
+// Dirt outline of a field tile: where the tile is an outer corner of the
+// patch, the corner curves inward so the fields get soft rounded edges.
+function fieldPath(tx, ty) {
+  const P = [
+    mp(tx * TILE, ty * TILE),
+    mp((tx + 1) * TILE, ty * TILE),
+    mp((tx + 1) * TILE, (ty + 1) * TILE),
+    mp(tx * TILE, (ty + 1) * TILE),
+  ];
+  const grass = (ax, ay) => !isField(ax, ay);
+  // A corner is rounded when everything around it (sides and diagonal) is grass
+  const rounded = [
+    grass(tx, ty - 1) && grass(tx - 1, ty) && grass(tx - 1, ty - 1),
+    grass(tx, ty - 1) && grass(tx + 1, ty) && grass(tx + 1, ty - 1),
+    grass(tx + 1, ty) && grass(tx, ty + 1) && grass(tx + 1, ty + 1),
+    grass(tx - 1, ty) && grass(tx, ty + 1) && grass(tx - 1, ty + 1),
+  ];
+  const t = 0.45;
+  const path = new Path2D();
+  let started = false;
+  for (let i = 0; i < 4; i++) {
+    const cur = P[i];
+    const prev = P[(i + 3) % 4];
+    const next = P[(i + 1) % 4];
+    if (rounded[i]) {
+      const ax = cur.x + (prev.x - cur.x) * t;
+      const ay = cur.y + (prev.y - cur.y) * t;
+      const bx = cur.x + (next.x - cur.x) * t;
+      const by = cur.y + (next.y - cur.y) * t;
+      if (started) path.lineTo(ax, ay);
+      else path.moveTo(ax, ay);
+      path.quadraticCurveTo(cur.x, cur.y, bx, by);
+    } else if (started) {
+      path.lineTo(cur.x, cur.y);
+    } else {
+      path.moveTo(cur.x, cur.y);
+    }
+    started = true;
+  }
+  path.closePath();
+  return path;
+}
+
+function drawTile(tx, ty) {
+  const type = tiles[ty][tx];
+  const kc = groundShade((tx + 0.5) * TILE, (ty + 0.5) * TILE);
+
+  // Ground in sub-quads, each shaded from its own terrain normal, so slope
+  // shading varies inside a tile instead of stepping at tile borders. Each
+  // quad overdraws its outline in its own color: antialiasing otherwise
+  // leaves hairline seams that read as a grid over the terrain.
+  const SUB = 3;
+  const subQuads = (color) => {
+    for (let sy = 0; sy < SUB; sy++) {
+      for (let sx = 0; sx < SUB; sx++) {
+        const x0 = (tx + sx / SUB) * TILE;
+        const y0 = (ty + sy / SUB) * TILE;
+        const x1 = (tx + (sx + 1) / SUB) * TILE;
+        const y1 = (ty + (sy + 1) / SUB) * TILE;
+        const a = mp(x0, y0);
+        const b = mp(x1, y0);
+        const c = mp(x1, y1);
+        const d = mp(x0, y1);
+        mapCtx.fillStyle = shade(color, groundShade((x0 + x1) / 2, (y0 + y1) / 2));
+        mapCtx.beginPath();
+        mapCtx.moveTo(a.x, a.y);
+        mapCtx.lineTo(b.x, b.y);
+        mapCtx.lineTo(c.x, c.y);
+        mapCtx.lineTo(d.x, d.y);
+        mapCtx.closePath();
+        mapCtx.fill();
+        mapCtx.strokeStyle = mapCtx.fillStyle;
+        mapCtx.lineWidth = 1;
+        mapCtx.stroke();
+      }
+    }
+  };
+
+  // Grass everywhere; field dirt is layered on top with rounded corners
+  subQuads(GRASS);
+
+  if (type === 0) {
+    // Speckles: grass tufts
+    for (let i = 0; i < 8; i++) {
+      const p = mp((tx + Math.random()) * TILE, (ty + Math.random()) * TILE);
+      mapCtx.fillStyle = shade(GRASS_DOTS[(Math.random() * GRASS_DOTS.length) | 0], kc);
+      mapCtx.fillRect(Math.round(p.x), Math.round(p.y), 1, 1);
+    }
+
+    // Little meadow flowers: four petals around a yellow heart
+    if (Math.random() < 0.5) {
+      const p = mp(
+        (tx + 0.2 + Math.random() * 0.6) * TILE,
+        (ty + 0.2 + Math.random() * 0.6) * TILE
+      );
+      const x = Math.round(p.x);
+      const y = Math.round(p.y);
+      mapCtx.fillStyle = shade(FLOWER_COLORS[(Math.random() * FLOWER_COLORS.length) | 0], kc);
+      mapCtx.fillRect(x - 1, y, 1, 1);
+      mapCtx.fillRect(x + 1, y, 1, 1);
+      mapCtx.fillRect(x, y - 1, 1, 1);
+      mapCtx.fillRect(x, y + 1, 1, 1);
+      mapCtx.fillStyle = shade("#ffd94f", kc);
+      mapCtx.fillRect(x, y, 1, 1);
+    }
+    return;
+  }
+
+  // Field dirt and everything drawn on it stay inside the rounded outline
+  const path = fieldPath(tx, ty);
+  mapCtx.save();
+  mapCtx.clip(path);
+  subQuads(DIRT);
 
   if (type >= 2) {
     // Furrow lines parallel to the direction the tile was plowed in
     const alongX = dirs[ty][tx] === 1;
-    mapCtx.strokeStyle = shade("#8a6540", k);
+    mapCtx.strokeStyle = shade("#8a6540", kc);
     mapCtx.lineWidth = 1;
     for (const s of [0.25, 0.5, 0.75]) {
       const a = alongX
@@ -246,49 +347,38 @@ function drawTile(tx, ty) {
           const x = Math.round(p.x);
           const y = Math.round(p.y);
           if (stage === 0) {
-            mapCtx.fillStyle = shade("#6b5228", k); // seed spot
+            mapCtx.fillStyle = shade("#6b5228", kc); // seed spot
             mapCtx.fillRect(x, y, 1, 1);
           } else if (stage === 1) {
-            mapCtx.fillStyle = shade("#8ee06a", k); // sprout
-            mapCtx.fillRect(x, y - 1, 1, 1);
+            mapCtx.fillStyle = shade("#8ee06a", kc); // sprout
+            mapCtx.fillRect(x, y - 2, 1, 2);
           } else if (stage === 2) {
-            mapCtx.fillStyle = shade("#5cbf47", k); // young plant
-            mapCtx.fillRect(x, y - 2, 1, 2);
+            mapCtx.fillStyle = shade("#5cbf47", kc); // young plant
+            mapCtx.fillRect(x, y - 3, 1, 3);
           } else {
-            mapCtx.fillStyle = shade("#c2a044", k); // mature stalk
-            mapCtx.fillRect(x, y - 2, 1, 2);
-            mapCtx.fillStyle = shade("#f5d96b", k); // grain head
-            mapCtx.fillRect(x, y - 3, 1, 1);
+            mapCtx.fillStyle = shade("#c2a044", kc); // mature stalk
+            mapCtx.fillRect(x, y - 3, 1, 3);
+            mapCtx.fillStyle = shade("#f5d96b", kc); // grain head
+            mapCtx.fillRect(x, y - 5, 1, 2);
           }
         }
       }
     }
   } else {
-    // Speckles: dirt clods on fields, grass tufts elsewhere
-    const dots = type === 1 ? DIRT_DOTS : GRASS_DOTS;
-    for (let i = 0; i < 5; i++) {
+    // Speckles: dirt clods
+    for (let i = 0; i < 8; i++) {
       const p = mp((tx + Math.random()) * TILE, (ty + Math.random()) * TILE);
-      mapCtx.fillStyle = shade(dots[(Math.random() * dots.length) | 0], k);
+      mapCtx.fillStyle = shade(DIRT_DOTS[(Math.random() * DIRT_DOTS.length) | 0], kc);
       mapCtx.fillRect(Math.round(p.x), Math.round(p.y), 1, 1);
     }
-
-    // Little meadow flowers: four petals around a yellow heart
-    if (type === 0 && Math.random() < 0.4) {
-      const p = mp(
-        (tx + 0.2 + Math.random() * 0.6) * TILE,
-        (ty + 0.2 + Math.random() * 0.6) * TILE
-      );
-      const x = Math.round(p.x);
-      const y = Math.round(p.y);
-      mapCtx.fillStyle = shade(FLOWER_COLORS[(Math.random() * FLOWER_COLORS.length) | 0], k);
-      mapCtx.fillRect(x - 1, y, 1, 1);
-      mapCtx.fillRect(x + 1, y, 1, 1);
-      mapCtx.fillRect(x, y - 1, 1, 1);
-      mapCtx.fillRect(x, y + 1, 1, 1);
-      mapCtx.fillStyle = shade("#ffd94f", k);
-      mapCtx.fillRect(x, y, 1, 1);
-    }
   }
+  mapCtx.restore();
+
+  // Trace the outline in dirt: smooths the rounded edge and covers the
+  // antialiasing seams against neighboring field tiles
+  mapCtx.strokeStyle = shade(DIRT, kc);
+  mapCtx.lineWidth = 1;
+  mapCtx.stroke(path);
 }
 
 // --- Field work, one function per implement ---------------------------------
@@ -415,10 +505,14 @@ makeMap();
 // ---------------------------------------------------------------------------
 
 const TREE_BOXES = [
-  { x0: -0.9, x1: 0.9, y0: -0.9, y1: 0.9, z0: 0.0, z1: 3.5, color: "#8a5a36" }, // trunk
-  { x0: -3.4, x1: 3.4, y0: -3.4, y1: 3.4, z0: 3.5, z1: 7.5, color: "#4fae4a" }, // canopy
-  { x0: -2.4, x1: 2.4, y0: -2.4, y1: 2.4, z0: 7.5, z1: 10.0, color: "#5fc257" },
-  { x0: -1.3, x1: 1.3, y0: -1.3, y1: 1.3, z0: 10.0, z1: 11.6, color: "#72d367" },
+  { x0: -0.9, x1: 0.9, y0: -0.9, y1: 0.9, z0: 0.0, z1: 4.5, color: "#8a5a36" }, // trunk
+];
+
+// Cloud-shaped canopy: one big blob with two smaller ones tucked against it
+const TREE_BLOBS = [
+  { blob: true, x: 0, y: 0, z: 7.2, r: 4.2, color: "#4fae4a" },
+  { blob: true, x: 1.5, y: -1.5, z: 9.6, r: 2.7, color: "#5fc257", bias: 0.05 },
+  { blob: true, x: -1.3, y: 1.3, z: 10.2, r: 2.1, color: "#72d367", bias: 0.1 },
 ];
 
 const trees = [];
@@ -436,22 +530,28 @@ for (let attempts = 0; trees.length < 12 && attempts < 400; attempts++) {
 // (+x = forward, z = up), rotated around z and projected each frame.
 // ---------------------------------------------------------------------------
 
+const TIRE = "#33363d";
+const HUB = "#f7e8b8";
+
 const BOXES = [
   { x0: -7.0, x1: 3.0, y0: -3.0, y1: 3.0, z0: 2.5, z1: 6.0, color: "#f25c3f" }, // chassis
   { x0: 3.0, x1: 7.0, y0: -2.2, y1: 2.2, z0: 2.5, z1: 5.5, color: "#f25c3f" }, // hood
   { x0: -6.5, x1: -1.0, y0: -2.6, y1: 2.6, z0: 6.0, z1: 10.0, color: "#bfeaf5" }, // cab glass
   { x0: -7.0, x1: -0.5, y0: -3.0, y1: 3.0, z0: 10.0, z1: 11.0, color: "#d94a2e" }, // roof
-  { x0: -5.4, x1: -4.4, y0: -0.5, y1: 0.5, z0: 11.0, z1: 12.1, color: "#ffb433" }, // beacon light
   { x0: 1.5, x1: 2.5, y0: -0.5, y1: 0.5, z0: 5.5, z1: 9.5, color: "#7a7a7a" }, // exhaust
-  { x0: -7.0, x1: -2.0, y0: 3.0, y1: 5.0, z0: 0.0, z1: 5.0, color: "#33363d" }, // rear wheel L
-  { x0: -7.0, x1: -2.0, y0: -5.0, y1: -3.0, z0: 0.0, z1: 5.0, color: "#33363d" }, // rear wheel R
-  { x0: -5.2, x1: -3.8, y0: 5.0, y1: 5.4, z0: 1.8, z1: 3.2, color: "#f7e8b8" }, // rear hubcap L
-  { x0: -5.2, x1: -3.8, y0: -5.4, y1: -5.0, z0: 1.8, z1: 3.2, color: "#f7e8b8" }, // rear hubcap R
-  { x0: 3.5, x1: 6.5, y0: 2.3, y1: 3.9, z0: 0.0, z1: 3.2, color: "#33363d" }, // front wheel L
-  { x0: 3.5, x1: 6.5, y0: -3.9, y1: -2.3, z0: 0.0, z1: 3.2, color: "#33363d" }, // front wheel R
-  { x0: 4.5, x1: 5.5, y0: 3.9, y1: 4.2, z0: 1.1, z1: 2.1, color: "#f7e8b8" }, // front hubcap L
-  { x0: 4.5, x1: 5.5, y0: -4.2, y1: -3.9, z0: 1.1, z1: 2.1, color: "#f7e8b8" }, // front hubcap R
 ];
+
+// Wheels are round: a disc on each face plus a slim inset box for the tread.
+// x/z is the axle center, r the tire radius, y0..y1 the width.
+const TRACTOR_WHEELS = [
+  { x: -4.5, y0: 3.0, y1: 5.0, z: 2.5, r: 2.5 }, // rear L
+  { x: -4.5, y0: -5.0, y1: -3.0, z: 2.5, r: 2.5 }, // rear R
+  { x: 5.0, y0: 2.3, y1: 3.9, z: 1.6, r: 1.6 }, // front L
+  { x: 5.0, y0: -3.9, y1: -2.3, z: 1.6, r: 1.6 }, // front R
+];
+
+// Round beacon light on the cab roof
+const TRACTOR_SHAPES = [{ blob: true, x: -4.9, y: 0, z: 11.6, r: 0.8, color: "#ffb433" }];
 
 // Implements hang behind the tractor; liftable ones get a z offset from the
 // hydraulic lift so they can be raised for transport and dropped to work.
@@ -487,8 +587,11 @@ const HARVESTER_BOXES = [
   { x0: -13.0, x1: -8.6, y0: -4.8, y1: 4.8, z0: 2.2, z1: 8.0, color: "#4cae4f" }, // body
   { x0: -12.4, x1: -11.2, y0: -4.2, y1: 4.2, z0: 8.0, z1: 9.4, color: "#3c8c40" }, // grain tank
   { x0: -8.6, x1: -7.4, y0: -4.8, y1: 4.8, z0: 0.4, z1: 2.6, color: "#d94a2e" }, // header reel
-  { x0: -12.6, x1: -9.4, y0: 4.8, y1: 6.0, z0: 0.0, z1: 3.6, color: "#33363d" }, // wheel L
-  { x0: -12.6, x1: -9.4, y0: -6.0, y1: -4.8, z0: 0.0, z1: 3.6, color: "#33363d" }, // wheel R
+];
+
+const HARVESTER_WHEELS = [
+  { x: -11.0, y0: 4.8, y1: 6.0, z: 1.8, r: 1.8 }, // wheel L
+  { x: -11.0, y0: -6.0, y1: -4.8, z: 1.8, r: 1.8 }, // wheel R
 ];
 
 const TRAILER_BOXES = [
@@ -496,10 +599,11 @@ const TRAILER_BOXES = [
   { x0: -21.0, x1: -11.5, y0: -4.2, y1: 4.2, z0: 3.0, z1: 7.0, color: "#9a7442" }, // wooden bed
 ];
 // Tandem axles: two pairs of wheels under the rear half of the bed
-for (const [wx0, wx1] of [[-16.6, -13.8], [-20.0, -17.2]]) {
-  TRAILER_BOXES.push(
-    { x0: wx0, x1: wx1, y0: 4.2, y1: 5.4, z0: 0.0, z1: 3.4, color: "#33363d" }, // wheel L
-    { x0: wx0, x1: wx1, y0: -5.4, y1: -4.2, z0: 0.0, z1: 3.4, color: "#33363d" } // wheel R
+const TRAILER_WHEELS = [];
+for (const wx of [-15.2, -18.6]) {
+  TRAILER_WHEELS.push(
+    { x: wx, y0: 4.2, y1: 5.4, z: 1.7, r: 1.7 }, // wheel L
+    { x: wx, y0: -5.4, y1: -4.2, z: 1.7, r: 1.7 } // wheel R
   );
 }
 
@@ -515,10 +619,10 @@ function trailerBoxes() {
 // Mounted implements (3-point hitch) turn rigidly with the tractor; towed
 // ones ride on their own wheels and pivot at the drawbar pin.
 const IMPLEMENTS = {
-  plow: { label: "PLOW", liftable: true, boxes: () => PLOW_BOXES },
-  seeder: { label: "SEEDER", liftable: true, boxes: () => SEEDER_BOXES },
-  harvester: { label: "HARVESTER", liftable: true, towed: true, towLength: 4.5, boxes: () => HARVESTER_BOXES },
-  trailer: { label: "TRAILER", liftable: false, towed: true, towLength: 9.9, boxes: trailerBoxes },
+  plow: { label: "PLOW", liftable: true, boxes: () => PLOW_BOXES, wheels: [] },
+  seeder: { label: "SEEDER", liftable: true, boxes: () => SEEDER_BOXES, wheels: [] },
+  harvester: { label: "HARVESTER", liftable: true, towed: true, towLength: 4.5, boxes: () => HARVESTER_BOXES, wheels: HARVESTER_WHEELS },
+  trailer: { label: "TRAILER", liftable: false, towed: true, towLength: 9.9, boxes: trailerBoxes, wheels: TRAILER_WHEELS },
 };
 
 // Farm buildings, local to FARM
@@ -527,12 +631,15 @@ const FARM_BOXES = [
   { x0: -17.5, x1: 3.5, y0: -13.5, y1: 3.5, z0: 9.0, z1: 12.0, color: "#7a4a32" }, // barn roof
   { x0: -7.5, x1: -3.5, y0: 1.9, y1: 2.3, z0: 0.0, z1: 6.0, color: "#f7e8d8" }, // barn door
   { x0: 8.0, x1: 17.0, y0: -9.0, y1: 0.0, z0: 0.0, z1: 20.0, color: "#c6ced6" }, // silo
-  { x0: 9.0, x1: 16.0, y0: -8.0, y1: -1.0, z0: 20.0, z1: 22.0, color: "#d94a2e" }, // silo cap
 ];
 
-// Grain sacks dropped by the harvester
-const SACK_BOXES = [
-  { x0: -1.6, x1: 1.6, y0: -1.6, y1: 1.6, z0: 0.0, z1: 2.8, color: "#f0cf5e" },
+// Round red dome on the silo
+const FARM_SHAPES = [{ blob: true, x: 12.5, y: -4.5, z: 20.0, r: 4.0, color: "#d94a2e" }];
+
+// Grain sacks dropped by the harvester: plump blobs with a tied-off top
+const SACK_SHAPES = [
+  { blob: true, x: 0, y: 0, z: 1.5, r: 1.6, color: "#f0cf5e" },
+  { blob: true, x: 0, y: 0, z: 3.1, r: 0.7, color: "#d9b446", bias: 0.05 },
 ];
 
 // Faces of a unit box; corner index = xi*4 + yi*2 + zi. Windings are chosen
@@ -597,6 +704,68 @@ function makeItems(items, boxes, ox, oy, angle, liftZ, camX, camY) {
   }
 }
 
+// Round shapes: discs are circles in the local x-z plane (wheel faces),
+// blobs are soft spheres drawn as shaded ellipses (canopies, sacks, domes).
+function makeRoundItems(items, shapes, ox, oy, angle, liftZ, camX, camY) {
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  const project = (lx, ly, lz) => {
+    const wx = ox + lx * cos - ly * sin;
+    const wy = oy + lx * sin + ly * cos;
+    const wz = lz + terrainHeight(wx, wy);
+    return {
+      x: Math.round(projX(wx, wy) - camX),
+      y: Math.round(projY(wx, wy, wz) - camY),
+      depth: wx + wy + wz,
+    };
+  };
+  for (const s of shapes) {
+    const c = project(s.x, s.y, s.z + liftZ);
+    if (s.disc) {
+      const pts = [];
+      for (let i = 0; i < 14; i++) {
+        const a = (i / 14) * Math.PI * 2;
+        pts.push(project(s.x + Math.cos(a) * s.r, s.y, s.z + liftZ + Math.sin(a) * s.r));
+      }
+      // Lit like a box's side face: normal is the rotated local y axis
+      const d = -s.n * sin * LIGHT.x + s.n * cos * LIGHT.y;
+      const k = Math.min(1, Math.max(0.3, 0.3 + d));
+      items.push({ poly: pts, color: s.color, k, depth: c.depth + (s.bias || 0) });
+    } else {
+      items.push({
+        blob: c,
+        rx: s.r * 1.4,
+        ry: s.r * 1.2,
+        color: s.color,
+        k: Math.min(1, 0.35 + LIGHT.z),
+        depth: c.depth + (s.bias || 0),
+      });
+    }
+  }
+}
+
+// A wheel is a slim tread box plus a tire disc and hubcap on each face. The
+// disc on the camera side always projects nearer than the box center, so the
+// painter's sort shows the round face; edge-on, the box gives the silhouette.
+function makeWheels(items, wheels, ox, oy, angle, liftZ, camX, camY) {
+  const boxes = [];
+  const shapes = [];
+  for (const w of wheels) {
+    boxes.push({
+      x0: w.x - w.r * 0.72, x1: w.x + w.r * 0.72,
+      y0: w.y0, y1: w.y1,
+      z0: w.z - w.r * 0.72, z1: w.z + w.r * 0.72,
+      color: TIRE,
+    });
+    for (const [ly, n] of [[w.y0, -1], [w.y1, 1]]) {
+      shapes.push({ disc: true, x: w.x, y: ly, z: w.z, r: w.r, n, color: TIRE });
+      shapes.push({ disc: true, x: w.x, y: ly, z: w.z, r: w.r * 0.45, n, color: HUB, bias: 0.06 });
+    }
+  }
+  makeItems(items, boxes, ox, oy, angle, liftZ, camX, camY);
+  makeRoundItems(items, shapes, ox, oy, angle, liftZ, camX, camY);
+}
+
 function drawScene(camX, camY) {
   const pose = implementPose();
 
@@ -636,23 +805,49 @@ function drawScene(camX, camY) {
 
   // Painter's algorithm: depth along the view axis is wx + wy + wz.
   const items = [];
+  const liftZ = imp.liftable ? tractor.implLift * IMPLEMENT_LIFT_HEIGHT : 0;
   makeItems(items, BOXES, tractor.x, tractor.y, tractor.angle, 0, camX, camY);
-  makeItems(
-    items,
-    impBoxes,
-    pose.x,
-    pose.y,
-    pose.angle,
-    imp.liftable ? tractor.implLift * IMPLEMENT_LIFT_HEIGHT : 0,
-    camX,
-    camY
-  );
+  makeWheels(items, TRACTOR_WHEELS, tractor.x, tractor.y, tractor.angle, 0, camX, camY);
+  makeRoundItems(items, TRACTOR_SHAPES, tractor.x, tractor.y, tractor.angle, 0, camX, camY);
+  makeItems(items, impBoxes, pose.x, pose.y, pose.angle, liftZ, camX, camY);
+  makeWheels(items, imp.wheels, pose.x, pose.y, pose.angle, liftZ, camX, camY);
   makeItems(items, FARM_BOXES, FARM.x, FARM.y, 0, 0, camX, camY);
-  for (const t of trees) makeItems(items, TREE_BOXES, t.wx, t.wy, t.angle, 0, camX, camY);
-  for (const s of sacks) makeItems(items, SACK_BOXES, s.wx, s.wy, 0, 0, camX, camY);
+  makeRoundItems(items, FARM_SHAPES, FARM.x, FARM.y, 0, 0, camX, camY);
+  for (const t of trees) {
+    makeItems(items, TREE_BOXES, t.wx, t.wy, t.angle, 0, camX, camY);
+    makeRoundItems(items, TREE_BLOBS, t.wx, t.wy, t.angle, 0, camX, camY);
+  }
+  for (const s of sacks) makeRoundItems(items, SACK_SHAPES, s.wx, s.wy, 0, 0, camX, camY);
   items.sort((a, b) => a.depth - b.depth);
 
   for (const item of items) {
+    if (item.blob) {
+      // Soft sphere: base ellipse with a lighter highlight up and to the left
+      ctx.fillStyle = shade(item.color, item.k);
+      ctx.beginPath();
+      ctx.ellipse(item.blob.x, item.blob.y, item.rx, item.ry, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = shade(item.color, item.k * 1.16);
+      ctx.beginPath();
+      ctx.ellipse(
+        item.blob.x - item.rx * 0.25,
+        item.blob.y - item.ry * 0.3,
+        item.rx * 0.55,
+        item.ry * 0.5,
+        0, 0, Math.PI * 2
+      );
+      ctx.fill();
+      continue;
+    }
+    if (item.poly) {
+      ctx.fillStyle = shade(item.color, item.k);
+      ctx.beginPath();
+      ctx.moveTo(item.poly[0].x, item.poly[0].y);
+      for (const p of item.poly.slice(1)) ctx.lineTo(p.x, p.y);
+      ctx.closePath();
+      ctx.fill();
+      continue;
+    }
     for (const face of FACES) {
       const pts = face.i.map((i) => item.pts[i]);
       if (signedArea(pts) <= 0) continue;
@@ -668,9 +863,6 @@ function drawScene(camX, camY) {
       for (const p of pts.slice(1)) ctx.lineTo(p.x, p.y);
       ctx.closePath();
       ctx.fill();
-      ctx.strokeStyle = "rgba(40,30,45,0.18)";
-      ctx.lineWidth = 1;
-      ctx.stroke();
     }
   }
 }
@@ -720,11 +912,11 @@ SKY.addColorStop(1, "#c8ecf8");
 function drawSun() {
   ctx.fillStyle = "rgba(255,240,170,0.4)";
   ctx.beginPath();
-  ctx.arc(42, 34, 15, 0, Math.PI * 2);
+  ctx.arc(56, 44, 20, 0, Math.PI * 2);
   ctx.fill();
   ctx.fillStyle = "#ffe66b";
   ctx.beginPath();
-  ctx.arc(42, 34, 10, 0, Math.PI * 2);
+  ctx.arc(56, 44, 13, 0, Math.PI * 2);
   ctx.fill();
 }
 
@@ -746,7 +938,7 @@ function drawClouds(camX, camY) {
   for (const c of CLOUDS) {
     const sx = ((((c.x + worldTime * c.speed - camX * c.par) % wrapX) + wrapX) % wrapX) - 120;
     const sy = ((((c.y - camY * c.par) % wrapY) + wrapY) % wrapY) - 100;
-    const s = c.scale;
+    const s = c.scale * 1.4;
     ctx.beginPath();
     ctx.arc(sx, sy, 7 * s, 0, Math.PI * 2);
     ctx.arc(sx - 8 * s, sy + 2 * s, 5 * s, 0, Math.PI * 2);
@@ -854,16 +1046,13 @@ function spawnChaff(wx, wy) {
 function drawSmoke(camX, camY) {
   for (const p of smoke) {
     const t = 1 - p.life / p.maxLife;
-    const size = 1 + Math.round(t * 3);
+    const r = 0.8 + t * 2.6;
     ctx.fillStyle = p.gold
       ? `rgba(219,186,84,${(0.8 * (1 - t)).toFixed(2)})`
       : `rgba(235,235,235,${(0.7 * (1 - t)).toFixed(2)})`;
-    ctx.fillRect(
-      Math.round(projX(p.wx, p.wy) - camX - size / 2),
-      Math.round(projY(p.wx, p.wy, p.wz) - camY - size / 2),
-      size,
-      size
-    );
+    ctx.beginPath();
+    ctx.arc(projX(p.wx, p.wy) - camX, projY(p.wx, p.wy, p.wz) - camY, r, 0, Math.PI * 2);
+    ctx.fill();
   }
 }
 
