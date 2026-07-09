@@ -711,8 +711,11 @@ function drawSmoke(camX, camY) {
 
 const SEED_CAP = 64; // seeder hopper size, refilled at the farm
 const TRAILER_CAP = 12; // sacks the trailer can carry
+const SEED_PRICE = 2; // € per seed, bought automatically at the farm
+const SACK_PRICE = 10; // € earned per sack of grain sold
 
-let seeds = 0; // start empty: fetch seeds from the farm
+let cash = 100; // € — enough starting capital for the first bag of seeds
+let seeds = 0; // start empty: buy seeds at the farm
 let cargo = 0; // sacks on the trailer
 let sold = 0; // total sacks delivered to the farm
 const sacks = []; // grain sacks lying on the fields
@@ -853,10 +856,18 @@ function update(dt) {
     }
   }
 
-  // Farmyard services: seed refill and grain delivery
+  // Farmyard services: seed purchase and grain delivery
   if (nearFarm()) {
-    if (tractor.implement === "seeder") seeds = SEED_CAP;
+    if (tractor.implement === "seeder" && seeds < SEED_CAP) {
+      // Top up the hopper with as many seeds as the cash covers
+      const bought = Math.min(SEED_CAP - seeds, Math.floor(cash / SEED_PRICE));
+      if (bought > 0) {
+        seeds += bought;
+        cash -= bought * SEED_PRICE;
+      }
+    }
     if (tractor.implement === "trailer" && cargo > 0) {
+      cash += cargo * SACK_PRICE;
       sold += cargo;
       cargo = 0;
       spawnChaff(tractor.x - 11 * cos, tractor.y - 11 * sin);
@@ -923,6 +934,7 @@ function draw() {
   seg(`${imp.label}${state} [Space]   `, flashImpl ? RED : null);
   if (tractor.implement === "seeder") seg(`SEEDS: ${seeds}   `, seeds === 0 ? RED : null);
   if (tractor.implement === "trailer") seg(`CARGO: ${cargo}/${TRAILER_CAP}   `);
+  seg(`CASH: €${cash}   `, cash < SEED_PRICE ? RED : null);
   seg(`SOLD: ${sold}   `);
   seg(`@FARM 1:PLOW 2:SEED 3:HARVEST 4:TRAILER`, "#a8a898");
 }
