@@ -204,9 +204,9 @@ function isField(tx, ty) {
   return tiles[ty][tx] >= 1;
 }
 
-// Dirt outline of a field tile: where the tile is an outer corner of the
-// patch, the corner curves inward so the fields get soft rounded edges.
-function fieldPath(tx, ty) {
+// Corners of a field tile that are outer corners of the whole patch
+// (everything around them is grass); those corners get rounded off.
+function fieldGeometry(tx, ty) {
   const P = [
     mp(tx * TILE, ty * TILE),
     mp((tx + 1) * TILE, ty * TILE),
@@ -214,14 +214,19 @@ function fieldPath(tx, ty) {
     mp(tx * TILE, (ty + 1) * TILE),
   ];
   const grass = (ax, ay) => !isField(ax, ay);
-  // A corner is rounded when everything around it (sides and diagonal) is grass
   const rounded = [
     grass(tx, ty - 1) && grass(tx - 1, ty) && grass(tx - 1, ty - 1),
     grass(tx, ty - 1) && grass(tx + 1, ty) && grass(tx + 1, ty - 1),
     grass(tx + 1, ty) && grass(tx, ty + 1) && grass(tx + 1, ty + 1),
     grass(tx - 1, ty) && grass(tx, ty + 1) && grass(tx - 1, ty + 1),
   ];
-  const t = 0.45;
+  return { P, rounded };
+}
+
+const CORNER_T = 0.45; // how far along the tile edges the rounding cuts in
+
+// Dirt outline of a field tile with the rounded corners curved inward
+function fieldPath(P, rounded) {
   const path = new Path2D();
   let started = false;
   for (let i = 0; i < 4; i++) {
@@ -229,10 +234,10 @@ function fieldPath(tx, ty) {
     const prev = P[(i + 3) % 4];
     const next = P[(i + 1) % 4];
     if (rounded[i]) {
-      const ax = cur.x + (prev.x - cur.x) * t;
-      const ay = cur.y + (prev.y - cur.y) * t;
-      const bx = cur.x + (next.x - cur.x) * t;
-      const by = cur.y + (next.y - cur.y) * t;
+      const ax = cur.x + (prev.x - cur.x) * CORNER_T;
+      const ay = cur.y + (prev.y - cur.y) * CORNER_T;
+      const bx = cur.x + (next.x - cur.x) * CORNER_T;
+      const by = cur.y + (next.y - cur.y) * CORNER_T;
       if (started) path.lineTo(ax, ay);
       else path.moveTo(ax, ay);
       path.quadraticCurveTo(cur.x, cur.y, bx, by);
@@ -282,10 +287,9 @@ function drawTile(tx, ty) {
     }
   };
 
-  // Grass everywhere; field dirt is layered on top with rounded corners
-  subQuads(GRASS);
-
   if (type === 0) {
+    subQuads(GRASS);
+
     // Speckles: grass tufts
     for (let i = 0; i < 8; i++) {
       const p = mp((tx + Math.random()) * TILE, (ty + Math.random()) * TILE);
@@ -312,11 +316,42 @@ function drawTile(tx, ty) {
     return;
   }
 
-  // Field dirt and everything drawn on it stay inside the rounded outline
-  const path = fieldPath(tx, ty);
-  mapCtx.save();
-  mapCtx.clip(path);
+  // Field tile: dirt across the whole tile, seamless against neighboring
+  // dirt tiles thanks to the sub-quads' own outline overdraw
   subQuads(DIRT);
+
+  // Round the patch's outer corners by painting the cut crescents back to
+  // grass; their outer edges only ever border grass tiles, so the overdraw
+  // never bleeds onto dirt
+  const { P, rounded } = fieldGeometry(tx, ty);
+  const cornerTile = [[tx, ty], [tx + 1, ty], [tx + 1, ty + 1], [tx, ty + 1]];
+  for (let i = 0; i < 4; i++) {
+    if (!rounded[i]) continue;
+    const cur = P[i];
+    const prev = P[(i + 3) % 4];
+    const next = P[(i + 1) % 4];
+    const ax = cur.x + (prev.x - cur.x) * CORNER_T;
+    const ay = cur.y + (prev.y - cur.y) * CORNER_T;
+    const bx = cur.x + (next.x - cur.x) * CORNER_T;
+    const by = cur.y + (next.y - cur.y) * CORNER_T;
+    mapCtx.fillStyle = shade(
+      GRASS,
+      groundShade(cornerTile[i][0] * TILE, cornerTile[i][1] * TILE)
+    );
+    mapCtx.beginPath();
+    mapCtx.moveTo(ax, ay);
+    mapCtx.quadraticCurveTo(cur.x, cur.y, bx, by);
+    mapCtx.lineTo(cur.x, cur.y);
+    mapCtx.closePath();
+    mapCtx.fill();
+    mapCtx.strokeStyle = mapCtx.fillStyle;
+    mapCtx.lineWidth = 1;
+    mapCtx.stroke();
+  }
+
+  // Furrows, crops and clods stay inside the rounded outline
+  mapCtx.save();
+  mapCtx.clip(fieldPath(P, rounded));
 
   if (type >= 2) {
     // Furrow lines parallel to the direction the tile was plowed in
@@ -373,12 +408,6 @@ function drawTile(tx, ty) {
     }
   }
   mapCtx.restore();
-
-  // Trace the outline in dirt: smooths the rounded edge and covers the
-  // antialiasing seams against neighboring field tiles
-  mapCtx.strokeStyle = shade(DIRT, kc);
-  mapCtx.lineWidth = 1;
-  mapCtx.stroke(path);
 }
 
 // --- Field work, one function per implement ---------------------------------
