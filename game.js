@@ -355,7 +355,7 @@ const IMPLEMENT_KEYS = { 1: "plow", 2: "seeder", 3: "harvester", 4: "trailer" };
 // F1 opens the menu, the only place the seed and mode can be picked. It is
 // also the start menu: a fresh visit begins with it open and the clock held.
 let menuOpen = !gameStarted;
-let menuSeed = String(SEED);
+let menuSeed = "1"; // the start menu defaults to seed 1; R rolls a random one
 let menuMode = mode;
 
 // Away clock, toggled in the menu: rAF stops in a hidden tab, so normally
@@ -377,13 +377,14 @@ window.addEventListener("keydown", (e) => {
     e.preventDefault();
     if (!gameStarted) return; // the start menu stays until a mode is picked
     menuOpen = !menuOpen;
-    menuSeed = String(SEED);
+    menuSeed = String(SEED); // mid-game the field opens on the current map
     menuMode = mode;
     return;
   }
   if (menuOpen) {
-    // The menu swallows all input: type a seed, arrows pick the mode, Enter
-    // starts, N rolls a random map, Esc closes (once a game is running)
+    // The menu swallows all input: type a seed, arrows pick the mode, R
+    // rolls a random seed into the field, Enter starts, Esc closes (once a
+    // game is running)
     e.preventDefault();
     if (e.key === "Enter") {
       const n = parseInt(menuSeed, 10);
@@ -395,8 +396,8 @@ window.addEventListener("keydown", (e) => {
           location.search = `?seed=${n}&mode=${menuMode}`;
         }
       }
-    } else if (e.key === "n" || e.key === "N") {
-      location.search = `?seed=${(Math.random() * 1e9) | 0}&mode=${menuMode}`;
+    } else if (e.key === "r" || e.key === "R") {
+      menuSeed = String((Math.random() * 1e9) | 0);
     } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
       menuMode = menuMode === "classic" ? "survival" : "classic";
     } else if (e.key === "t" || e.key === "T") {
@@ -3368,7 +3369,7 @@ function draw() {
       awayClock ? "#c9e6a8" : "#d8c49a"
     );
     label(
-      "[↑↓] MODE   [ENTER] START   [N] NEW MAP" +
+      "[↑↓] MODE   [R] RANDOM SEED   [ENTER] START" +
         (gameStarted ? "   [ESC] CLOSE" : ""),
       cx,
       y + h - 14,
