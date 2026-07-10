@@ -358,6 +358,17 @@ let menuOpen = !gameStarted;
 let menuSeed = String(SEED);
 let menuMode = mode;
 
+// Away clock, toggled in the menu: rAF stops in a hidden tab, so normally
+// game time freezes there. With this on, the lost time is applied in one
+// catch-up step on return — crops grow, the calendar turns, taxes fall due.
+const AWAY_CLOCK_KEY = "traktoripeli.awayclock";
+let awayClock = false;
+try {
+  awayClock = localStorage.getItem(AWAY_CLOCK_KEY) === "1";
+} catch {
+  // private browsing etc: the option just isn't persisted
+}
+
 window.addEventListener("keydown", (e) => {
   // Browsers only allow audio after a user gesture
   initAudio();
@@ -388,6 +399,13 @@ window.addEventListener("keydown", (e) => {
       location.search = `?seed=${(Math.random() * 1e9) | 0}&mode=${menuMode}`;
     } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
       menuMode = menuMode === "classic" ? "survival" : "classic";
+    } else if (e.key === "t" || e.key === "T") {
+      awayClock = !awayClock;
+      try {
+        localStorage.setItem(AWAY_CLOCK_KEY, awayClock ? "1" : "0");
+      } catch {
+        // not persisted, still applies to this session
+      }
     } else if (e.key === "Escape") {
       if (gameStarted) menuOpen = false;
     } else if (e.key === "Backspace") {
@@ -2729,6 +2747,45 @@ function startGame(m) {
   menuOpen = false;
 }
 
+// Oct 31: the tax collector comes around, then a new year begins.
+// Returns false when the bill bankrupts the farm and the run is over.
+function collectTax() {
+  cash -= propertyTax;
+  taxPaid = propertyTax;
+  taxFlash = 4;
+  playTax();
+  if (cash < -DEBT_LIMIT) {
+    endSurvival();
+    return false;
+  }
+  year++;
+  propertyTax += TAX_STEP;
+  timeLeft = ROUND_TIME;
+  return true;
+}
+
+// Away-clock catch-up: time the frame loop never saw (rAF stops in a
+// hidden tab) is applied in one step. Crops grow and the calendar keeps
+// turning — year by year in survival, taxes and all.
+function advanceTime(sec) {
+  if (!gameStarted || gameOver) return;
+  worldTime += sec;
+  updateCrops(sec);
+  while (sec > 0 && !gameOver) {
+    if (timeLeft > sec) {
+      timeLeft -= sec;
+      sec = 0;
+    } else if (mode === "survival") {
+      sec -= timeLeft;
+      timeLeft = 0;
+      if (!collectTax()) return;
+    } else {
+      timeLeft = 0;
+      endRound();
+    }
+  }
+}
+
 function endRound() {
   gameOver = true;
   tractor.speed = 0;
@@ -2859,18 +2916,7 @@ function update(dt) {
   timeLeft = Math.max(0, timeLeft - dt);
   if (timeLeft === 0) {
     if (mode === "survival") {
-      // Oct 31: the tax collector comes around, then a new year begins
-      cash -= propertyTax;
-      taxPaid = propertyTax;
-      taxFlash = 4;
-      playTax();
-      if (cash < -DEBT_LIMIT) {
-        endSurvival();
-        return;
-      }
-      year++;
-      propertyTax += TAX_STEP;
-      timeLeft = ROUND_TIME;
+      if (!collectTax()) return;
     } else {
       endRound();
       return;
@@ -3282,7 +3328,7 @@ function draw() {
   // opens it before the clock starts; F1 brings it back later.
   if (menuOpen) {
     const w = 420;
-    const h = 192;
+    const h = 216;
     const x = (screenCanvas.width - w) / 2;
     const y = (screenCanvas.height - h) / 2;
     const cx = screenCanvas.width / 2;
@@ -3316,6 +3362,12 @@ function draw() {
 
     screenCtx.font = "11px monospace";
     label(
+      `[T] AWAY CLOCK: ${awayClock ? "ON " : "OFF"} — TIME PASSES WHILE THE TAB IS HIDDEN`,
+      cx,
+      y + 152,
+      awayClock ? "#c9e6a8" : "#d8c49a"
+    );
+    label(
       "[↑↓] MODE   [ENTER] START   [N] NEW MAP" +
         (gameStarted ? "   [ESC] CLOSE" : ""),
       cx,
@@ -3332,11 +3384,22 @@ function draw() {
 
 let lastTime = performance.now();
 let fps = 0;
+let awayPool = 0; // time the dt cap discarded, waiting to be applied
 
 function loop(now) {
   const frameMs = now - lastTime;
   const dt = Math.min(frameMs / 1000, 0.05);
   lastTime = now;
+  // The dt cap normally discards time lost to a hidden tab (one big gap on
+  // return) or a throttled one (a trickle of ~1s frames); with the away
+  // clock on it pools up and is applied to the game clock instead
+  awayPool += frameMs / 1000 - dt;
+  if (awayClock && awayPool > 0.5) {
+    advanceTime(awayPool);
+    awayPool = 0;
+  } else if (!awayClock) {
+    awayPool = 0;
+  }
   // Smoothed over ~20 frames so the readout doesn't flicker
   if (frameMs > 0) fps += (1000 / frameMs - fps) * 0.05;
   update(dt);
