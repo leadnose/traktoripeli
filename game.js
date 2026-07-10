@@ -1736,10 +1736,32 @@ const SHEEP_SHAPES = [
   { blob: true, x: 0, y: 0, z: 2.1, r: 1.8, color: "#f4f1e6" }, // woolly body
 ];
 
+// Chicken: a tiny white bird with a red comb and orange beak, drawn in
+// fixed paint order like the others (body, tail, head, comb, beak)
+const CHICKEN_BOXES = [
+  { x0: -0.7, x1: 0.7, y0: -0.5, y1: 0.5, z0: 0.4, z1: 1.6, color: "#f5f1e4" }, // body
+  { x0: -1.05, x1: -0.6, y0: -0.25, y1: 0.25, z0: 1.0, z1: 1.9, color: "#f5f1e4" }, // tail
+  { x0: 0.5, x1: 0.95, y0: -0.25, y1: 0.25, z0: 1.3, z1: 2.3, color: "#f5f1e4" }, // head
+  { x0: 0.6, x1: 0.9, y0: -0.12, y1: 0.12, z0: 2.3, z1: 2.6, color: "#d94a2e" }, // comb
+  { x0: 0.95, x1: 1.25, y0: -0.12, y1: 0.12, z0: 1.5, z1: 1.7, color: "#f0a030" }, // beak
+];
+
+// Per-species behavior: chickens are quick, jerky, peck constantly, keep to
+// a small range and may run on roads (the yard is full of them)
+// Horses and chickens spook (spook radius + flee dash speed) and get clear
+// of the tractor; cows and sheep have no spook — they stand their ground
+// and physically block it instead.
+const ANIMAL_SPECS = {
+  cow: { speed: 2.5, range: 22, sep: 4.5, turn: 1.4, pauseChance: 0.004, pauseDur: [1, 3], shadow: 3.4 },
+  sheep: { speed: 2.2, range: 20, sep: 4.5, turn: 1.4, pauseChance: 0.005, pauseDur: [1, 3], shadow: 2.4 },
+  horse: { speed: 3.2, range: 26, sep: 4.5, turn: 1.4, pauseChance: 0.004, pauseDur: [1, 3], shadow: 3.4, spook: 26, flee: 22 },
+  chicken: { speed: 5, range: 15, sep: 1.6, turn: 4, pauseChance: 0.03, pauseDur: [0.4, 1.2], shadow: 1.0, roads: true, spook: 18, flee: 16 },
+};
+
 const animals = [];
 
-function spawnHerd(species, hx, hy) {
-  const n = 3 + ((rand() * 4) | 0);
+function spawnHerd(species, hx, hy, count) {
+  const n = count || 3 + ((rand() * 4) | 0);
   for (let i = 0; i < n; i++) {
     // Keep trying offsets until the animal actually stands on grass —
     // otherwise it can spawn in the water beside a shoreline home spot
@@ -1748,7 +1770,10 @@ function spawnHerd(species, hx, hy) {
     for (let t = 0; t < 20; t++) {
       const cx = hx + (rand() - 0.5) * 24;
       const cy = hy + (rand() - 0.5) * 24;
-      if (tileTypeAt(cx, cy) === 0 && !roadTiles.has(tileKey(cx, cy))) {
+      if (
+        tileTypeAt(cx, cy) === 0 &&
+        (ANIMAL_SPECS[species].roads || !roadTiles.has(tileKey(cx, cy)))
+      ) {
         wx = cx;
         wy = cy;
         break;
@@ -1788,6 +1813,9 @@ for (const species of ["cow", "sheep", "horse"]) {
   spawnHerd(species, hx, hy);
 }
 
+// ...and a flock of chickens pecking around the yard itself
+spawnHerd("chicken", FARM.x, FARM.y, 6 + ((rand() * 4) | 0));
+
 // Plus a few wild-placed herds further out
 for (let herds = 0, tries = 0; herds < 4 && tries < 400; tries++) {
   const hx = 30 + rand() * (MAP_SIZE - 60);
@@ -1802,6 +1830,15 @@ for (let herds = 0, tries = 0; herds < 4 && tries < 400; tries++) {
 
 function updateAnimals(dt) {
   for (const a of animals) {
+    const spec = ANIMAL_SPECS[a.species];
+    const tractorDist = Math.hypot(a.wx - tractor.x, a.wy - tractor.y);
+    const walkable = (wx, wy) => {
+      if (tileTypeAt(wx, wy) !== 0) return false;
+      if (!spec.roads && roadTiles.has(tileKey(wx, wy))) return false;
+      // Never walk into the tractor (moving further away is always allowed)
+      const td = Math.hypot(wx - tractor.x, wy - tractor.y);
+      return td > 5 || td > tractorDist;
+    };
     // Herd spacing: crowding neighbors ease each other apart (also while
     // grazing) so animals never stand inside one another
     for (const b of animals) {
@@ -1809,10 +1846,10 @@ function updateAnimals(dt) {
       const dx = a.wx - b.wx;
       const dy = a.wy - b.wy;
       const d = Math.hypot(dx, dy);
-      if (d < 4.5 && d > 0.001) {
-        const nx = a.wx + (dx / d) * (4.5 - d) * dt * 3;
-        const ny = a.wy + (dy / d) * (4.5 - d) * dt * 3;
-        if (tileTypeAt(nx, ny) === 0 && !roadTiles.has(tileKey(nx, ny))) {
+      if (d < spec.sep && d > 0.001) {
+        const nx = a.wx + (dx / d) * (spec.sep - d) * dt * 3;
+        const ny = a.wy + (dy / d) * (spec.sep - d) * dt * 3;
+        if (walkable(nx, ny)) {
           a.wx = nx;
           a.wy = ny;
         }
@@ -1820,20 +1857,45 @@ function updateAnimals(dt) {
         a.wx += rand() - 0.5; // unstick exact overlaps
       }
     }
+    // Spooked animals dash clear of the tractor — sideways off its path,
+    // not down the line of travel — turning fast but smoothly (no snaps)
+    if (spec.spook && tractorDist < spec.spook) {
+      a.pause = 0;
+      const tdx = a.wx - tractor.x;
+      const tdy = a.wy - tractor.y;
+      const hx = Math.cos(tractor.angle);
+      const hy = Math.sin(tractor.angle);
+      const side = tdx * -hy + tdy * hx >= 0 ? 1 : -1;
+      const fx = -hy * side + (tdx / (tractorDist || 1)) * 0.5;
+      const fy = hx * side + (tdy / (tractorDist || 1)) * 0.5;
+      const want =
+        Math.abs(tractor.speed) > 3 ? Math.atan2(fy, fx) : Math.atan2(tdy, tdx);
+      const d = Math.atan2(Math.sin(want - a.angle), Math.cos(want - a.angle));
+      a.angle += Math.max(-8 * dt, Math.min(8 * dt, d));
+      const nx = a.wx + Math.cos(a.angle) * spec.flee * dt;
+      const ny = a.wy + Math.sin(a.angle) * spec.flee * dt;
+      if (walkable(nx, ny)) {
+        a.wx = nx;
+        a.wy = ny;
+      } else {
+        a.angle += 3 * dt; // cornered against water or a field: sidle along
+      }
+      continue; // fleeing overrides grazing and homing
+    }
     if (a.pause > 0) {
       a.pause -= dt;
       continue;
     }
     // Amble about, turning back toward the herd's home spot when strayed
-    a.angle += (rand() - 0.5) * 1.4 * dt;
-    if (Math.hypot(a.wx - a.hx, a.wy - a.hy) > 22) {
+    a.angle += (rand() - 0.5) * spec.turn * dt;
+    if (Math.hypot(a.wx - a.hx, a.wy - a.hy) > spec.range) {
       const want = Math.atan2(a.hy - a.wy, a.hx - a.wx);
       const d = Math.atan2(Math.sin(want - a.angle), Math.cos(want - a.angle));
       a.angle += Math.max(-2.5 * dt, Math.min(2.5 * dt, d));
     }
-    const nx = a.wx + Math.cos(a.angle) * 2.5 * dt;
-    const ny = a.wy + Math.sin(a.angle) * 2.5 * dt;
-    if (tileTypeAt(nx, ny) === 0 && !roadTiles.has(tileKey(nx, ny))) {
+    const nx = a.wx + Math.cos(a.angle) * spec.speed * dt;
+    const ny = a.wy + Math.sin(a.angle) * spec.speed * dt;
+    if (walkable(nx, ny)) {
       a.wx = nx;
       a.wy = ny;
     } else {
@@ -1841,7 +1903,9 @@ function updateAnimals(dt) {
       // direction opens up (an instant turn every frame strobes the model)
       a.angle += 2.5 * dt;
     }
-    if (rand() < 0.004) a.pause = 1 + rand() * 3; // stop to graze
+    if (rand() < spec.pauseChance) {
+      a.pause = spec.pauseDur[0] + rand() * spec.pauseDur[1];
+    }
   }
 }
 
@@ -2197,7 +2261,7 @@ function drawScene(camX, camY) {
     if (!onScreen(a.wx, a.wy, camX, camY)) continue;
     const sx = Math.round(projX(a.wx, a.wy) - camX);
     const sy = Math.round(projY(a.wx, a.wy, terrainHeight(a.wx, a.wy)) - camY);
-    const r = a.species === "sheep" ? 2.4 : 3.4;
+    const r = ANIMAL_SPECS[a.species].shadow;
     ctx.moveTo(sx + r, sy);
     ctx.ellipse(sx, sy, r, r / 2, 0, 0, Math.PI * 2);
   }
@@ -2250,7 +2314,9 @@ function drawScene(camX, camY) {
       makeRoundItems(items, SHEEP_SHAPES, a.wx, a.wy, a.angle, 0, camX, camY);
       makeItems(items, SHEEP_BOXES, a.wx, a.wy, a.angle, 0, camX, camY);
     } else {
-      makeItems(items, a.species === "cow" ? COW_BOXES : HORSE_BOXES, a.wx, a.wy, a.angle, 0, camX, camY);
+      const boxes =
+        a.species === "cow" ? COW_BOXES : a.species === "horse" ? HORSE_BOXES : CHICKEN_BOXES;
+      makeItems(items, boxes, a.wx, a.wy, a.angle, 0, camX, camY);
     }
     for (let i = start; i < items.length; i++) {
       items[i].depth = a.sd + 2.5 + (i - start) * 1e-4;
@@ -2783,6 +2849,19 @@ function update(dt) {
     tractor.x = prevX;
     tractor.y = prevY;
     tractor.speed = 0;
+  }
+
+  // Cows and sheep are solid: drive into one and the tractor just stops.
+  // Only blocked while closing in, so backing away always works.
+  for (const an of animals) {
+    if (an.species !== "cow" && an.species !== "sheep") continue;
+    const dNew = Math.hypot(an.wx - tractor.x, an.wy - tractor.y);
+    if (dNew < 6.5 && dNew < Math.hypot(an.wx - prevX, an.wy - prevY)) {
+      tractor.x = prevX;
+      tractor.y = prevY;
+      tractor.speed = 0;
+      break;
+    }
   }
 
   // A towed implement's wheels roll rather than skid, so the hitch's
