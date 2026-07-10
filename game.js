@@ -25,8 +25,16 @@ const ctx = view.getContext("2d");
 // F1 menu (or ?seed= in the URL); anything non-numeric gets replaced.
 // ---------------------------------------------------------------------------
 
-const seedParam = parseInt(new URLSearchParams(location.search).get("seed"), 10);
+const urlParams = new URLSearchParams(location.search);
+const seedParam = parseInt(urlParams.get("seed"), 10);
 const SEED = Number.isFinite(seedParam) ? seedParam : (Math.random() * 1e9) | 0;
+
+// Game mode: "classic" is the timed one-season round, "survival" rolls year
+// after year with a property tax due every Oct 31. Chosen in the start menu;
+// reloads carry the mode in the URL next to the seed, and a fresh visit
+// (no mode in the URL) opens the start menu before anything moves.
+let mode = urlParams.get("mode") === "survival" ? "survival" : "classic";
+let gameStarted = urlParams.has("mode");
 
 const rand = (function mulberry32(a) {
   return function () {
@@ -317,6 +325,26 @@ function playSell() {
   });
 }
 
+// Falling two-note toll when the yearly property tax is collected
+function playTax() {
+  if (!audio) return;
+  const t = audio.ac.currentTime;
+  [523, 349].forEach((freq, i) => {
+    const o = audio.ac.createOscillator();
+    o.type = "triangle";
+    const g = audio.ac.createGain();
+    o.connect(g);
+    g.connect(audio.master);
+    const at = t + i * 0.16;
+    o.frequency.setValueAtTime(freq, at);
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.linearRampToValueAtTime(0.16, at + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + 0.4);
+    o.start(at);
+    o.stop(at + 0.42);
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Input
 // ---------------------------------------------------------------------------
@@ -324,9 +352,11 @@ function playSell() {
 const keys = {};
 const IMPLEMENT_KEYS = { 1: "plow", 2: "seeder", 3: "harvester", 4: "trailer" };
 
-// F1 opens the menu, the only place the seed can be typed in
-let menuOpen = false;
-let menuSeed = "";
+// F1 opens the menu, the only place the seed and mode can be picked. It is
+// also the start menu: a fresh visit begins with it open and the clock held.
+let menuOpen = !gameStarted;
+let menuSeed = String(SEED);
+let menuMode = mode;
 
 window.addEventListener("keydown", (e) => {
   // Browsers only allow audio after a user gesture
@@ -334,21 +364,32 @@ window.addEventListener("keydown", (e) => {
   if (audio.ac.state === "suspended") audio.ac.resume();
   if (e.key === "F1" && !e.repeat) {
     e.preventDefault();
+    if (!gameStarted) return; // the start menu stays until a mode is picked
     menuOpen = !menuOpen;
     menuSeed = String(SEED);
+    menuMode = mode;
     return;
   }
   if (menuOpen) {
-    // The menu swallows all input: type a seed, Enter loads it, N rolls a
-    // random map, Esc closes
+    // The menu swallows all input: type a seed, arrows pick the mode, Enter
+    // starts, N rolls a random map, Esc closes (once a game is running)
     e.preventDefault();
     if (e.key === "Enter") {
       const n = parseInt(menuSeed, 10);
-      if (Number.isFinite(n)) location.search = "?seed=" + n;
+      if (Number.isFinite(n)) {
+        if (!gameStarted && n === SEED) {
+          // Same map as the one already generated: start without a reload
+          startGame(menuMode);
+        } else {
+          location.search = `?seed=${n}&mode=${menuMode}`;
+        }
+      }
     } else if (e.key === "n" || e.key === "N") {
-      location.search = "?seed=" + ((Math.random() * 1e9) | 0);
+      location.search = `?seed=${(Math.random() * 1e9) | 0}&mode=${menuMode}`;
+    } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+      menuMode = menuMode === "classic" ? "survival" : "classic";
     } else if (e.key === "Escape") {
-      menuOpen = false;
+      if (gameStarted) menuOpen = false;
     } else if (e.key === "Backspace") {
       menuSeed = menuSeed.slice(0, -1);
     } else if (/^[0-9]$/.test(e.key) && menuSeed.length < 10) {
@@ -2656,15 +2697,36 @@ const TRAILER_CAP = 12; // sacks the trailer can carry
 const SEED_PRICE = 2; // € per seed, bought automatically at the farm
 const SACK_PRICE = 10; // € earned per sack of grain sold
 
-// Rounds are timed; the score is the profit made before time runs out.
-// The five best scores are kept in localStorage.
-const ROUND_TIME = 300; // seconds
+// Classic rounds are timed; the score is the profit made before time runs
+// out. The five best scores are kept in localStorage.
+const ROUND_TIME = 300; // seconds — one Apr 1 – Oct 31 season in either mode
 const START_CASH = 100;
 const SCORES_KEY = "traktoripeli.best";
 let timeLeft = ROUND_TIME;
 let gameOver = false;
 let bestScores = [];
 let finalRank = -1; // this round's place in the best list, -1 if none
+
+// Survival mode: the years keep rolling and every Oct 31 the property tax
+// is collected, growing a little each year, income or not. Seeds can go on
+// credit down to the debt limit; sink below it and the bank takes the farm.
+// Its scoreboard is the longest runs in years, kept apart from the classic.
+const SURVIVAL_START_CASH = 250;
+const TAX_BASE = 150; // € — the first year's property tax
+const TAX_STEP = 75; // € added to the tax each following year
+const DEBT_LIMIT = 400; // bankruptcy when cash drops below -this
+const SURVIVAL_SCORES_KEY = "traktoripeli.survival";
+let year = 1;
+let propertyTax = TAX_BASE;
+let taxFlash = 0; // seconds left of the "tax paid" banner
+let taxPaid = 0; // amount shown in that banner
+
+function startGame(m) {
+  mode = m;
+  cash = m === "survival" ? SURVIVAL_START_CASH : START_CASH;
+  gameStarted = true;
+  menuOpen = false;
+}
 
 function endRound() {
   gameOver = true;
@@ -2687,7 +2749,32 @@ function endRound() {
   }
 }
 
-let cash = START_CASH; // € — enough starting capital for the first bag of seeds
+// Bankruptcy ends a survival run; the score is how many years the farm held
+// out, with the closing balance as the tiebreak
+function endSurvival() {
+  gameOver = true;
+  tractor.speed = 0;
+  const entry = { years: year, cash, seed: SEED, date: Date.now() };
+  let scores;
+  try {
+    scores = JSON.parse(localStorage.getItem(SURVIVAL_SCORES_KEY)) || [];
+  } catch {
+    scores = [];
+  }
+  scores.push(entry);
+  scores.sort((a, b) => b.years - a.years || b.cash - a.cash);
+  bestScores = scores.slice(0, 5);
+  finalRank = bestScores.indexOf(entry);
+  try {
+    localStorage.setItem(SURVIVAL_SCORES_KEY, JSON.stringify(bestScores));
+  } catch {
+    // private browsing etc: scores just aren't persisted
+  }
+}
+
+// € — enough starting capital for the first bag of seeds; survival starts
+// with a bit more as a buffer against the first tax bill
+let cash = mode === "survival" ? SURVIVAL_START_CASH : START_CASH;
 let seeds = 0; // start empty: buy seeds at the farm
 let cargo = 0; // sacks on the trailer
 let sold = 0; // total sacks delivered to the farm
@@ -2766,13 +2853,29 @@ function update(dt) {
   updateAnimals(dt);
   updateBirds(dt);
   updateSeason();
-  if (gameOver) return;
+  if (!gameStarted || gameOver) return;
 
   timeLeft = Math.max(0, timeLeft - dt);
   if (timeLeft === 0) {
-    endRound();
-    return;
+    if (mode === "survival") {
+      // Oct 31: the tax collector comes around, then a new year begins
+      cash -= propertyTax;
+      taxPaid = propertyTax;
+      taxFlash = 4;
+      playTax();
+      if (cash < -DEBT_LIMIT) {
+        endSurvival();
+        return;
+      }
+      year++;
+      propertyTax += TAX_STEP;
+      timeLeft = ROUND_TIME;
+    } else {
+      endRound();
+      return;
+    }
   }
+  taxFlash = Math.max(0, taxFlash - dt);
 
   const imp = IMPLEMENTS[tractor.implement];
 
@@ -2922,8 +3025,10 @@ function update(dt) {
   // Farmyard services: seed purchase and grain delivery
   if (nearFarm()) {
     if (tractor.implement === "seeder" && seeds < SEED_CAP) {
-      // Top up the hopper with as many seeds as the cash covers
-      const bought = Math.min(SEED_CAP - seeds, Math.floor(cash / SEED_PRICE));
+      // Top up the hopper with as many seeds as the cash covers; in
+      // survival the farm buys on credit down to the debt limit
+      const budget = mode === "survival" ? cash + DEBT_LIMIT : cash;
+      const bought = Math.min(SEED_CAP - seeds, Math.floor(budget / SEED_PRICE));
       if (bought > 0) {
         seeds += bought;
         cash -= bought * SEED_PRICE;
@@ -3063,6 +3168,24 @@ function draw() {
   screenCtx.fillStyle = flash ? "#ff5040" : seasonHex(SEASON_BAR_COLORS);
   screenCtx.fillRect(bx, by, Math.round(barW * progress), barH);
 
+  // Survival: the year and the tax bill waiting at the end of it, swapped
+  // for a red receipt banner for a few seconds after the tax is collected
+  if (mode === "survival") {
+    screenCtx.font = "bold 11px monospace";
+    screenCtx.textAlign = "center";
+    if (taxFlash > 0 && !gameOver) {
+      label(`PROPERTY TAX PAID: -€${taxPaid}`, bx + barW / 2, by + barH + 16, "#ff5040");
+    } else {
+      label(
+        `YEAR ${year} — TAX DUE OCT 31: €${propertyTax}`,
+        bx + barW / 2,
+        by + barH + 16,
+        "#f5e9c8"
+      );
+    }
+    screenCtx.textAlign = "left";
+  }
+
   // Game over: final score and the all-time best list
   if (gameOver) {
     const w = 460;
@@ -3082,19 +3205,39 @@ function draw() {
     for (let py = y + 52; py < y + h; py += 52) screenCtx.fillRect(x, py, w, 1);
     screenCtx.textAlign = "center";
     screenCtx.font = "bold 24px monospace";
-    label("OCT 31 — SEASON'S END", cx, y + 40, "#ffd94f");
-    screenCtx.font = "bold 18px monospace";
-    label(`PROFIT: €${cash - START_CASH}`, cx, y + 74, "#f5e9c8");
-    screenCtx.font = "13px monospace";
-    bestScores.forEach((entry, i) => {
+    if (mode === "survival") {
+      label("BANKRUPT — THE FARM IS LOST", cx, y + 40, "#ff7a5c");
+      screenCtx.font = "bold 18px monospace";
       label(
-        `${i + 1}.  €${entry.score}   (seed ${entry.seed})`,
+        `SURVIVED ${year} YEAR${year === 1 ? "" : "S"}   (€${cash})`,
         cx,
-        y + 106 + i * 20,
-        i === finalRank ? "#ffd94f" : "#e0d0a8"
+        y + 74,
+        "#f5e9c8"
       );
-    });
-    label("[F1] MENU — NEW MAP OR SEED", cx, y + h - 18, "#c9e6a8");
+      screenCtx.font = "13px monospace";
+      bestScores.forEach((entry, i) => {
+        label(
+          `${i + 1}.  ${entry.years} YEAR${entry.years === 1 ? " " : "S"}   €${entry.cash}   (seed ${entry.seed})`,
+          cx,
+          y + 106 + i * 20,
+          i === finalRank ? "#ffd94f" : "#e0d0a8"
+        );
+      });
+    } else {
+      label("OCT 31 — SEASON'S END", cx, y + 40, "#ffd94f");
+      screenCtx.font = "bold 18px monospace";
+      label(`PROFIT: €${cash - START_CASH}`, cx, y + 74, "#f5e9c8");
+      screenCtx.font = "13px monospace";
+      bestScores.forEach((entry, i) => {
+        label(
+          `${i + 1}.  €${entry.score}   (seed ${entry.seed})`,
+          cx,
+          y + 106 + i * 20,
+          i === finalRank ? "#ffd94f" : "#e0d0a8"
+        );
+      });
+    }
+    label("[F1] MENU — NEW GAME, MAP OR MODE", cx, y + h - 18, "#c9e6a8");
     screenCtx.textAlign = "left";
   }
 
@@ -3133,12 +3276,14 @@ function draw() {
   screenCtx.fillRect(tmx - 1, tmy - 1, 2, 2);
   screenCtx.restore();
 
-  // F1 menu: type a seed on a little wooden sign
+  // Start / F1 menu: seed and mode on a little wooden sign. A fresh visit
+  // opens it before the clock starts; F1 brings it back later.
   if (menuOpen) {
-    const w = 360;
-    const h = 120;
+    const w = 420;
+    const h = 192;
     const x = (screenCanvas.width - w) / 2;
     const y = (screenCanvas.height - h) / 2;
+    const cx = screenCanvas.width / 2;
     screenCtx.fillStyle = "rgba(24,14,6,0.45)";
     screenCtx.fillRect(0, 0, screenCanvas.width, screenCanvas.height);
     screenCtx.fillStyle = "#4a2f1a";
@@ -3147,16 +3292,31 @@ function draw() {
     screenCtx.fillRect(x, y, w, h);
     screenCtx.textAlign = "center";
     screenCtx.font = "bold 16px monospace";
-    label("MAP SEED", screenCanvas.width / 2, y + 28, "#ffd94f");
+    label(gameStarted ? "MENU" : "TRAKTORIPELI", cx, y + 26, "#ffd94f");
+
+    screenCtx.font = "11px monospace";
+    label("MAP SEED", cx, y + 46, "#d8c49a");
     screenCtx.fillStyle = "#2e1d10";
-    screenCtx.fillRect(x + 60, y + 42, w - 120, 26);
+    screenCtx.fillRect(x + 90, y + 52, w - 180, 24);
     screenCtx.font = "bold 14px monospace";
     const caret = ((worldTime * 2) | 0) % 2 === 0 ? "_" : " ";
-    label(menuSeed + caret, screenCanvas.width / 2, y + 60, "#f5e9c8");
+    label(menuSeed + caret, cx, y + 69, "#f5e9c8");
+
+    screenCtx.font = "bold 12px monospace";
+    const modeRows = [
+      ["classic", "CLASSIC  — ONE SEASON, RACE FOR PROFIT"],
+      ["survival", "SURVIVAL — PAY THE YEARLY TAX, SURVIVE"],
+    ];
+    modeRows.forEach(([m, text], i) => {
+      const sel = menuMode === m;
+      label((sel ? "» " : "  ") + text, cx, y + 104 + i * 20, sel ? "#ffd94f" : "#e0d0a8");
+    });
+
     screenCtx.font = "11px monospace";
     label(
-      "[ENTER] LOAD MAP   [N] NEW MAP   [ESC] CLOSE",
-      screenCanvas.width / 2,
+      "[↑↓] MODE   [ENTER] START   [N] NEW MAP" +
+        (gameStarted ? "   [ESC] CLOSE" : ""),
+      cx,
       y + h - 14,
       "#c9e6a8"
     );
