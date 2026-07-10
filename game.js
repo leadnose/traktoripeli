@@ -760,9 +760,23 @@ function drawTile(tx, ty) {
   ditherRegion(mapCtx, x0, y0, x1 - x0, y1 - y0);
 }
 
+// Per-tile deterministic randomness for tile details (speckles, flowers,
+// ripples): a tile repaint must reproduce the exact same pixels, otherwise
+// the constant background repaints (seasons, field work) twinkle
+function tileRand(tx, ty) {
+  let s = (SEED ^ Math.imul(tx + 1, 374761393) ^ Math.imul(ty + 1, 668265263)) | 0;
+  return function () {
+    s = (s + 0x6d2b79f5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 function paintTile(tx, ty) {
   const type = tiles[ty][tx];
   const kc = groundShade((tx + 0.5) * TILE, (ty + 0.5) * TILE);
+  const tr = tileRand(tx, ty);
 
   // Ground in sub-quads, each shaded from its own terrain normal, so slope
   // shading varies inside a tile instead of stepping at tile borders. Each
@@ -800,21 +814,21 @@ function paintTile(tx, ty) {
 
     // Speckles: grass tufts
     for (let i = 0; i < 8; i++) {
-      const p = mp((tx + rand()) * TILE, (ty + rand()) * TILE);
-      mapCtx.fillStyle = shade(GRASS_DOTS[(rand() * GRASS_DOTS.length) | 0], kc);
+      const p = mp((tx + tr()) * TILE, (ty + tr()) * TILE);
+      mapCtx.fillStyle = shade(GRASS_DOTS[(tr() * GRASS_DOTS.length) | 0], kc);
       mapCtx.fillRect(Math.round(p.x), Math.round(p.y), 1, 1);
     }
 
     // Little meadow flowers: four petals around a yellow heart; forests
     // keep their floor bare
-    if (!forestTiles.has(ty * MAP_TILES + tx) && rand() < 0.5) {
+    if (!forestTiles.has(ty * MAP_TILES + tx) && tr() < 0.5) {
       const p = mp(
-        (tx + 0.2 + rand() * 0.6) * TILE,
-        (ty + 0.2 + rand() * 0.6) * TILE
+        (tx + 0.2 + tr() * 0.6) * TILE,
+        (ty + 0.2 + tr() * 0.6) * TILE
       );
       const x = Math.round(p.x);
       const y = Math.round(p.y);
-      mapCtx.fillStyle = shade(FLOWER_COLORS[(rand() * FLOWER_COLORS.length) | 0], kc);
+      mapCtx.fillStyle = shade(FLOWER_COLORS[(tr() * FLOWER_COLORS.length) | 0], kc);
       mapCtx.fillRect(x - 1, y, 1, 1);
       mapCtx.fillRect(x + 1, y, 1, 1);
       mapCtx.fillRect(x, y - 1, 1, 1);
@@ -847,7 +861,7 @@ function paintTile(tx, ty) {
 
     mapCtx.fillStyle = "#6fa9dd"; // ripples
     for (let i = 0; i < 5; i++) {
-      const p = mp((tx + 0.15 + rand() * 0.7) * TILE, (ty + 0.15 + rand() * 0.7) * TILE);
+      const p = mp((tx + 0.15 + tr() * 0.7) * TILE, (ty + 0.15 + tr() * 0.7) * TILE);
       mapCtx.fillRect(Math.round(p.x), Math.round(p.y), 2, 1);
     }
 
@@ -939,8 +953,8 @@ function paintTile(tx, ty) {
   } else {
     // Speckles: dirt clods
     for (let i = 0; i < 8; i++) {
-      const p = mp((tx + rand()) * TILE, (ty + rand()) * TILE);
-      mapCtx.fillStyle = shade(DIRT_DOTS[(rand() * DIRT_DOTS.length) | 0], kc);
+      const p = mp((tx + tr()) * TILE, (ty + tr()) * TILE);
+      mapCtx.fillStyle = shade(DIRT_DOTS[(tr() * DIRT_DOTS.length) | 0], kc);
       mapCtx.fillRect(Math.round(p.x), Math.round(p.y), 1, 1);
     }
   }
@@ -1685,56 +1699,137 @@ for (const p of patches) {
 // of birds cross the sky.
 // ---------------------------------------------------------------------------
 
+// The body is split into adjacent segments instead of overlapping boxes:
+// overlapping boxes have near-equal painter's depths, and the sort order
+// flips as the cow turns or drapes over a hill, which made them flicker
+// Animal parts are listed in paint order (legs under body, head on top):
+// each animal is drawn as one unit in this fixed order, because its parts
+// are so small and close together that depth-sorting them individually
+// lands on near-ties that flip while the animal moves
 const COW_BOXES = [
-  { x0: -2.4, x1: 2.0, y0: -1.2, y1: 1.2, z0: 1.3, z1: 3.8, color: "#f0ede2" }, // body
-  { x0: -1.7, x1: 0.4, y0: -1.25, y1: 1.25, z0: 2.4, z1: 3.85, color: "#413c38" }, // patch
-  { x0: 2.0, x1: 3.3, y0: -0.8, y1: 0.8, z0: 2.4, z1: 4.2, color: "#f0ede2" }, // head
-  { x0: 2.9, x1: 3.35, y0: -0.6, y1: 0.6, z0: 2.4, z1: 3.0, color: "#d9a3ab" }, // muzzle
   { x0: -2.0, x1: -1.2, y0: -1.0, y1: 1.0, z0: 0.0, z1: 1.3, color: "#5a534c" }, // hind legs
   { x0: 1.0, x1: 1.8, y0: -1.0, y1: 1.0, z0: 0.0, z1: 1.3, color: "#5a534c" }, // front legs
+  { x0: -2.4, x1: -1.7, y0: -1.2, y1: 1.2, z0: 1.3, z1: 3.8, color: "#f0ede2" }, // rump
+  { x0: -1.7, x1: 0.4, y0: -1.2, y1: 1.2, z0: 1.3, z1: 3.8, color: "#413c38" }, // dark middle
+  { x0: 0.4, x1: 2.0, y0: -1.2, y1: 1.2, z0: 1.3, z1: 3.8, color: "#f0ede2" }, // shoulders
+  { x0: 2.0, x1: 2.9, y0: -0.8, y1: 0.8, z0: 2.4, z1: 4.2, color: "#f0ede2" }, // head
+  { x0: 2.9, x1: 3.35, y0: -0.7, y1: 0.7, z0: 2.4, z1: 3.4, color: "#d9a3ab" }, // muzzle
 ];
 const SHEEP_BOXES = [
   { x0: 1.4, x1: 2.4, y0: -0.6, y1: 0.6, z0: 1.6, z1: 2.9, color: "#4a4238" }, // head
   { x0: -1.4, x1: -0.6, y0: -0.7, y1: 0.7, z0: 0.0, z1: 1.4, color: "#4a4238" }, // hind legs
   { x0: 0.5, x1: 1.3, y0: -0.7, y1: 0.7, z0: 0.0, z1: 1.4, color: "#4a4238" }, // front legs
 ];
+
+// Horse: taller and slimmer, with a raised neck, dark mane and a tail.
+// Same fixed paint order: legs, body, tail, neck, head, mane.
+const HORSE_BOXES = [
+  { x0: -1.9, x1: -1.1, y0: -0.9, y1: 0.9, z0: 0.0, z1: 1.8, color: "#5a4636" }, // hind legs
+  { x0: 1.0, x1: 1.8, y0: -0.9, y1: 0.9, z0: 0.0, z1: 1.8, color: "#5a4636" }, // front legs
+  { x0: -2.3, x1: 2.0, y0: -1.0, y1: 1.0, z0: 1.8, z1: 3.9, color: "#8a5c3a" }, // body
+  { x0: -2.9, x1: -2.3, y0: -0.3, y1: 0.3, z0: 2.2, z1: 3.7, color: "#4a3626" }, // tail
+  { x0: 1.6, x1: 2.5, y0: -0.55, y1: 0.55, z0: 3.4, z1: 5.6, color: "#8a5c3a" }, // neck
+  { x0: 2.2, x1: 3.4, y0: -0.5, y1: 0.5, z0: 4.6, z1: 5.7, color: "#8a5c3a" }, // head
+  { x0: 1.5, x1: 2.1, y0: -0.15, y1: 0.15, z0: 4.2, z1: 6.0, color: "#4a3626" }, // mane
+];
 const SHEEP_SHAPES = [
   { blob: true, x: 0, y: 0, z: 2.1, r: 1.8, color: "#f4f1e6" }, // woolly body
 ];
 
 const animals = [];
+
+function spawnHerd(species, hx, hy) {
+  const n = 3 + ((rand() * 4) | 0);
+  for (let i = 0; i < n; i++) {
+    // Keep trying offsets until the animal actually stands on grass —
+    // otherwise it can spawn in the water beside a shoreline home spot
+    let wx = hx;
+    let wy = hy;
+    for (let t = 0; t < 20; t++) {
+      const cx = hx + (rand() - 0.5) * 24;
+      const cy = hy + (rand() - 0.5) * 24;
+      if (tileTypeAt(cx, cy) === 0 && !roadTiles.has(tileKey(cx, cy))) {
+        wx = cx;
+        wy = cy;
+        break;
+      }
+    }
+    animals.push({
+      species,
+      hx,
+      hy,
+      wx,
+      wy,
+      angle: rand() * Math.PI * 2,
+      pause: rand() * 4,
+      // Unique depth tiebreak: animals standing at the same depth keep a
+      // consistent order instead of interleaving their parts
+      tie: animals.length * 0.004,
+    });
+  }
+}
+
+// The farm always keeps one herd of each species grazing close by
+for (const species of ["cow", "sheep", "horse"]) {
+  let hx = FARM.x;
+  let hy = FARM.y;
+  for (let tries = 0; tries < 200; tries++) {
+    const a = rand() * Math.PI * 2;
+    const d = FARM_RADIUS + 30 + rand() * 40;
+    const cx = FARM.x + Math.cos(a) * d;
+    const cy = FARM.y + Math.sin(a) * d;
+    if (cx < 24 || cy < 24 || cx > MAP_SIZE - 24 || cy > MAP_SIZE - 24) continue;
+    if (tileTypeAt(cx, cy) !== 0) continue;
+    if (forestTiles.has(tileKey(cx, cy)) || roadTiles.has(tileKey(cx, cy))) continue;
+    hx = cx;
+    hy = cy;
+    break;
+  }
+  spawnHerd(species, hx, hy);
+}
+
+// Plus a few wild-placed herds further out
 for (let herds = 0, tries = 0; herds < 4 && tries < 400; tries++) {
   const hx = 30 + rand() * (MAP_SIZE - 60);
   const hy = 30 + rand() * (MAP_SIZE - 60);
   if (tileTypeAt(hx, hy) !== 0) continue;
   if (forestTiles.has(tileKey(hx, hy)) || roadTiles.has(tileKey(hx, hy))) continue;
   if (Math.hypot(hx - FARM.x, hy - FARM.y) < FARM_RADIUS + 24) continue;
-  const species = rand() < 0.5 ? "cow" : "sheep";
-  const n = 3 + ((rand() * 4) | 0);
-  for (let i = 0; i < n; i++) {
-    animals.push({
-      species,
-      hx,
-      hy,
-      wx: hx + (rand() - 0.5) * 24,
-      wy: hy + (rand() - 0.5) * 24,
-      angle: rand() * Math.PI * 2,
-      pause: rand() * 4,
-    });
-  }
+  const r = rand();
+  spawnHerd(r < 0.4 ? "cow" : r < 0.75 ? "sheep" : "horse", hx, hy);
   herds++;
 }
 
 function updateAnimals(dt) {
   for (const a of animals) {
+    // Herd spacing: crowding neighbors ease each other apart (also while
+    // grazing) so animals never stand inside one another
+    for (const b of animals) {
+      if (b === a) continue;
+      const dx = a.wx - b.wx;
+      const dy = a.wy - b.wy;
+      const d = Math.hypot(dx, dy);
+      if (d < 4.5 && d > 0.001) {
+        const nx = a.wx + (dx / d) * (4.5 - d) * dt * 3;
+        const ny = a.wy + (dy / d) * (4.5 - d) * dt * 3;
+        if (tileTypeAt(nx, ny) === 0 && !roadTiles.has(tileKey(nx, ny))) {
+          a.wx = nx;
+          a.wy = ny;
+        }
+      } else if (d <= 0.001) {
+        a.wx += rand() - 0.5; // unstick exact overlaps
+      }
+    }
     if (a.pause > 0) {
       a.pause -= dt;
       continue;
     }
-    // Amble about, drifting back toward the herd's home spot
+    // Amble about, turning back toward the herd's home spot when strayed
     a.angle += (rand() - 0.5) * 1.4 * dt;
     if (Math.hypot(a.wx - a.hx, a.wy - a.hy) > 22) {
-      a.angle = Math.atan2(a.hy - a.wy, a.hx - a.wx);
+      const want = Math.atan2(a.hy - a.wy, a.hx - a.wx);
+      const d = Math.atan2(Math.sin(want - a.angle), Math.cos(want - a.angle));
+      a.angle += Math.max(-2.5 * dt, Math.min(2.5 * dt, d));
     }
     const nx = a.wx + Math.cos(a.angle) * 2.5 * dt;
     const ny = a.wy + Math.sin(a.angle) * 2.5 * dt;
@@ -1742,7 +1837,9 @@ function updateAnimals(dt) {
       a.wx = nx;
       a.wy = ny;
     } else {
-      a.angle += Math.PI / 2; // blocked by water, field or road: turn away
+      // Blocked by water, a field or a road: pivot smoothly until a clear
+      // direction opens up (an instant turn every frame strobes the model)
+      a.angle += 2.5 * dt;
     }
     if (rand() < 0.004) a.pause = 1 + rand() * 3; // stop to graze
   }
@@ -1923,12 +2020,15 @@ const FACES = [
   { n: [0, -1, 0], i: [0, 4, 5, 1] },
 ];
 
+// Backface test on the UNROUNDED projection (fx/fy): for small thin boxes,
+// pixel rounding can flip a near-edge-on face's sign from frame to frame
+// while the model moves, making faces pop in and out
 function signedArea(pts) {
   let a = 0;
   for (let i = 0; i < pts.length; i++) {
     const p = pts[i];
     const q = pts[(i + 1) % pts.length];
-    a += p.x * q.y - q.x * p.y;
+    a += p.fx * q.fy - q.fx * p.fy;
   }
   return a;
 }
@@ -1939,19 +2039,24 @@ function signedArea(pts) {
 // ---------------------------------------------------------------------------
 
 // Each point rides at terrain height under its own footprint, which drapes
-// models over slopes so they visibly pitch and roll on hills.
-function makeItems(items, boxes, ox, oy, angle, liftZ, camX, camY) {
+// models over slopes so they visibly pitch and roll on hills. Sort depths,
+// however, use the terrain height at the model's origin for every box: on a
+// steep slope falling away from the camera, per-footprint heights nearly
+// cancel the depth differences between a model's parts, and the resulting
+// near-ties flip per frame and flicker.
+function makeItems(items, boxes, ox, oy, angle, liftZ, camX, camY, baseDepth) {
   const cos = Math.cos(angle);
   const sin = Math.sin(angle);
+  // Model-level depth: callers of moving models can pass a smoothed value so
+  // frame-to-frame jitter can't flip the draw order against neighbors
+  const M = baseDepth !== undefined ? baseDepth : ox + oy + terrainHeight(ox, oy);
   const local = (lx, ly, lz) => {
     const wx = ox + lx * cos - ly * sin;
     const wy = oy + lx * sin + ly * cos;
     const wz = lz + terrainHeight(wx, wy);
-    return {
-      x: Math.round(projX(wx, wy) - camX),
-      y: Math.round(projY(wx, wy, wz) - camY),
-      depth: wx + wy + wz,
-    };
+    const fx = projX(wx, wy) - camX;
+    const fy = projY(wx, wy, wz) - camY;
+    return { x: Math.round(fx), y: Math.round(fy), fx, fy };
   };
   for (const box of boxes) {
     const pts = [];
@@ -1965,20 +2070,20 @@ function makeItems(items, boxes, ox, oy, angle, liftZ, camX, camY) {
               (zi ? box.z1 : box.z0) + liftZ
             )
           );
-    const center = local(
-      (box.x0 + box.x1) / 2,
-      (box.y0 + box.y1) / 2,
-      (box.z0 + box.z1) / 2 + liftZ
-    );
-    items.push({ box, pts, depth: center.depth, cos, sin });
+    const cx = (box.x0 + box.x1) / 2;
+    const cy = (box.y0 + box.y1) / 2;
+    const rel = cx * cos - cy * sin + cx * sin + cy * cos;
+    const depth = M + rel + (box.z0 + box.z1) / 2 + liftZ;
+    items.push({ box, pts, depth, cos, sin });
   }
 }
 
 // Round shapes: discs are circles in the local x-z plane (wheel faces),
 // blobs are soft spheres drawn as shaded ellipses (canopies, sacks, domes).
-function makeRoundItems(items, shapes, ox, oy, angle, liftZ, camX, camY) {
+function makeRoundItems(items, shapes, ox, oy, angle, liftZ, camX, camY, baseDepth) {
   const cos = Math.cos(angle);
   const sin = Math.sin(angle);
+  const M = baseDepth !== undefined ? baseDepth : ox + oy + terrainHeight(ox, oy);
   const project = (lx, ly, lz) => {
     const wx = ox + lx * cos - ly * sin;
     const wy = oy + lx * sin + ly * cos;
@@ -1986,11 +2091,13 @@ function makeRoundItems(items, shapes, ox, oy, angle, liftZ, camX, camY) {
     return {
       x: Math.round(projX(wx, wy) - camX),
       y: Math.round(projY(wx, wy, wz) - camY),
-      depth: wx + wy + wz,
     };
   };
   for (const s of shapes) {
     const c = project(s.x, s.y, s.z + liftZ);
+    // Depth from the shared model base, like makeItems
+    const rel = s.x * cos - s.y * sin + s.x * sin + s.y * cos;
+    const depth = M + rel + s.z + liftZ + (s.bias || 0);
     if (s.disc) {
       const pts = [];
       for (let i = 0; i < 14; i++) {
@@ -2000,7 +2107,7 @@ function makeRoundItems(items, shapes, ox, oy, angle, liftZ, camX, camY) {
       // Lit like a box's side face: normal is the rotated local y axis
       const d = -s.n * sin * LIGHT.x + s.n * cos * LIGHT.y;
       const k = Math.min(1, Math.max(0.3, 0.3 + d));
-      items.push({ poly: pts, color: s.color, k, depth: c.depth + (s.bias || 0) });
+      items.push({ poly: pts, color: s.color, k, depth });
     } else {
       items.push({
         blob: c,
@@ -2008,7 +2115,7 @@ function makeRoundItems(items, shapes, ox, oy, angle, liftZ, camX, camY) {
         ry: s.r * 1.2,
         color: s.color,
         k: Math.min(1, 0.35 + LIGHT.z),
-        depth: c.depth + (s.bias || 0),
+        depth,
       });
     }
   }
@@ -2090,7 +2197,7 @@ function drawScene(camX, camY) {
     if (!onScreen(a.wx, a.wy, camX, camY)) continue;
     const sx = Math.round(projX(a.wx, a.wy) - camX);
     const sy = Math.round(projY(a.wx, a.wy, terrainHeight(a.wx, a.wy)) - camY);
-    const r = a.species === "cow" ? 3.4 : 2.4;
+    const r = a.species === "sheep" ? 2.4 : 3.4;
     ctx.moveTo(sx + r, sy);
     ctx.ellipse(sx, sy, r, r / 2, 0, 0, Math.PI * 2);
   }
@@ -2116,14 +2223,37 @@ function drawScene(camX, camY) {
     if (!onScreen(b.wx, b.wy, camX, camY)) continue;
     b.shapes[0].color = seasonHex(b.seasonColors);
     makeRoundItems(items, b.shapes, b.wx, b.wy, 0, 0, camX, camY);
+    // Anchor the bush to the same ground-based depth formula the animals
+    // use, so an animal grazing past swaps order exactly where the ground
+    // positions cross — anywhere else and the swap visibly pops
+    items[items.length - 1].depth = b.wx + b.wy + terrainHeight(b.wx, b.wy) + 2.5;
   }
   for (const a of animals) {
     if (!onScreen(a.wx, a.wy, camX, camY)) continue;
-    if (a.species === "cow") {
-      makeItems(items, COW_BOXES, a.wx, a.wy, a.angle, 0, camX, camY);
+    // Smooth the animal's base depth so its wandering can't jitter the draw
+    // order against herd-mates standing at nearly the same depth
+    const target = a.wx + a.wy + terrainHeight(a.wx, a.wy) + a.tie;
+    // Hysteresis follower: the sort depth trails the true depth a little and
+    // holds still while the animal wanders inside the band, so per-frame
+    // jitter can't flip the draw order against neighbors
+    if (a.sd === undefined) {
+      a.sd = target;
     } else {
-      makeItems(items, SHEEP_BOXES, a.wx, a.wy, a.angle, 0, camX, camY);
+      const diff = target - a.sd;
+      if (Math.abs(diff) > 0.75) a.sd = target - Math.sign(diff) * 0.75;
+    }
+    // One unit, fixed internal paint order: overwrite the parts' depths with
+    // strictly increasing values around the smoothed base, so the global
+    // sort can never reorder them (see COW_BOXES)
+    const start = items.length;
+    if (a.species === "sheep") {
       makeRoundItems(items, SHEEP_SHAPES, a.wx, a.wy, a.angle, 0, camX, camY);
+      makeItems(items, SHEEP_BOXES, a.wx, a.wy, a.angle, 0, camX, camY);
+    } else {
+      makeItems(items, a.species === "cow" ? COW_BOXES : HORSE_BOXES, a.wx, a.wy, a.angle, 0, camX, camY);
+    }
+    for (let i = start; i < items.length; i++) {
+      items[i].depth = a.sd + 2.5 + (i - start) * 1e-4;
     }
   }
   for (const s of sacks) {
@@ -2598,6 +2728,12 @@ function update(dt) {
       terrainHeight(tractor.x - cos * 4, tractor.y - sin * 4)) /
     8;
   tractor.speed -= grade * 60 * dt;
+
+  // At a crawl with no throttle the tractor simply stops — otherwise slope
+  // gravity keeps it creeping forever and the camera never settles
+  if (!keys.ArrowUp && !keys.ArrowDown && Math.abs(tractor.speed) < 1.5) {
+    tractor.speed = 0;
+  }
 
   // Top speed from the gear, further reduced by drag when working the ground
   let maxForward =
