@@ -1789,14 +1789,14 @@ const CHICKEN_BOXES = [
 
 // Per-species behavior: chickens are quick, jerky, peck constantly, keep to
 // a small range and may run on roads (the yard is full of them)
-// Horses and chickens spook (spook radius + flee dash speed) and get clear
-// of the tractor; cows and sheep have no spook — they stand their ground
-// and physically block it instead.
+// Every species gets clear of the tractor (spook radius + flee speed +
+// fleeTurn rate): horses and chickens dash in a panic, while cows and sheep
+// — still solid to drive against — just plod calmly out of the way.
 const ANIMAL_SPECS = {
-  cow: { speed: 2.5, range: 22, sep: 4.5, turn: 1.4, pauseChance: 0.004, pauseDur: [1, 3], shadow: 3.4 },
-  sheep: { speed: 2.2, range: 20, sep: 4.5, turn: 1.4, pauseChance: 0.005, pauseDur: [1, 3], shadow: 2.4 },
-  horse: { speed: 3.2, range: 26, sep: 4.5, turn: 1.4, pauseChance: 0.004, pauseDur: [1, 3], shadow: 3.4, spook: 26, flee: 22 },
-  chicken: { speed: 5, range: 15, sep: 1.6, turn: 4, pauseChance: 0.03, pauseDur: [0.4, 1.2], shadow: 1.0, roads: true, spook: 18, flee: 16 },
+  cow: { speed: 2.5, range: 22, sep: 4.5, turn: 1.4, pauseChance: 0.004, pauseDur: [1, 3], shadow: 3.4, spook: 16, flee: 3.5, fleeTurn: 3 },
+  sheep: { speed: 2.2, range: 20, sep: 4.5, turn: 1.4, pauseChance: 0.005, pauseDur: [1, 3], shadow: 2.4, spook: 16, flee: 3.8, fleeTurn: 3.5 },
+  horse: { speed: 3.2, range: 26, sep: 4.5, turn: 1.4, pauseChance: 0.004, pauseDur: [1, 3], shadow: 3.4, spook: 26, flee: 22, fleeTurn: 8 },
+  chicken: { speed: 5, range: 15, sep: 1.6, turn: 4, pauseChance: 0.03, pauseDur: [0.4, 1.2], shadow: 1.0, roads: true, spook: 18, flee: 16, fleeTurn: 8 },
 };
 
 const animals = [];
@@ -1898,8 +1898,9 @@ function updateAnimals(dt) {
         a.wx += rand() - 0.5; // unstick exact overlaps
       }
     }
-    // Spooked animals dash clear of the tractor — sideways off its path,
-    // not down the line of travel — turning fast but smoothly (no snaps)
+    // Spooked animals get clear of the tractor — sideways off its path,
+    // not down the line of travel — turning at the species' own pace but
+    // always smoothly (no snaps)
     if (spec.spook && tractorDist < spec.spook) {
       a.pause = 0;
       const tdx = a.wx - tractor.x;
@@ -1912,7 +1913,7 @@ function updateAnimals(dt) {
       const want =
         Math.abs(tractor.speed) > 3 ? Math.atan2(fy, fx) : Math.atan2(tdy, tdx);
       const d = Math.atan2(Math.sin(want - a.angle), Math.cos(want - a.angle));
-      a.angle += Math.max(-8 * dt, Math.min(8 * dt, d));
+      a.angle += Math.max(-spec.fleeTurn * dt, Math.min(spec.fleeTurn * dt, d));
       const nx = a.wx + Math.cos(a.angle) * spec.flee * dt;
       const ny = a.wy + Math.sin(a.angle) * spec.flee * dt;
       if (walkable(nx, ny)) {
@@ -2954,8 +2955,9 @@ function update(dt) {
     tractor.speed = 0;
   }
 
-  // Cows and sheep are solid: drive into one and the tractor just stops.
-  // Only blocked while closing in, so backing away always works.
+  // Cows and sheep are solid: drive into one and the tractor stops until
+  // it has plodded aside (they walk clear of a nearby tractor on their
+  // own). Only blocked while closing in, so backing away always works.
   for (const an of animals) {
     if (an.species !== "cow" && an.species !== "sheep") continue;
     const dNew = Math.hypot(an.wx - tractor.x, an.wy - tractor.y);
