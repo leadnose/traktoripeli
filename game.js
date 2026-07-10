@@ -2759,16 +2759,31 @@ function draw() {
 
   screenCtx.drawImage(view, 0, 0, screenCanvas.width, screenCanvas.height);
 
-  // HUD
+  // HUD: a worn wooden plank bar along the bottom
   const imp = IMPLEMENTS[tractor.implement];
-  screenCtx.fillStyle = "rgba(0,0,0,0.45)";
-  screenCtx.fillRect(0, screenCanvas.height - 26, screenCanvas.width, 26);
+  const barY = screenCanvas.height - 28;
+  screenCtx.fillStyle = "#4a2f1a";
+  screenCtx.fillRect(0, barY - 3, screenCanvas.width, 3);
+  screenCtx.fillStyle = "#7a4f2d";
+  screenCtx.fillRect(0, barY, screenCanvas.width, 28);
+  screenCtx.fillStyle = "rgba(0,0,0,0.12)"; // plank seams
+  for (let px = 40; px < screenCanvas.width; px += 80) screenCtx.fillRect(px, barY, 1, 28);
+  screenCtx.fillStyle = "rgba(255,240,200,0.15)"; // sun-bleached top edge
+  screenCtx.fillRect(0, barY, screenCanvas.width, 1);
+
+  // Text is stamped: a dark offset shadow under warm cream
+  const label = (str, x, y, color) => {
+    screenCtx.fillStyle = "rgba(40,24,12,0.9)";
+    screenCtx.fillText(str, x + 1, y + 1);
+    screenCtx.fillStyle = color;
+    screenCtx.fillText(str, x, y);
+  };
+
   screenCtx.font = "bold 13px monospace";
-  const hudY = screenCanvas.height - 8;
+  const hudY = screenCanvas.height - 10;
   let hudX = 12;
   const seg = (text, color) => {
-    screenCtx.fillStyle = color || "#e8e8d8";
-    screenCtx.fillText(text, hudX, hudY);
+    label(text, hudX, hudY, color || "#f5e9c8");
     hudX += screenCtx.measureText(text).width;
   };
   const RED = "#ff5040";
@@ -2782,20 +2797,19 @@ function draw() {
   seg(`${imp.label}${state} [Space]   `, flashImpl ? RED : null);
   if (tractor.implement === "seeder") seg(`SEEDS: ${seeds}   `, seeds === 0 ? RED : null);
   if (tractor.implement === "trailer") seg(`CARGO: ${cargo}/${TRAILER_CAP}   `);
-  seg(`CASH: €${cash}   `, cash < SEED_PRICE ? RED : null);
+  seg(`CASH: €${cash}   `, cash < SEED_PRICE ? RED : "#ffd94f");
   seg(`SOLD: ${sold}   `);
-  seg(`@FARM 1:PLOW 2:SEED 3:HARVEST 4:TRAILER`, "#a8a898");
+  seg(`@FARM 1:PLOW 2:SEED 3:HARVEST 4:TRAILER`, "#d8c49a");
 
-  // Seed readout, so a nice map can be shared via ?seed=
+  // Seed readout on a little leather tag, so a nice map can be shared
   screenCtx.font = "11px monospace";
-  screenCtx.fillStyle = "rgba(255,255,255,0.6)";
-  screenCtx.fillText(
+  const infoText =
     `SEED ${SEED_TEXT}   [N] NEW MAP  [S] SET SEED  [R] RESTART  ` +
-      `[M] MUSIC ${musicMuted ? "OFF" : "ON"}  [Q] SOUND ${soundMuted ? "OFF" : "ON"}`,
-    12,
-    20
-  );
-  screenCtx.fillText(`${fps.toFixed(0)} FPS`, 12, 36);
+    `[M] MUSIC ${musicMuted ? "OFF" : "ON"}  [Q] SOUND ${soundMuted ? "OFF" : "ON"}`;
+  screenCtx.fillStyle = "rgba(58,40,24,0.55)";
+  screenCtx.fillRect(6, 6, screenCtx.measureText(infoText).width + 12, 36);
+  label(infoText, 12, 20, "#f5e9c8");
+  label(`${fps.toFixed(0)} FPS`, 12, 36, "#d8c49a");
 
   // Season calendar instead of a clock: the current date counts from spring
   // toward the end date, with a progress bar in between. Flashes red for
@@ -2811,47 +2825,54 @@ function draw() {
   const flash = timeLeft < 30 && ((timeLeft * 2) | 0) % 2 === 0;
   screenCtx.font = "bold 13px monospace";
   screenCtx.textAlign = "right";
-  screenCtx.fillStyle = flash ? "#ff5040" : "#ffffff";
-  screenCtx.fillText(
+  label(
     `${MONTH_NAMES[date.getMonth()]} ${date.getDate()}`,
     bx - 10,
-    by + barH
+    by + barH,
+    flash ? "#ff5040" : "#f5e9c8"
   );
   screenCtx.textAlign = "left";
-  screenCtx.fillStyle = "rgba(255,255,255,0.7)";
-  screenCtx.fillText("OCT 31", bx + barW + 10, by + barH);
-  screenCtx.fillStyle = "rgba(10,20,30,0.55)";
-  screenCtx.fillRect(bx - 1, by - 1, barW + 2, barH + 2);
+  label("OCT 31", bx + barW + 10, by + barH, "#d8c49a");
+  // The season grows along a wooden trough
+  screenCtx.fillStyle = "#4a2f1a";
+  screenCtx.fillRect(bx - 2, by - 2, barW + 4, barH + 4);
+  screenCtx.fillStyle = "#2e1d10";
+  screenCtx.fillRect(bx, by, barW, barH);
   screenCtx.fillStyle = flash ? "#ff5040" : seasonHex(SEASON_BAR_COLORS);
   screenCtx.fillRect(bx, by, Math.round(barW * progress), barH);
 
   // Game over: final score and the all-time best list
   if (gameOver) {
-    const w = 440;
-    const h = 250;
+    const w = 460;
+    const h = 260;
     const x = (screenCanvas.width - w) / 2;
     const y = (screenCanvas.height - h) / 2;
     const cx = screenCanvas.width / 2;
-    screenCtx.fillStyle = "rgba(10,20,30,0.8)";
+    // Dusk settles over the farm
+    screenCtx.fillStyle = "rgba(24,14,6,0.45)";
+    screenCtx.fillRect(0, 0, screenCanvas.width, screenCanvas.height);
+    // A big wooden signboard
+    screenCtx.fillStyle = "#4a2f1a";
+    screenCtx.fillRect(x - 6, y - 6, w + 12, h + 12);
+    screenCtx.fillStyle = "#7a4f2d";
     screenCtx.fillRect(x, y, w, h);
+    screenCtx.fillStyle = "rgba(0,0,0,0.12)"; // plank seams
+    for (let py = y + 52; py < y + h; py += 52) screenCtx.fillRect(x, py, w, 1);
     screenCtx.textAlign = "center";
     screenCtx.font = "bold 24px monospace";
-    screenCtx.fillStyle = "#ffe66b";
-    screenCtx.fillText("OCT 31 — SEASON'S END", cx, y + 40);
+    label("OCT 31 — SEASON'S END", cx, y + 40, "#ffd94f");
     screenCtx.font = "bold 18px monospace";
-    screenCtx.fillStyle = "#e8e8d8";
-    screenCtx.fillText(`PROFIT: €${cash - START_CASH}`, cx, y + 72);
+    label(`PROFIT: €${cash - START_CASH}`, cx, y + 74, "#f5e9c8");
     screenCtx.font = "13px monospace";
     bestScores.forEach((entry, i) => {
-      screenCtx.fillStyle = i === finalRank ? "#ffe66b" : "#c8c8b8";
-      screenCtx.fillText(
+      label(
         `${i + 1}.  €${entry.score}   (seed ${entry.seed})`,
         cx,
-        y + 104 + i * 20
+        y + 106 + i * 20,
+        i === finalRank ? "#ffd94f" : "#e0d0a8"
       );
     });
-    screenCtx.fillStyle = "#a8e0a0";
-    screenCtx.fillText("[R] RETRY MAP    [N] NEW MAP", cx, y + h - 18);
+    label("[R] RETRY MAP    [N] NEW MAP", cx, y + h - 18, "#c9e6a8");
     screenCtx.textAlign = "left";
   }
 
@@ -2861,8 +2882,11 @@ function draw() {
   const mmH = minimapCanvas.height * mmScale;
   const mmX = screenCanvas.width - mmW - 12;
   const mmY = 12;
-  screenCtx.fillStyle = "rgba(16,28,40,0.5)";
-  screenCtx.fillRect(mmX - 6, mmY - 6, mmW + 12, mmH + 12);
+  // Wooden picture frame around the map
+  screenCtx.fillStyle = "#4a2f1a";
+  screenCtx.fillRect(mmX - 8, mmY - 8, mmW + 16, mmH + 16);
+  screenCtx.fillStyle = "rgba(122,79,45,0.95)";
+  screenCtx.fillRect(mmX - 5, mmY - 5, mmW + 10, mmH + 10);
   screenCtx.drawImage(minimapCanvas, mmX, mmY, mmW, mmH);
   screenCtx.save();
   screenCtx.beginPath();
