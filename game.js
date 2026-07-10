@@ -21,21 +21,12 @@ const ctx = view.getContext("2d");
 
 // ---------------------------------------------------------------------------
 // Seeded RNG: the whole world is generated through rand(), so the same seed
-// always produces the same map. Pick a map with ?seed=anything in the URL.
+// always produces the same map. The seed is a plain integer, set from the
+// F1 menu (or ?seed= in the URL); anything non-numeric gets replaced.
 // ---------------------------------------------------------------------------
 
-const SEED_TEXT =
-  new URLSearchParams(location.search).get("seed") ||
-  String((Math.random() * 1e9) | 0);
-
-function hashSeed(str) {
-  let h = 2166136261;
-  for (let i = 0; i < str.length; i++) {
-    h ^= str.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return h >>> 0;
-}
+const seedParam = parseInt(new URLSearchParams(location.search).get("seed"), 10);
+const SEED = Number.isFinite(seedParam) ? seedParam : (Math.random() * 1e9) | 0;
 
 const rand = (function mulberry32(a) {
   return function () {
@@ -44,9 +35,9 @@ const rand = (function mulberry32(a) {
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
-})(hashSeed(SEED_TEXT));
+})(SEED >>> 0);
 
-console.log(`map seed: ${SEED_TEXT} — reload with ?seed=${SEED_TEXT} to reproduce`);
+console.log(`map seed: ${SEED} — reload with ?seed=${SEED} to reproduce`);
 
 // ---------------------------------------------------------------------------
 // Sound: synthesized with the Web Audio API. A continuous engine loop follows
@@ -333,10 +324,40 @@ function playSell() {
 const keys = {};
 const IMPLEMENT_KEYS = { 1: "plow", 2: "seeder", 3: "harvester", 4: "trailer" };
 
+// F1 opens the menu, the only place the seed can be typed in
+let menuOpen = false;
+let menuSeed = "";
+
 window.addEventListener("keydown", (e) => {
   // Browsers only allow audio after a user gesture
   initAudio();
   if (audio.ac.state === "suspended") audio.ac.resume();
+  if (e.key === "F1" && !e.repeat) {
+    e.preventDefault();
+    menuOpen = !menuOpen;
+    menuSeed = String(SEED);
+    return;
+  }
+  if (menuOpen) {
+    // The menu swallows all input: type a seed, Enter loads it, N rolls a
+    // random map, Esc closes
+    e.preventDefault();
+    if (e.key === "Enter") {
+      const n = parseInt(menuSeed, 10);
+      if (Number.isFinite(n)) location.search = "?seed=" + n;
+    } else if (e.key === "n" || e.key === "N") {
+      location.search = "?seed=" + ((Math.random() * 1e9) | 0);
+    } else if (e.key === "Escape") {
+      menuOpen = false;
+    } else if (e.key === "Backspace") {
+      menuSeed = menuSeed.slice(0, -1);
+    } else if (/^[0-9]$/.test(e.key) && menuSeed.length < 10) {
+      menuSeed += e.key;
+    } else if (e.key === "-" && menuSeed === "") {
+      menuSeed = "-";
+    }
+    return;
+  }
   if (e.key.startsWith("Arrow")) e.preventDefault();
   keys[e.key] = true;
   if (e.key === " " && !e.repeat) {
@@ -370,20 +391,6 @@ window.addEventListener("keydown", (e) => {
   if (e.key === "Shift" && !e.repeat) {
     tractor.fastGear = !tractor.fastGear;
     if (tractor.fastGear) tractor.implDown = false; // lift before shifting up
-  }
-  // New map: N rolls a fresh seed, S asks for one; both reload via the URL
-  if ((e.key === "n" || e.key === "N") && !e.repeat) {
-    location.search = "?seed=" + ((Math.random() * 1e9) | 0);
-  }
-  if ((e.key === "s" || e.key === "S") && !e.repeat) {
-    const s = prompt("Map seed:", SEED_TEXT);
-    if (s) location.search = "?seed=" + encodeURIComponent(s);
-  }
-  // Restart the current map (same seed, fresh round)
-  if ((e.key === "r" || e.key === "R") && !e.repeat) {
-    const target = "?seed=" + encodeURIComponent(SEED_TEXT);
-    if (location.search === target) location.reload();
-    else location.search = target;
   }
   if (IMPLEMENT_KEYS[e.key] && !e.repeat) {
     // Implements are swapped at the farmyard
@@ -2466,7 +2473,7 @@ let finalRank = -1; // this round's place in the best list, -1 if none
 function endRound() {
   gameOver = true;
   tractor.speed = 0;
-  const entry = { score: cash - START_CASH, seed: SEED_TEXT, date: Date.now() };
+  const entry = { score: cash - START_CASH, seed: SEED, date: Date.now() };
   let scores;
   try {
     scores = JSON.parse(localStorage.getItem(SCORES_KEY)) || [];
@@ -2804,7 +2811,7 @@ function draw() {
   // Seed readout on a little leather tag, so a nice map can be shared
   screenCtx.font = "11px monospace";
   const infoText =
-    `SEED ${SEED_TEXT}   [N] NEW MAP  [S] SET SEED  [R] RESTART  ` +
+    `SEED ${SEED}   [F1] MENU  ` +
     `[M] MUSIC ${musicMuted ? "OFF" : "ON"}  [Q] SOUND ${soundMuted ? "OFF" : "ON"}`;
   screenCtx.fillStyle = "rgba(58,40,24,0.55)";
   screenCtx.fillRect(6, 6, screenCtx.measureText(infoText).width + 12, 36);
@@ -2872,7 +2879,7 @@ function draw() {
         i === finalRank ? "#ffd94f" : "#e0d0a8"
       );
     });
-    label("[R] RETRY MAP    [N] NEW MAP", cx, y + h - 18, "#c9e6a8");
+    label("[F1] MENU — NEW MAP OR SEED", cx, y + h - 18, "#c9e6a8");
     screenCtx.textAlign = "left";
   }
 
@@ -2910,6 +2917,36 @@ function draw() {
   screenCtx.fillStyle = "#f25c3f";
   screenCtx.fillRect(tmx - 1, tmy - 1, 2, 2);
   screenCtx.restore();
+
+  // F1 menu: type a seed on a little wooden sign
+  if (menuOpen) {
+    const w = 360;
+    const h = 120;
+    const x = (screenCanvas.width - w) / 2;
+    const y = (screenCanvas.height - h) / 2;
+    screenCtx.fillStyle = "rgba(24,14,6,0.45)";
+    screenCtx.fillRect(0, 0, screenCanvas.width, screenCanvas.height);
+    screenCtx.fillStyle = "#4a2f1a";
+    screenCtx.fillRect(x - 6, y - 6, w + 12, h + 12);
+    screenCtx.fillStyle = "#7a4f2d";
+    screenCtx.fillRect(x, y, w, h);
+    screenCtx.textAlign = "center";
+    screenCtx.font = "bold 16px monospace";
+    label("MAP SEED", screenCanvas.width / 2, y + 28, "#ffd94f");
+    screenCtx.fillStyle = "#2e1d10";
+    screenCtx.fillRect(x + 60, y + 42, w - 120, 26);
+    screenCtx.font = "bold 14px monospace";
+    const caret = ((worldTime * 2) | 0) % 2 === 0 ? "_" : " ";
+    label(menuSeed + caret, screenCanvas.width / 2, y + 60, "#f5e9c8");
+    screenCtx.font = "11px monospace";
+    label(
+      "[ENTER] LOAD MAP   [N] NEW MAP   [ESC] CLOSE",
+      screenCanvas.width / 2,
+      y + h - 14,
+      "#c9e6a8"
+    );
+    screenCtx.textAlign = "left";
+  }
 }
 
 // ---------------------------------------------------------------------------
