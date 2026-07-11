@@ -16,3 +16,28 @@ html, body {
   max-width: 100vw;
   max-height: 100vh;
 }
+
+/* In fullscreen (F11 or the Fullscreen API) the canvas fills the whole
+   viewport, letterboxed to keep the pixels square. */
+@media (display-mode: fullscreen) {
+  html, body {
+    background: #26221a;
+  }
+
+  #game {
+    width: 100vw;
+    height: 100vh;
+    object-fit: contain;
+    border: none;
+    border-radius: 0;
+  }
+}
+
+#game:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  object-fit: contain;
+  border: none;
+  border-radius: 0;
+  background: #26221a;
+}
