@@ -2498,17 +2498,33 @@ function drawBirds(camX, camY) {
 const TIRE = "#33363d";
 const HUB = "#f7e8b8";
 
+// Styled after the old workhorse of Nordic farmyards: deep red bodywork
+// riding on flint-gray running gear, a hood tapering into the grille, a
+// bare pan seat between flat fenders, and a muffler halfway up the stack
+const TRACTOR_RED = "#d64535";
+
 const BOXES = [
-  { x0: -7.0, x1: 3.0, y0: -3.0, y1: 3.0, z0: 2.5, z1: 6.0, color: "#f25c3f" }, // chassis
-  { x0: 3.0, x1: 6.2, y0: -2.2, y1: 2.2, z0: 2.5, z1: 5.3, color: "#f25c3f" }, // hood
-  { x0: 6.2, x1: 7.0, y0: -1.8, y1: 1.8, z0: 2.5, z1: 4.4, color: "#d94a2e" }, // nose, stepped down for a snub front
-  { x0: 7.0, x1: 7.4, y0: -1.5, y1: 1.5, z0: 2.6, z1: 4.2, color: "#5a5148" }, // radiator grille
+  { x0: -7.0, x1: -3.4, y0: -1.6, y1: 1.6, z0: 2.5, z1: 4.2, color: "#6e6e6e" }, // frame rail, rear run
+  { x0: -3.4, x1: -0.6, y0: -1.6, y1: 1.6, z0: 2.5, z1: 5.2, color: "#6e6e6e" }, // gearbox hump amidships, one higher
+  { x0: -0.6, x1: 3.0, y0: -1.6, y1: 1.6, z0: 2.5, z1: 4.2, color: "#6e6e6e" }, // frame rail, front run
+  { x0: -7.0, x1: -3.4, y0: -3.0, y1: 3.0, z0: 4.2, z1: 6.0, color: TRACTOR_RED }, // body platform, rear
+  { x0: -3.4, x1: -0.6, y0: -3.0, y1: 3.0, z0: 5.2, z1: 6.0, color: TRACTOR_RED }, // body platform, thinner over the hump
+  { x0: -0.6, x1: 3.0, y0: -3.0, y1: 3.0, z0: 4.2, z1: 6.0, color: TRACTOR_RED }, // body platform, front
+  { x0: -5.0, x1: -4.0, y0: -2.9, y1: 2.9, z0: 2.6, z1: 3.4, color: "#6e6e6e" }, // rear axle out to the big wheels
+  { x0: 4.6, x1: 5.4, y0: -2.2, y1: 2.2, z0: 1.4, z1: 2.5, color: "#6e6e6e" }, // front axle under the engine
+  { x0: 3.0, x1: 6.2, y0: -1.6, y1: 1.6, z0: 2.5, z1: 4.2, color: "#6e6e6e" }, // engine block, exposed at the sides
+  { x0: 3.0, x1: 4.8, y0: -2.2, y1: 2.2, z0: 4.2, z1: 5.3, color: TRACTOR_RED }, // hood lid, rear half
+  { x0: 4.8, x1: 6.2, y0: -1.9, y1: 1.9, z0: 4.2, z1: 5.1, color: TRACTOR_RED }, // hood lid tapering toward the front
+  { x0: 6.2, x1: 7.0, y0: -1.5, y1: 1.5, z0: 2.5, z1: 4.3, color: "#c03a2c" }, // nose, stepped down for a snub front
+  { x0: 7.0, x1: 7.4, y0: -1.3, y1: 1.3, z0: 2.6, z1: 4.1, color: "#5a5148" }, // radiator grille
   { x0: -7.9, x1: -7.0, y0: -0.8, y1: 0.8, z0: 2.8, z1: 3.9, color: "#6b6b6b" }, // hitch block; implement drawbars butt against it
-  { x0: -6.2, x1: -2.8, y0: 3.0, y1: 5.4, z0: 6.0, z1: 6.7, color: "#d94a2e" }, // rear fender L
-  { x0: -6.2, x1: -2.8, y0: -5.4, y1: -3.0, z0: 6.0, z1: 6.7, color: "#d94a2e" }, // rear fender R
-  { x0: -4.7, x1: -2.9, y0: -1.3, y1: 1.3, z0: 6.0, z1: 7.0, color: "#d94a2e" }, // sprung seat, out in the open
-  { x0: -4.9, x1: -4.4, y0: -1.3, y1: 1.3, z0: 7.0, z1: 8.6, color: "#d94a2e" }, // seat back
-  { x0: 1.5, x1: 2.5, y0: -0.5, y1: 0.5, z0: 5.3, z1: 9.5, color: "#7a7a7a" }, // exhaust stack
+  { x0: -6.2, x1: -2.8, y0: 3.0, y1: 5.4, z0: 6.0, z1: 6.7, color: TRACTOR_RED }, // rear fender L
+  { x0: -6.2, x1: -2.8, y0: -5.4, y1: -3.0, z0: 6.0, z1: 6.7, color: TRACTOR_RED }, // rear fender R
+  { x0: -4.5, x1: -3.1, y0: -1.1, y1: 1.1, z0: 6.1, z1: 6.7, color: "#6e6e6e" }, // bare pan seat between the fenders
+  { x0: -2.45, x1: -2.05, y0: -0.25, y1: 0.25, z0: 5.2, z1: 7.3, color: "#4c443c" }, // steering column off the gearbox hump
+  { x0: 1.5, x1: 2.5, y0: -0.5, y1: 0.5, z0: 5.3, z1: 6.4, color: "#7a7a7a" }, // exhaust riser
+  { x0: 1.3, x1: 2.7, y0: -0.7, y1: 0.7, z0: 6.4, z1: 8.2, color: "#8f8f8f" }, // muffler can
+  { x0: 1.7, x1: 2.3, y0: -0.35, y1: 0.35, z0: 8.2, z1: 9.7, color: "#7a7a7a" }, // tailpipe
 ];
 
 // Wheels are round: a disc on each face plus a slim inset box for the tread.
@@ -2526,9 +2542,9 @@ const TRACTOR_WHEELS = [
 // the heading — the wheel sits in front of the driver toward the camera and
 // hides behind him driving away; the far-side lamp ducks behind the hood.
 const TRACTOR_SHAPES = [
-  { blob: true, x: -2.2, y: 0, z: 7.3, r: 0.55, color: "#33363d" }, // steering wheel
-  { blob: true, x: 6.6, y: 1.2, z: 4.8, r: 0.45, color: "#ffe66b" }, // headlamp L
-  { blob: true, x: 6.6, y: -1.2, z: 4.8, r: 0.45, color: "#ffe66b" }, // headlamp R
+  { blob: true, x: -2.2, y: 0, z: 7.5, r: 0.7, color: "#33363d" }, // steering wheel atop its column
+  { blob: true, x: 6.6, y: 1.2, z: 4.65, r: 0.45, color: "#ffe66b" }, // headlamp L
+  { blob: true, x: 6.6, y: -1.2, z: 4.65, r: 0.45, color: "#ffe66b" }, // headlamp R
 ];
 
 // The driver: a round little figure out in the open on the seat. All parts
@@ -2536,9 +2552,9 @@ const TRACTOR_SHAPES = [
 // paint order — overalls, head, straw hat — holds at every heading.
 // `rest` is the seated height; z gets a bounce added per frame.
 const DRIVER_SHAPES = [
-  { blob: true, x: -3.7, y: 0, rest: 7.5, z: 7.5, r: 1.5, color: "#4a6fa5" }, // overalls
-  { blob: true, x: -3.7, y: 0, rest: 9.1, z: 9.1, r: 1.0, color: "#f2c091" }, // head
-  { blob: true, x: -3.7, y: 0, rest: 9.85, z: 9.85, r: 0.8, color: "#e8b13d", bias: 0.05 }, // straw hat
+  { blob: true, x: -3.7, y: 0, rest: 7.3, z: 7.3, r: 1.5, color: "#4a6fa5" }, // overalls
+  { blob: true, x: -3.7, y: 0, rest: 8.9, z: 8.9, r: 1.0, color: "#f2c091" }, // head
+  { blob: true, x: -3.7, y: 0, rest: 9.65, z: 9.65, r: 0.8, color: "#e8b13d", bias: 0.05 }, // straw hat
 ];
 
 // Implements hang behind the tractor; liftable ones get a z offset from the
@@ -4183,7 +4199,7 @@ function draw() {
   const tmy = mmY + ((tractor.x + tractor.y) / (2 * TILE)) * mmScale;
   screenCtx.fillStyle = "#ffffff";
   screenCtx.fillRect(tmx - 2, tmy - 2, 4, 4);
-  screenCtx.fillStyle = "#f25c3f";
+  screenCtx.fillStyle = TRACTOR_RED;
   screenCtx.fillRect(tmx - 1, tmy - 1, 2, 2);
   screenCtx.restore();
 
