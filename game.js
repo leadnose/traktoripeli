@@ -2103,6 +2103,104 @@ for (let sy = 0; sy < MAP_TILES; sy++)
       shoreSpots.push({ x: (sx + 0.5) * TILE, y: (sy + 0.5) * TILE });
   }
 
+// ---------------------------------------------------------------------------
+// Signposts: little roadside boards naming the landmarks
+// ---------------------------------------------------------------------------
+
+// Tiny 5-row lettering, one string per row, stamped as ink pixels
+const SIGN_FONT = {
+  A: [".#.", "#.#", "###", "#.#", "#.#"],
+  I: ["###", ".#.", ".#.", ".#.", "###"],
+  L: ["#..", "#..", "#..", "#..", "###"],
+  M: ["#...#", "##.##", "#.#.#", "#...#", "#...#"],
+  P: ["##.", "#.#", "##.", "#..", "#.."],
+  S: ["###", "#..", "###", "..#", "###"],
+  T: ["###", ".#.", ".#.", ".#.", ".#."],
+};
+
+const signs = [];
+
+function addSign(text, wx, wy) {
+  let w = -1;
+  for (const ch of text) w += SIGN_FONT[ch][0].length + 1;
+  signs.push({ text, wx, wy, w });
+}
+
+// A post with a cream board, drawn straight to the screen as a billboard.
+// It renders into the scene canvas, so the ink pass outlines it like
+// everything else and the board needs no frame of its own.
+function drawSign(s, x, y) {
+  const bw = s.w + 4;
+  const bh = 9;
+  const bx = x - (bw >> 1);
+  const by = y - 6 - bh;
+  sceneCtx.fillStyle = shade("#8a5a36", 1);
+  sceneCtx.fillRect(x - 1, y - 8, 2, 8);
+  sceneCtx.fillStyle = shade("#f2e6cc", 1);
+  sceneCtx.fillRect(bx, by, bw, bh);
+  sceneCtx.fillStyle = INK;
+  let cx = bx + 2;
+  for (const ch of s.text) {
+    const g = SIGN_FONT[ch];
+    for (let r = 0; r < 5; r++)
+      for (let cc = 0; cc < g[r].length; cc++)
+        if (g[r][cc] === "#") sceneCtx.fillRect(cx + cc, by + 2 + r, 1, 1);
+    cx += g[0].length + 1;
+  }
+}
+
+// Beside a road point, on whichever side is open grass
+function placeSignBeside(text, p) {
+  for (const side of [1, -1]) {
+    const sx = p.x + Math.cos(p.dir + (Math.PI / 2) * side) * 7;
+    const sy = p.y + Math.sin(p.dir + (Math.PI / 2) * side) * 7;
+    if (tileTypeAt(sx, sy) === 0) {
+      addSign(text, sx, sy);
+      return true;
+    }
+  }
+  return false;
+}
+
+// MAATILA where the farm's own road leaves the yard
+if (roads.length && roads[0].pts.length > 6) placeSignBeside("MAATILA", roads[0].pts[5]);
+else addSign("MAATILA", FARM.x + 24, FARM.y + 24);
+
+// SILTA on the approach to a bridge, for up to two crossings
+{
+  let posted = 0;
+  for (const r of roads) {
+    if (posted >= 2) break;
+    if (r.entry) continue;
+    for (let i = 4; i < r.pts.length; i++) {
+      if (tileTypeAt(r.pts[i].x, r.pts[i].y) !== 4) continue;
+      if (tileTypeAt(r.pts[i - 2].x, r.pts[i - 2].y) === 4) continue; // mid-crossing
+      if (placeSignBeside("SILTA", r.pts[i - 4])) posted++;
+      break; // one sign per road
+    }
+  }
+}
+
+// LAMPI at the waterside nearest the farm — where the herds go to drink
+{
+  let spot = null;
+  let bd = Infinity;
+  for (const s of shoreSpots) {
+    const d = Math.hypot(s.x - FARM.x, s.y - FARM.y);
+    if (d < bd) {
+      bd = d;
+      spot = s;
+    }
+  }
+  if (spot && bd < 260) {
+    // A step inland, so it stands clear of the bank where the herds crowd
+    const nx = spot.x + ((FARM.x - spot.x) / bd) * 8;
+    const ny = spot.y + ((FARM.y - spot.y) / bd) * 8;
+    if (tileTypeAt(nx, ny) === 0) addSign("LAMPI", nx, ny);
+    else addSign("LAMPI", spot.x, spot.y);
+  }
+}
+
 function updateAnimals(dt) {
   for (const a of animals) {
     const spec = ANIMAL_SPECS[a.species];
@@ -2728,6 +2826,13 @@ function drawScene(camX, camY) {
     ctx.moveTo(sx + r, sy);
     ctx.ellipse(sx, sy, r, r / 2, 0, 0, Math.PI * 2);
   }
+  for (const s of signs) {
+    if (!onScreen(s.wx, s.wy, camX, camY)) continue;
+    const sx = Math.round(projX(s.wx, s.wy) - camX);
+    const sy = Math.round(projY(s.wx, s.wy, terrainHeight(s.wx, s.wy)) - camY);
+    ctx.moveTo(sx + 3, sy);
+    ctx.ellipse(sx, sy, 3, 1.5, 0, 0, Math.PI * 2);
+  }
   ctx.fill();
 
   // Painter's algorithm: depth along the view axis is wx + wy + wz.
@@ -2799,10 +2904,24 @@ function drawScene(camX, camY) {
     if (!onScreen(s.wx, s.wy, camX, camY)) continue;
     makeRoundItems(items, SACK_SHAPES, s.wx, s.wy, 0, 0, camX, camY);
   }
+  for (const s of signs) {
+    if (!onScreen(s.wx, s.wy, camX, camY)) continue;
+    items.push({
+      sign: s,
+      x: Math.round(projX(s.wx, s.wy) - camX),
+      y: Math.round(projY(s.wx, s.wy, terrainHeight(s.wx, s.wy)) - camY),
+      // Same ground-based depth convention as the bushes and animals
+      depth: s.wx + s.wy + terrainHeight(s.wx, s.wy) + 2.5,
+    });
+  }
   items.sort((a, b) => a.depth - b.depth);
 
   sceneCtx.clearRect(0, 0, VIEW_W, VIEW_H);
   for (const item of items) {
+    if (item.sign) {
+      drawSign(item.sign, item.x, item.y);
+      continue;
+    }
     if (item.blob) {
       // Soft sphere: base ellipse with a lighter highlight up and to the left
       sceneCtx.fillStyle = shade(item.color, item.k);
