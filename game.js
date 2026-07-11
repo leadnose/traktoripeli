@@ -980,6 +980,9 @@ function drawTile(tx, ty) {
 
   // Re-dither everything that was repainted
   ditherRegion(mapCtx, x0, y0, x1 - x0, y1 - y0);
+
+  // The ground repaint erased any wheel marks on this tile: stamp them back
+  restampTracks(tx, ty);
 }
 
 // Per-tile deterministic randomness for tile details (speckles, flowers,
@@ -3027,8 +3030,10 @@ function drawScene(camX, camY) {
 }
 
 // ---------------------------------------------------------------------------
-// Wheel tracks: stamped permanently into the prerendered map canvas while
-// driving over unplowed field dirt (working a tile repaints it clean).
+// Wheel tracks: stamped into the prerendered map canvas while driving over
+// unplowed field dirt. Each mark is also recorded by tile index so drawTile
+// can stamp it back after a repaint (seasons, crop overhangs); working the
+// tile changes its type, which drops the record — field work wipes tracks.
 // ---------------------------------------------------------------------------
 
 const TRACK_WHEELS = [
@@ -3037,6 +3042,16 @@ const TRACK_WHEELS = [
   { x: 5.0, y: 3.1, w: 1 }, // front left
   { x: 5.0, y: -3.1, w: 1 }, // front right
 ];
+
+const TRACK_COLOR = "rgba(94,66,38,0.45)";
+// Repeat passes over the same pixel composite darker; past a few the alpha
+// saturates, so capping there bounds the record while letting a restamp
+// replay the exact darkness
+const TRACK_MAX_PASSES = 4;
+// Tile index -> Map of packed (px, py, width) -> pass count
+const trackMarks = new Map();
+
+const packMark = (px, py, w) => (py * mapCanvas.width + px) * 2 + (w - 1);
 
 let trackDist = 0;
 
@@ -3053,8 +3068,35 @@ function updateTracks(dt) {
     if (tileTypeAt(wx, wy) !== 1) continue; // marks only on unplowed field dirt
     const px = Math.round(projX(wx, wy) + MAP_OFFSET_X);
     const py = Math.round(projY(wx, wy, terrainHeight(wx, wy)) + MAP_OFFSET_Y);
-    mapCtx.fillStyle = "rgba(94,66,38,0.45)";
+    const key = tileKey(wx, wy);
+    let marks = trackMarks.get(key);
+    if (!marks) trackMarks.set(key, (marks = new Map()));
+    const mk = packMark(px, py, wheel.w);
+    const passes = marks.get(mk) || 0;
+    if (passes >= TRACK_MAX_PASSES) continue;
+    marks.set(mk, passes + 1);
+    mapCtx.fillStyle = TRACK_COLOR;
     mapCtx.fillRect(px - (wheel.w >> 1), py, wheel.w, 1);
+  }
+}
+
+// Stamp a tile's recorded marks back over a fresh repaint (called by
+// drawTile after its re-dither, matching how live marks go down undithered)
+function restampTracks(tx, ty) {
+  const key = ty * MAP_TILES + tx;
+  const marks = trackMarks.get(key);
+  if (!marks) return;
+  if (tiles[ty][tx] !== 1) {
+    trackMarks.delete(key); // the tile was worked: its marks are gone for good
+    return;
+  }
+  mapCtx.fillStyle = TRACK_COLOR;
+  for (const [mk, passes] of marks) {
+    const w = (mk % 2) + 1;
+    const pos = (mk - (w - 1)) / 2;
+    const px = pos % mapCanvas.width;
+    const py = (pos / mapCanvas.width) | 0;
+    for (let i = 0; i < passes; i++) mapCtx.fillRect(px - (w >> 1), py, w, 1);
   }
 }
 
@@ -3121,7 +3163,7 @@ function updateSeason() {
     paintSky();
   }
   // The ground turns gradually: a few random tiles repaint per frame with
-  // the current colors (as a side effect, old wheel tracks slowly fade)
+  // the current colors (wheel marks survive: drawTile restamps them)
   for (let i = 0; i < 8; i++) {
     drawTile((rand() * MAP_TILES) | 0, (rand() * MAP_TILES) | 0);
   }
