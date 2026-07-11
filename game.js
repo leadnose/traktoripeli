@@ -3245,6 +3245,42 @@ function updateCamera(dt) {
 // Rendering
 // ---------------------------------------------------------------------------
 
+// Wood grain for the HUD carpentry: thin streaks with the occasional knot.
+// Seeded from the region so the pattern is identical every frame — drawing
+// fresh random streaks each frame would shimmer.
+function drawWoodGrain(x, y, w, h) {
+  let s = ((x * 73856093) ^ (y * 19349663) ^ (w * 83492791) ^ h) | 0;
+  const rnd = () => {
+    s = (s + 0x6d2b79f5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const n = (w * h) / 220; // streak density scales with the area
+  for (let i = 0; i < n; i++) {
+    const gx = Math.round(x + rnd() * w);
+    const gy = Math.round(y + 2 + rnd() * (h - 4));
+    const len = 8 + rnd() * 36;
+    screenCtx.fillStyle =
+      rnd() < 0.7 ? "rgba(40,24,12,0.18)" : "rgba(255,235,200,0.10)";
+    // Two offset segments so it reads as grain, not pinstripes
+    const seg1 = Math.round(len * (0.3 + rnd() * 0.5));
+    screenCtx.fillRect(gx, gy, Math.max(0, Math.min(seg1, x + w - gx)), 1);
+    screenCtx.fillRect(
+      gx + seg1,
+      gy + (rnd() < 0.5 ? 1 : -1),
+      Math.max(0, Math.min(len - seg1, x + w - gx - seg1)),
+      1
+    );
+    if (rnd() < 0.06) {
+      // a knot in the plank
+      screenCtx.fillStyle = "rgba(40,24,12,0.22)";
+      screenCtx.fillRect(gx, gy - 1, 2, 3);
+      screenCtx.fillRect(gx - 1, gy, 4, 1);
+    }
+  }
+}
+
 // Tiny pixel icons for the top bar: a note for the music, a speaker for the
 // sound effects. Muted draws dim with a red strike across.
 function iconStrike(x, y) {
@@ -3311,6 +3347,7 @@ function draw() {
   screenCtx.fillRect(0, barY, screenCanvas.width, 28);
   screenCtx.fillStyle = "rgba(0,0,0,0.12)"; // plank seams
   for (let px = 40; px < screenCanvas.width; px += 80) screenCtx.fillRect(px, barY, 1, 28);
+  drawWoodGrain(0, barY, screenCanvas.width, 28);
   screenCtx.fillStyle = "rgba(255,240,200,0.15)"; // sun-bleached top edge
   screenCtx.fillRect(0, barY, screenCanvas.width, 1);
 
@@ -3332,9 +3369,6 @@ function draw() {
   const RED = "#ff5040";
   const flashGear = tractor.gearFlash > 0 && ((tractor.gearFlash * 8) | 0) % 2 === 0;
   const flashImpl = tractor.implFlash > 0 && ((tractor.implFlash * 8) | 0) % 2 === 0;
-  // One world unit is ~0.3 m, so units/s * 3.6 * 0.3 gives km/h
-  const kmh = Math.abs(tractor.speed) * 1.08;
-  seg(`${kmh.toFixed(0).padStart(2)} KM/H   `);
   seg(`GEAR: ${tractor.fastGear ? "FAST" : "SLOW"} [Shift]   `, flashGear ? RED : null);
   const state = imp.liftable ? (tractor.implDown ? " DOWN" : " UP") : "";
   seg(`${imp.label}${state} [Space]   `, flashImpl ? RED : null);
@@ -3380,6 +3414,7 @@ function draw() {
   screenCtx.fillRect(0, topH, screenCanvas.width, 3);
   screenCtx.fillStyle = "rgba(0,0,0,0.12)"; // plank seams
   for (let px = 40; px < screenCanvas.width; px += 80) screenCtx.fillRect(px, 0, 1, topH);
+  drawWoodGrain(0, 0, screenCanvas.width, topH);
   screenCtx.fillStyle = "rgba(255,240,200,0.15)"; // sun-bleached lower edge
   screenCtx.fillRect(0, topH - 1, screenCanvas.width, 1);
 
@@ -3434,16 +3469,13 @@ function draw() {
   screenCtx.fillStyle = flash ? "#ff5040" : seasonHex(SEASON_BAR_COLORS);
   screenCtx.fillRect(bx, by, Math.round(barW * progress), barH);
 
-  // Right: menu key, music & sound icons, FPS
-  screenCtx.textAlign = "right";
+  // Right: menu key and the music & sound icons
   let rx = screenCanvas.width - 12;
-  const fpsText = `${fps.toFixed(0)} FPS`;
-  label(fpsText, rx, topY, "#d8c49a");
-  rx -= screenCtx.measureText(fpsText).width + 12;
   drawSpeakerIcon(rx - 13, 8, !soundMuted);
   rx -= 13 + 10;
   drawNoteIcon(rx - 12, 8, !musicMuted);
   rx -= 12 + 10;
+  screenCtx.textAlign = "right";
   label("[F1] MENU", rx, topY, "#d8c49a");
   screenCtx.textAlign = "left";
 
@@ -3502,17 +3534,19 @@ function draw() {
     screenCtx.textAlign = "left";
   }
 
-  // Minimap panel in the top-right corner
+  // Minimap: a wooden panel hanging off the right end of the top bar,
+  // flush with the screen edge. Its dark rim starts at the bar's trim in
+  // the same color, so the two read as one piece of carpentry.
   const mmScale = 2;
   const mmW = minimapCanvas.width * mmScale;
   const mmH = minimapCanvas.height * mmScale;
-  const mmX = screenCanvas.width - mmW - 12;
-  const mmY = topH + 11; // tucked under the top plank bar
-  // Wooden picture frame around the map
-  screenCtx.fillStyle = "#4a2f1a";
-  screenCtx.fillRect(mmX - 8, mmY - 8, mmW + 16, mmH + 16);
-  screenCtx.fillStyle = "rgba(122,79,45,0.95)";
-  screenCtx.fillRect(mmX - 5, mmY - 5, mmW + 10, mmH + 10);
+  const mmX = screenCanvas.width - mmW - 8;
+  const mmY = topH + 8;
+  screenCtx.fillStyle = "#4a2f1a"; // rim, continuous with the bar trim
+  screenCtx.fillRect(mmX - 8, topH, mmW + 16, mmH + 16);
+  screenCtx.fillStyle = "rgba(122,79,45,0.95)"; // plank fill
+  screenCtx.fillRect(mmX - 5, topH + 3, mmW + 10, mmH + 10);
+  drawWoodGrain(mmX - 5, topH + 3, mmW + 10, mmH + 10);
   screenCtx.drawImage(minimapCanvas, mmX, mmY, mmW, mmH);
   screenCtx.save();
   screenCtx.beginPath();
@@ -3646,7 +3680,6 @@ if (menuOpen) menuSaveInfo = loadSave();
 }
 
 let lastTime = performance.now();
-let fps = 0;
 let awayPool = 0; // time the dt cap discarded, waiting to be applied
 
 function loop(now) {
@@ -3663,8 +3696,6 @@ function loop(now) {
   } else if (!awayClock) {
     awayPool = 0;
   }
-  // Smoothed over ~20 frames so the readout doesn't flicker
-  if (frameMs > 0) fps += (1000 / frameMs - fps) * 0.05;
   update(dt);
   updateAudio();
   updateCamera(dt);
