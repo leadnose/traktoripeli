@@ -581,7 +581,7 @@ const INK = "#4a3827";
 
 const shadeCache = {};
 function shade(color, k) {
-  const key = color + "|" + k.toFixed(2);
+  const key = color + ((k * 100 + 0.5) | 0);
   if (shadeCache[key]) return shadeCache[key];
   const ch = (i) => {
     const v = parseInt(color.slice(1 + i * 2, 3 + i * 2), 16);
@@ -641,7 +641,10 @@ const mapCanvas = document.createElement("canvas");
 mapCanvas.width = MAP_SIZE * 2;
 mapCanvas.height = MAP_SIZE + EDGE_DEPTH + MAP_OFFSET_Y;
 
-const mapCtx = mapCanvas.getContext("2d");
+// willReadFrequently keeps the canvas CPU-side: the constant background
+// repaints re-dither through getImageData, and on a GPU-backed canvas every
+// one of those is a pipeline-stalling readback
+const mapCtx = mapCanvas.getContext("2d", { willReadFrequently: true });
 
 // Tile types: 0 = grass, 1 = field (unplowed / stubble), 2 = plowed, 3 = seeded.
 // dirs holds the furrow direction (0 = along world y, 1 = along world x) and
@@ -2660,14 +2663,13 @@ const FACES = [
 // Backface test on the UNROUNDED projection (fx/fy): for small thin boxes,
 // pixel rounding can flip a near-edge-on face's sign from frame to frame
 // while the model moves, making faces pop in and out
-function signedArea(pts) {
-  let a = 0;
-  for (let i = 0; i < pts.length; i++) {
-    const p = pts[i];
-    const q = pts[(i + 1) % pts.length];
-    a += p.fx * q.fy - q.fx * p.fy;
-  }
-  return a;
+function signedArea4(p0, p1, p2, p3) {
+  return (
+    p0.fx * p1.fy - p1.fx * p0.fy +
+    p1.fx * p2.fy - p2.fx * p1.fy +
+    p2.fx * p3.fy - p3.fx * p2.fy +
+    p3.fx * p0.fy - p0.fx * p3.fy
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -2818,9 +2820,14 @@ function drawScene(camX, camY) {
         y: Math.round(projY(wx, wy, terrainHeight(wx, wy)) - camY),
       };
     };
-    const sh = [shPt(x0, -hw), shPt(x1, -hw), shPt(x1, hw), shPt(x0, hw)];
-    ctx.moveTo(sh[0].x, sh[0].y);
-    for (const p of sh.slice(1)) ctx.lineTo(p.x, p.y);
+    const a = shPt(x0, -hw);
+    const b = shPt(x1, -hw);
+    const c = shPt(x1, hw);
+    const d = shPt(x0, hw);
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.lineTo(c.x, c.y);
+    ctx.lineTo(d.x, d.y);
     ctx.closePath();
   };
   // One path for both quads so their overlap at the hitch doesn't darken
@@ -2973,14 +2980,18 @@ function drawScene(camX, camY) {
       sceneCtx.fillStyle = shade(item.color, item.k);
       sceneCtx.beginPath();
       sceneCtx.moveTo(item.poly[0].x, item.poly[0].y);
-      for (const p of item.poly.slice(1)) sceneCtx.lineTo(p.x, p.y);
+      for (let i = 1; i < item.poly.length; i++)
+        sceneCtx.lineTo(item.poly[i].x, item.poly[i].y);
       sceneCtx.closePath();
       sceneCtx.fill();
       continue;
     }
     for (const face of FACES) {
-      const pts = face.i.map((i) => item.pts[i]);
-      if (signedArea(pts) <= 0) continue;
+      const p0 = item.pts[face.i[0]];
+      const p1 = item.pts[face.i[1]];
+      const p2 = item.pts[face.i[2]];
+      const p3 = item.pts[face.i[3]];
+      if (signedArea4(p0, p1, p2, p3) <= 0) continue;
 
       const nx = face.n[0] * item.cos - face.n[1] * item.sin;
       const ny = face.n[0] * item.sin + face.n[1] * item.cos;
@@ -2989,8 +3000,10 @@ function drawScene(camX, camY) {
 
       sceneCtx.fillStyle = shade(item.box.color, k);
       sceneCtx.beginPath();
-      sceneCtx.moveTo(pts[0].x, pts[0].y);
-      for (const p of pts.slice(1)) sceneCtx.lineTo(p.x, p.y);
+      sceneCtx.moveTo(p0.x, p0.y);
+      sceneCtx.lineTo(p1.x, p1.y);
+      sceneCtx.lineTo(p2.x, p2.y);
+      sceneCtx.lineTo(p3.x, p3.y);
       sceneCtx.closePath();
       sceneCtx.fill();
     }
@@ -3125,7 +3138,7 @@ let worldTime = 0;
 const skyCanvas = document.createElement("canvas");
 skyCanvas.width = VIEW_W;
 skyCanvas.height = VIEW_H;
-const skyCtx = skyCanvas.getContext("2d");
+const skyCtx = skyCanvas.getContext("2d", { willReadFrequently: true });
 
 function paintSky() {
   const g = skyCtx.createLinearGradient(0, 0, 0, VIEW_H);
@@ -3868,7 +3881,7 @@ function updateCamera(dt) {
 // Wood grain for the HUD carpentry: thin streaks with the occasional knot.
 // Seeded from the region so the pattern is identical every frame — drawing
 // fresh random streaks each frame would shimmer.
-function drawWoodGrain(x, y, w, h) {
+function drawWoodGrain(c2d, x, y, w, h) {
   let s = ((x * 73856093) ^ (y * 19349663) ^ (w * 83492791) ^ h) | 0;
   const rnd = () => {
     s = (s + 0x6d2b79f5) | 0;
@@ -3881,12 +3894,12 @@ function drawWoodGrain(x, y, w, h) {
     const gx = Math.round(x + rnd() * w);
     const gy = Math.round(y + 2 + rnd() * (h - 4));
     const len = 8 + rnd() * 36;
-    screenCtx.fillStyle =
+    c2d.fillStyle =
       rnd() < 0.7 ? "rgba(40,24,12,0.18)" : "rgba(255,235,200,0.10)";
     // Two offset segments so it reads as grain, not pinstripes
     const seg1 = Math.round(len * (0.3 + rnd() * 0.5));
-    screenCtx.fillRect(gx, gy, Math.max(0, Math.min(seg1, x + w - gx)), 1);
-    screenCtx.fillRect(
+    c2d.fillRect(gx, gy, Math.max(0, Math.min(seg1, x + w - gx)), 1);
+    c2d.fillRect(
       gx + seg1,
       gy + (rnd() < 0.5 ? 1 : -1),
       Math.max(0, Math.min(len - seg1, x + w - gx - seg1)),
@@ -3894,12 +3907,67 @@ function drawWoodGrain(x, y, w, h) {
     );
     if (rnd() < 0.06) {
       // a knot in the plank
-      screenCtx.fillStyle = "rgba(40,24,12,0.22)";
-      screenCtx.fillRect(gx, gy - 1, 2, 3);
-      screenCtx.fillRect(gx - 1, gy, 4, 1);
+      c2d.fillStyle = "rgba(40,24,12,0.22)";
+      c2d.fillRect(gx, gy - 1, 2, 3);
+      c2d.fillRect(gx - 1, gy, 4, 1);
     }
   }
 }
+
+// The HUD's wooden chrome never changes, so the plank bars and the minimap's
+// panel are prerendered once and blitted per frame instead of rebuilding
+// their fills and grain streaks. Each prerender keeps its on-screen
+// coordinates via translate, so the grain (seeded from x/y/w/h) stays put.
+const topH = 28; // top bar height, shared by the layout below
+const barY = screenCanvas.height - 28; // bottom bar top edge
+
+const mmScale = 2;
+const mmW = minimapCanvas.width * mmScale;
+const mmH = minimapCanvas.height * mmScale;
+const mmX = screenCanvas.width - mmW - 8;
+const mmY = topH + 8;
+
+function prerenderPanel(x, y, w, h, paint) {
+  const c = document.createElement("canvas");
+  c.width = w;
+  c.height = h;
+  const p = c.getContext("2d");
+  p.translate(-x, -y);
+  paint(p);
+  return c;
+}
+
+const hudTopCanvas = prerenderPanel(0, 0, screenCanvas.width, topH + 3, (p) => {
+  p.fillStyle = "#7a4f2d";
+  p.fillRect(0, 0, screenCanvas.width, topH);
+  p.fillStyle = "#4a2f1a";
+  p.fillRect(0, topH, screenCanvas.width, 3);
+  p.fillStyle = "rgba(0,0,0,0.12)"; // plank seams
+  for (let px = 40; px < screenCanvas.width; px += 80) p.fillRect(px, 0, 1, topH);
+  drawWoodGrain(p, 0, 0, screenCanvas.width, topH);
+  p.fillStyle = "rgba(255,240,200,0.15)"; // sun-bleached lower edge
+  p.fillRect(0, topH - 1, screenCanvas.width, 1);
+});
+
+const hudBottomCanvas = prerenderPanel(0, barY - 3, screenCanvas.width, 31, (p) => {
+  p.fillStyle = "#4a2f1a";
+  p.fillRect(0, barY - 3, screenCanvas.width, 3);
+  p.fillStyle = "#7a4f2d";
+  p.fillRect(0, barY, screenCanvas.width, 28);
+  p.fillStyle = "rgba(0,0,0,0.12)"; // plank seams
+  for (let px = 40; px < screenCanvas.width; px += 80) p.fillRect(px, barY, 1, 28);
+  drawWoodGrain(p, 0, barY, screenCanvas.width, 28);
+  p.fillStyle = "rgba(255,240,200,0.15)"; // sun-bleached top edge
+  p.fillRect(0, barY, screenCanvas.width, 1);
+});
+
+const minimapPanelCanvas = prerenderPanel(mmX - 8, topH, mmW + 16, mmH + 16, (p) => {
+  p.fillStyle = "#4a2f1a"; // rim, continuous with the bar trim
+  p.fillRect(mmX - 8, topH, mmW + 16, mmH + 16);
+  p.fillStyle = "rgba(122,79,45,0.95)"; // plank fill
+  p.fillRect(mmX - 5, topH + 3, mmW + 10, mmH + 10);
+  drawWoodGrain(p, mmX - 5, topH + 3, mmW + 10, mmH + 10);
+});
 
 // Tiny pixel icons for the top bar: a note for the music, a speaker for the
 // sound effects. Muted draws dim with a red strike across.
@@ -3959,18 +4027,9 @@ function draw() {
 
   screenCtx.drawImage(view, 0, 0, screenCanvas.width, screenCanvas.height);
 
-  // HUD: a worn wooden plank bar along the bottom
+  // HUD: a worn wooden plank bar along the bottom (prerendered)
   const imp = IMPLEMENTS[tractor.implement];
-  const barY = screenCanvas.height - 28;
-  screenCtx.fillStyle = "#4a2f1a";
-  screenCtx.fillRect(0, barY - 3, screenCanvas.width, 3);
-  screenCtx.fillStyle = "#7a4f2d";
-  screenCtx.fillRect(0, barY, screenCanvas.width, 28);
-  screenCtx.fillStyle = "rgba(0,0,0,0.12)"; // plank seams
-  for (let px = 40; px < screenCanvas.width; px += 80) screenCtx.fillRect(px, barY, 1, 28);
-  drawWoodGrain(0, barY, screenCanvas.width, 28);
-  screenCtx.fillStyle = "rgba(255,240,200,0.15)"; // sun-bleached top edge
-  screenCtx.fillRect(0, barY, screenCanvas.width, 1);
+  screenCtx.drawImage(hudBottomCanvas, 0, barY - 3);
 
   // Text is stamped: a dark offset shadow under warm cream
   const label = (str, x, y, color) => {
@@ -4039,16 +4098,7 @@ function draw() {
   // mirrored: mode and seed on the left, the season calendar in the middle
   // with the year folded into its date label, and the menu key, mute icons
   // and FPS on the right
-  const topH = 28;
-  screenCtx.fillStyle = "#7a4f2d";
-  screenCtx.fillRect(0, 0, screenCanvas.width, topH);
-  screenCtx.fillStyle = "#4a2f1a";
-  screenCtx.fillRect(0, topH, screenCanvas.width, 3);
-  screenCtx.fillStyle = "rgba(0,0,0,0.12)"; // plank seams
-  for (let px = 40; px < screenCanvas.width; px += 80) screenCtx.fillRect(px, 0, 1, topH);
-  drawWoodGrain(0, 0, screenCanvas.width, topH);
-  screenCtx.fillStyle = "rgba(255,240,200,0.15)"; // sun-bleached lower edge
-  screenCtx.fillRect(0, topH - 1, screenCanvas.width, 1);
+  screenCtx.drawImage(hudTopCanvas, 0, 0);
 
   screenCtx.font = "11px monospace";
   const topY = 18; // shared text baseline in the bar
@@ -4169,16 +4219,7 @@ function draw() {
   // Minimap: a wooden panel hanging off the right end of the top bar,
   // flush with the screen edge. Its dark rim starts at the bar's trim in
   // the same color, so the two read as one piece of carpentry.
-  const mmScale = 2;
-  const mmW = minimapCanvas.width * mmScale;
-  const mmH = minimapCanvas.height * mmScale;
-  const mmX = screenCanvas.width - mmW - 8;
-  const mmY = topH + 8;
-  screenCtx.fillStyle = "#4a2f1a"; // rim, continuous with the bar trim
-  screenCtx.fillRect(mmX - 8, topH, mmW + 16, mmH + 16);
-  screenCtx.fillStyle = "rgba(122,79,45,0.95)"; // plank fill
-  screenCtx.fillRect(mmX - 5, topH + 3, mmW + 10, mmH + 10);
-  drawWoodGrain(mmX - 5, topH + 3, mmW + 10, mmH + 10);
+  screenCtx.drawImage(minimapPanelCanvas, mmX - 8, topH);
   screenCtx.drawImage(minimapCanvas, mmX, mmY, mmW, mmH);
   screenCtx.save();
   screenCtx.beginPath();
