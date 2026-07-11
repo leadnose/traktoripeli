@@ -567,14 +567,24 @@ function terrainHeight(wx, wy) {
 
 const LIGHT = { x: 0.35, y: 0.6, z: 0.71 };
 
+// Before shading, every base color is pulled a little toward warm cream and
+// tilted away from blue, so the scene reads like inks printed on soft paper
+// rather than raw screen color. Direct fills that skip lighting use
+// shade(color, 1) to pick up the same treatment.
+const PAPER_MIX = 0.12;
+const PAPER = [246, 233, 205];
+const INK_GAIN = [1.03, 1.0, 0.93];
+
 const shadeCache = {};
 function shade(color, k) {
   const key = color + "|" + k.toFixed(2);
   if (shadeCache[key]) return shadeCache[key];
-  const r = Math.min(255, Math.round(parseInt(color.slice(1, 3), 16) * k));
-  const g = Math.min(255, Math.round(parseInt(color.slice(3, 5), 16) * k));
-  const b = Math.min(255, Math.round(parseInt(color.slice(5, 7), 16) * k));
-  return (shadeCache[key] = `rgb(${r},${g},${b})`);
+  const ch = (i) => {
+    const v = parseInt(color.slice(1 + i * 2, 3 + i * 2), 16);
+    const p = (v * (1 - PAPER_MIX) + PAPER[i] * PAPER_MIX) * INK_GAIN[i];
+    return Math.min(255, Math.round(p * k));
+  };
+  return (shadeCache[key] = `rgb(${ch(0)},${ch(1)},${ch(2)})`);
 }
 
 // ---------------------------------------------------------------------------
@@ -814,11 +824,11 @@ function drawTile(tx, ty) {
     FARM_RADIUS * 2.2;
   const fc = mp(FARM.x, FARM.y);
   if (nearYard) {
-    mapCtx.fillStyle = "#a87e50";
+    mapCtx.fillStyle = shade("#a87e50", 1);
     mapCtx.beginPath();
     mapCtx.ellipse(fc.x, fc.y, FARM_RADIUS * 1.8, FARM_RADIUS * 0.9, 0, 0, Math.PI * 2);
     mapCtx.fill();
-    mapCtx.fillStyle = "#8f6940";
+    mapCtx.fillStyle = shade("#8f6940", 1);
     for (const p of yardPixels) mapCtx.fillRect(p.x, p.y, 1, 1);
   }
 
@@ -933,7 +943,7 @@ function paintTile(tx, ty) {
     const w1 = mp((tx + 1) * TILE, ty * TILE);
     const w2 = mp((tx + 1) * TILE, (ty + 1) * TILE);
     const w3 = mp(tx * TILE, (ty + 1) * TILE);
-    mapCtx.fillStyle = "#3d7dc4";
+    mapCtx.fillStyle = shade("#3d7dc4", 1);
     mapCtx.beginPath();
     mapCtx.moveTo(w0.x, w0.y);
     mapCtx.lineTo(w1.x, w1.y);
@@ -945,7 +955,7 @@ function paintTile(tx, ty) {
     mapCtx.lineWidth = 1;
     mapCtx.stroke();
 
-    mapCtx.fillStyle = "#6fa9dd"; // ripples
+    mapCtx.fillStyle = shade("#6fa9dd", 1); // ripples
     for (let i = 0; i < 5; i++) {
       const p = mp((tx + 0.15 + tr() * 0.7) * TILE, (ty + 0.15 + tr() * 0.7) * TILE);
       mapCtx.fillRect(Math.round(p.x), Math.round(p.y), 2, 1);
@@ -1528,7 +1538,7 @@ function makeMap() {
       mapCtx.fill();
     }
     // Wheel-worn speckles along the middle
-    mapCtx.fillStyle = "#a37e4e";
+    mapCtx.fillStyle = shade("#a37e4e", 1);
     for (let i = 0; i < road.pts.length; i += 3) {
       const p = road.pts[i];
       const c = mp(
@@ -1542,11 +1552,11 @@ function makeMap() {
 
   // Trodden dirt yard around the farm buildings
   const fc = mp(FARM.x, FARM.y);
-  mapCtx.fillStyle = "#a87e50";
+  mapCtx.fillStyle = shade("#a87e50", 1);
   mapCtx.beginPath();
   mapCtx.ellipse(fc.x, fc.y, FARM_RADIUS * 1.8, FARM_RADIUS * 0.9, 0, 0, Math.PI * 2);
   mapCtx.fill();
-  mapCtx.fillStyle = "#8f6940";
+  mapCtx.fillStyle = shade("#8f6940", 1);
   for (let i = 0; i < 40; i++) {
     const a = rand() * Math.PI * 2;
     const r = Math.sqrt(rand());
@@ -1564,7 +1574,7 @@ function makeMap() {
     [east, south, "#8a6540"],
     [south, west, "#6f4d2c"],
   ]) {
-    mapCtx.fillStyle = color;
+    mapCtx.fillStyle = shade(color, 1);
     mapCtx.beginPath();
     mapCtx.moveTo(a.x, a.y);
     mapCtx.lineTo(b.x, b.y);
@@ -1596,7 +1606,7 @@ function minimapTile(tx, ty) {
   let color = MINIMAP_COLORS[type];
   if (type === 0 && forestTiles.has(ty * MAP_TILES + tx)) color = "#2f7a2c";
   if (type === 3 && cropStage(growth[ty][tx]) >= 3) color = "#e3c355";
-  minimapCtx.fillStyle = color;
+  minimapCtx.fillStyle = shade(color, 1);
   minimapCtx.fillRect(tx - ty + MAP_TILES - 1, (tx + ty) >> 1, 2, 1);
 }
 
@@ -1606,7 +1616,7 @@ for (let ty = 0; ty < MAP_TILES; ty++)
   for (let tx = 0; tx < MAP_TILES; tx++) minimapTile(tx, ty);
 
 // Roads (never under field tiles, so tile updates can't erase them)
-minimapCtx.fillStyle = "#c09a66";
+minimapCtx.fillStyle = shade("#c09a66", 1);
 for (const p of roadSamples)
   minimapCtx.fillRect(
     Math.round((p.x - p.y) / TILE) + MAP_TILES,
@@ -2071,6 +2081,17 @@ const TRACTOR_WHEELS = [
 // Round beacon light on the cab roof
 const TRACTOR_SHAPES = [{ blob: true, x: -4.9, y: 0, z: 11.6, r: 0.8, color: "#ffb433" }];
 
+// The driver: a round little figure on the seat, visible through the cab
+// glass. All parts sit at the glass box's local depth center (x -3.75, y 0)
+// so their sort order against the cab is angle-independent: the biases put
+// them just in front of the glass (depth 8) and below the roof (10.5) at
+// every heading. `rest` is the seated height; z gets a bounce added per frame.
+const DRIVER_SHAPES = [
+  { blob: true, x: -3.75, y: 0, rest: 7.0, z: 7.0, r: 1.5, color: "#4a6fa5", bias: 1.3 }, // overalls
+  { blob: true, x: -3.75, y: 0, rest: 8.6, z: 8.6, r: 1.0, color: "#f2c091" }, // head
+  { blob: true, x: -3.75, y: 0, rest: 9.35, z: 9.35, r: 0.8, color: "#e8b13d", bias: 0.05 }, // straw hat
+];
+
 // Implements hang behind the tractor; liftable ones get a z offset from the
 // hydraulic lift so they can be raised for transport and dropped to work.
 const IMPLEMENT_LIFT_HEIGHT = 3.5;
@@ -2360,6 +2381,11 @@ function drawScene(camX, camY) {
   makeItems(items, BOXES, tractor.x, tractor.y, tractor.angle, 0, camX, camY);
   makeWheels(items, TRACTOR_WHEELS, tractor.x, tractor.y, tractor.angle, 0, camX, camY);
   makeRoundItems(items, TRACTOR_SHAPES, tractor.x, tractor.y, tractor.angle, 0, camX, camY);
+  // The driver bounces gently in the seat while rolling; the whole stack
+  // shares one offset so its internal ordering never changes
+  const bob = Math.abs(tractor.speed) > 2 ? Math.sin(worldTime * 11) * 0.22 : 0;
+  for (const s of DRIVER_SHAPES) s.z = s.rest + bob;
+  makeRoundItems(items, DRIVER_SHAPES, tractor.x, tractor.y, tractor.angle, 0, camX, camY);
   makeItems(items, impBoxes, pose.x, pose.y, pose.angle, liftZ, camX, camY);
   makeWheels(items, imp.wheels, pose.x, pose.y, pose.angle, liftZ, camX, camY);
   makeItems(items, FARM_BOXES, FARM.x, FARM.y, FARM.angle, 0, camX, camY);
@@ -2578,8 +2604,8 @@ const skyCtx = skyCanvas.getContext("2d");
 
 function paintSky() {
   const g = skyCtx.createLinearGradient(0, 0, 0, VIEW_H);
-  g.addColorStop(0, seasonHex(SKY_TOP_SEASONS));
-  g.addColorStop(1, seasonHex(SKY_BOTTOM_SEASONS));
+  g.addColorStop(0, shade(seasonHex(SKY_TOP_SEASONS), 1));
+  g.addColorStop(1, shade(seasonHex(SKY_BOTTOM_SEASONS), 1));
   skyCtx.fillStyle = g;
   skyCtx.fillRect(0, 0, VIEW_W, VIEW_H);
   ditherRegion(skyCtx, 0, 0, VIEW_W, VIEW_H);
@@ -2612,7 +2638,7 @@ for (let i = 0; i < 9; i++) {
 function drawClouds(camX, camY) {
   const wrapX = VIEW_W + 240;
   const wrapY = VIEW_H + 200;
-  ctx.fillStyle = "rgba(255,255,255,0.92)";
+  ctx.fillStyle = "rgba(252,247,235,0.92)"; // paper-white, matching the palette
   for (const c of CLOUDS) {
     const sx = ((((c.x + worldTime * c.speed - camX * c.par) % wrapX) + wrapX) % wrapX) - 120;
     const sy = ((((c.y - camY * c.par) % wrapY) + wrapY) % wrapY) - 100;
