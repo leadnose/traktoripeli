@@ -474,6 +474,7 @@ window.addEventListener("keydown", (e) => {
   }
   if ((e.key === "m" || e.key === "M") && !e.repeat) toggleMusic();
   if ((e.key === "q" || e.key === "Q") && !e.repeat) toggleSound();
+  if ((e.key === "f" || e.key === "F") && !e.repeat) fpsShown = !fpsShown;
   if (e.key === "Shift" && !e.repeat) {
     tractor.fastGear = !tractor.fastGear;
     if (tractor.fastGear) tractor.implDown = false; // lift before shifting up
@@ -4184,6 +4185,11 @@ function draw() {
     );
     screenCtx.textAlign = "left";
   }
+
+  if (fpsShown) {
+    screenCtx.font = "bold 11px monospace";
+    label(`${fpsValue} FPS`, 8, topH + 16, "#f5e9c8");
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -4228,10 +4234,23 @@ if (menuOpen) menuSaveInfo = loadSave();
 let lastTime = performance.now();
 let awayPool = 0; // time the dt cap discarded, waiting to be applied
 
+// FPS readout (Shift+F): frames averaged over half-second windows
+let fpsShown = false;
+let fpsFrames = 0;
+let fpsMs = 0;
+let fpsValue = 0;
+
 function loop(now) {
   const frameMs = now - lastTime;
   const dt = Math.min(frameMs / 1000, 0.05);
   lastTime = now;
+  fpsFrames++;
+  fpsMs += frameMs;
+  if (fpsMs >= 500) {
+    fpsValue = Math.round((fpsFrames * 1000) / fpsMs);
+    fpsFrames = 0;
+    fpsMs = 0;
+  }
   // The dt cap normally discards time lost to a hidden tab (one big gap on
   // return) or a throttled one (a trickle of ~1s frames); with the away
   // clock on it pools up and is applied to the game clock instead
