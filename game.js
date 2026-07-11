@@ -575,6 +575,9 @@ const PAPER_MIX = 0.12;
 const PAPER = [246, 233, 205];
 const INK_GAIN = [1.03, 1.0, 0.93];
 
+// Outline ink shared by the scene silhouettes and the map's boundary lines
+const INK = "#4a3827";
+
 const shadeCache = {};
 function shade(color, k) {
   const key = color + "|" + k.toFixed(2);
@@ -743,6 +746,69 @@ function fieldPath(P, rounded) {
   return path;
 }
 
+// Clip the map context to the ground diamond (caller does save/restore)
+function clipMapDiamond() {
+  mapCtx.beginPath();
+  for (const [ex, ey] of [[0, 0], [MAP_SIZE, 0], [MAP_SIZE, MAP_SIZE], [0, MAP_SIZE]]) {
+    const c = mp(ex, ey);
+    if (ex === 0 && ey === 0) mapCtx.moveTo(c.x, c.y);
+    else mapCtx.lineTo(c.x, c.y);
+  }
+  mapCtx.closePath();
+  mapCtx.clip();
+}
+
+// Ink lines along terrain boundaries. Each shared edge is drawn by the tile
+// with the higher-ranking type (water > seeded > plowed > stubble > grass),
+// following that tile's patch geometry so the line hugs the same rounded
+// outline the fills use; rounded corners ink their crescent arc, and edges
+// against the void draw the island's rim. Everything derives from the tile
+// grid, so any repaint reproduces the exact same line pixels.
+const EDGE_NEIGHBOR = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+
+function tileInk(tx, ty) {
+  const t = tiles[ty][tx];
+  const same = t === 4 ? isWater : t > 0 ? isField : () => true;
+  const { P, rounded } = tileGeometry(tx, ty, same);
+  mapCtx.strokeStyle = INK;
+  mapCtx.lineWidth = 1;
+  mapCtx.beginPath();
+  let any = false;
+  for (let i = 0; i < 4; i++) {
+    const cur = P[i];
+    const next = P[(i + 1) % 4];
+    if (rounded[i]) {
+      // The crescent arc always separates this tile's fill from grass
+      const prev = P[(i + 3) % 4];
+      mapCtx.moveTo(cur.x + (prev.x - cur.x) * CORNER_T, cur.y + (prev.y - cur.y) * CORNER_T);
+      mapCtx.quadraticCurveTo(
+        cur.x, cur.y,
+        cur.x + (next.x - cur.x) * CORNER_T, cur.y + (next.y - cur.y) * CORNER_T
+      );
+      any = true;
+    }
+    const nx = tx + EDGE_NEIGHBOR[i][0];
+    const ny = ty + EDGE_NEIGHBOR[i][1];
+    const n = nx < 0 || ny < 0 || nx >= MAP_TILES || ny >= MAP_TILES ? -1 : tiles[ny][nx];
+    if (n === t || (n !== -1 && n > t)) continue;
+    // Straight edge, cut short where a rounded corner replaces it
+    let x0 = cur.x, y0 = cur.y;
+    let x1 = next.x, y1 = next.y;
+    if (rounded[i]) {
+      x0 = cur.x + (next.x - cur.x) * CORNER_T;
+      y0 = cur.y + (next.y - cur.y) * CORNER_T;
+    }
+    if (rounded[(i + 1) % 4]) {
+      x1 = next.x + (cur.x - next.x) * CORNER_T;
+      y1 = next.y + (cur.y - next.y) * CORNER_T;
+    }
+    mapCtx.moveTo(x0, y0);
+    mapCtx.lineTo(x1, y1);
+    any = true;
+  }
+  if (any) mapCtx.stroke();
+}
+
 // Crop sprites for a seeded tile; the caller must have clipped to the
 // tile's field outline so plants never poke into the surrounding grass
 function drawCropsOn(tx, ty, kc) {
@@ -792,54 +858,28 @@ function drawTile(tx, ty) {
     mapCtx.restore();
   }
 
-  // Restore any road surface crossing this tile: roads live on top of the
-  // tiles, so the repaint just erased them here
-  const stamps = roadStamps.get(ty * MAP_TILES + tx);
-  if (stamps) {
-    mapCtx.save();
-    mapCtx.beginPath();
-    for (const [ex, ey] of [[0, 0], [MAP_SIZE, 0], [MAP_SIZE, MAP_SIZE], [0, MAP_SIZE]]) {
-      const c = mp(ex, ey);
-      if (ex === 0 && ey === 0) mapCtx.moveTo(c.x, c.y);
-      else mapCtx.lineTo(c.x, c.y);
-    }
-    mapCtx.closePath();
-    mapCtx.clip();
-    for (const s of stamps) {
-      const c = mp(s.x, s.y);
-      mapCtx.fillStyle = shade(s.color, groundShade(s.x, s.y));
-      mapCtx.beginPath();
-      mapCtx.ellipse(c.x, c.y, s.r * 1.5, s.r * 0.75, 0, 0, Math.PI * 2);
-      mapCtx.fill();
-    }
-    mapCtx.restore();
-  }
+  // Terrain boundary lines: this repaint painted over the ones crossing the
+  // tile, and its edge antialiasing nicked the neighbors' — redraw the whole
+  // neighborhood's lines (they are deterministic, so overdraw is a no-op)
+  for (let ny = Math.max(0, ty - 1); ny <= Math.min(MAP_TILES - 1, ty + 1); ny++)
+    for (let nx = Math.max(0, tx - 1); nx <= Math.min(MAP_TILES - 1, tx + 1); nx++)
+      tileInk(nx, ny);
 
-  // Restore the farmyard's trodden dirt if this tile is anywhere near it.
-  // The whole yard is repainted unclipped — its pixels are deterministic, so
-  // overpainting neighbors is a no-op, and clipping to the tile would leave
-  // antialiasing seams across the yard.
+  // The repaint region: the 3x3 block whose boundary lines were redrawn
+  // (which covers the front neighbors' crops too), with a margin for road
+  // stamps that stick out, plus the yard when it gets redrawn below. The
+  // road restore clips to this rect and the final re-dither covers it.
+  // 2.6: far enough that any road stamp the 5x5 gather can repaint under
+  // the yard's rim also triggers the yard that covers it back up
   const nearYard =
     Math.hypot((tx + 0.5) * TILE - FARM.x, (ty + 0.5) * TILE - FARM.y) <
-    FARM_RADIUS * 2.2;
+    FARM_RADIUS * 2.6;
   const fc = mp(FARM.x, FARM.y);
-  if (nearYard) {
-    mapCtx.fillStyle = shade("#a87e50", 1);
-    mapCtx.beginPath();
-    mapCtx.ellipse(fc.x, fc.y, FARM_RADIUS * 1.8, FARM_RADIUS * 0.9, 0, 0, Math.PI * 2);
-    mapCtx.fill();
-    mapCtx.fillStyle = shade("#8f6940", 1);
-    for (const p of yardPixels) mapCtx.fillRect(p.x, p.y, 1, 1);
-  }
-
-  // Re-dither everything that was repainted: the 2x2 block covering this
-  // tile and the front neighbors whose crops were redrawn, with a margin for
-  // road stamps that stick out, plus the yard when it was redrawn
   const c = [
-    mp(tx * TILE, ty * TILE),
-    mp((tx + 2) * TILE, ty * TILE),
+    mp((tx - 1) * TILE, (ty - 1) * TILE),
+    mp((tx + 2) * TILE, (ty - 1) * TILE),
     mp((tx + 2) * TILE, (ty + 2) * TILE),
-    mp(tx * TILE, (ty + 2) * TILE),
+    mp((tx - 1) * TILE, (ty + 2) * TILE),
   ];
   const xs = c.map((p) => p.x);
   const ys = c.map((p) => p.y);
@@ -853,6 +893,88 @@ function drawTile(tx, ty) {
     y0 = Math.min(y0, fc.y - FARM_RADIUS * 0.9 - 2);
     y1 = Math.max(y1, fc.y + FARM_RADIUS * 0.9 + 2);
   }
+
+  // Restore road and ditch surfaces: they live on top of the tiles and
+  // their boundary lines. Both passes are clipped so an ink ellipse can
+  // never land on road surface that no gathered fill covers (which would
+  // cap a continuing road): the clip is the repainted block itself, world-
+  // aligned exactly like the stamp gather, and the 5x5 gather guarantees
+  // every stamp whose fill overlaps it is present. The dither bbox would
+  // NOT work as the clip — a screen rect pokes tiles beyond the gather at
+  // its corners. Stamps are shared objects across tile lists, so a Set
+  // dedupes them.
+  const stamps = new Set();
+  for (let ny = Math.max(0, ty - 2); ny <= Math.min(MAP_TILES - 1, ty + 2); ny++)
+    for (let nx = Math.max(0, tx - 2); nx <= Math.min(MAP_TILES - 1, tx + 2); nx++) {
+      const list = roadStamps.get(ny * MAP_TILES + nx);
+      if (list) for (const s of list) stamps.add(s);
+    }
+  if (stamps.size) {
+    // The dither pass must cover every repainted pixel: grow the region to
+    // the gathered stamps' full extent, since the fills are not clipped
+    for (const s of stamps) {
+      const p = mp(s.x, s.y);
+      x0 = Math.min(x0, p.x - s.r * 1.5 - 2);
+      x1 = Math.max(x1, p.x + s.r * 1.5 + 2);
+      y0 = Math.min(y0, p.y - s.r * 0.75 - 2);
+      y1 = Math.max(y1, p.y + s.r * 0.75 + 2);
+    }
+    mapCtx.save();
+    clipMapDiamond();
+    // Ink goes down only inside the repainted block (world-aligned like the
+    // stamp gather, pushed out a few pixels for the terrain lines' edge
+    // antialiasing): every ink pixel in there is re-covered by a fill or is
+    // genuine rim, so a continuing road can't get capped
+    mapCtx.save();
+    mapCtx.beginPath();
+    mapCtx.moveTo(c[0].x, c[0].y - 6);
+    mapCtx.lineTo(c[1].x + 8, c[1].y);
+    mapCtx.lineTo(c[2].x, c[2].y + 6);
+    mapCtx.lineTo(c[3].x - 8, c[3].y);
+    mapCtx.closePath();
+    mapCtx.clip();
+    mapCtx.fillStyle = INK;
+    for (const s of stamps) {
+      const p = mp(s.x, s.y);
+      mapCtx.beginPath();
+      mapCtx.ellipse(p.x, p.y, s.r * 1.5 + 1, s.r * 0.75 + 1, 0, 0, Math.PI * 2);
+      mapCtx.fill();
+    }
+    mapCtx.restore();
+    // The fills are NOT clipped to the block — a clipped fill ends in an
+    // antialiased cut that reads as a straight seam across the road. Full
+    // ellipses repaint to exactly their build-time pixels instead. They go
+    // down in build order — ditch water first, road surface on top — so
+    // culverts keep reading as the road crossing over the ditch.
+    for (const ditchPass of [true, false])
+      for (const s of stamps) {
+        if ((s.color === DITCH_COLOR) !== ditchPass) continue;
+        const p = mp(s.x, s.y);
+        mapCtx.fillStyle = shade(s.color, groundShade(s.x, s.y));
+        mapCtx.beginPath();
+        mapCtx.ellipse(p.x, p.y, s.r * 1.5, s.r * 0.75, 0, 0, Math.PI * 2);
+        mapCtx.fill();
+      }
+    mapCtx.restore();
+  }
+
+  // Restore the farmyard's trodden dirt if this tile is anywhere near it.
+  // The whole yard is repainted unclipped — its pixels are deterministic, so
+  // overpainting neighbors is a no-op, and clipping to the tile would leave
+  // antialiasing seams across the yard.
+  if (nearYard) {
+    mapCtx.fillStyle = shade("#a87e50", 1);
+    mapCtx.beginPath();
+    mapCtx.ellipse(fc.x, fc.y, FARM_RADIUS * 1.8, FARM_RADIUS * 0.9, 0, 0, Math.PI * 2);
+    mapCtx.fill();
+    mapCtx.strokeStyle = INK;
+    mapCtx.lineWidth = 1;
+    mapCtx.stroke();
+    mapCtx.fillStyle = shade("#8f6940", 1);
+    for (const p of yardPixels) mapCtx.fillRect(p.x, p.y, 1, 1);
+  }
+
+  // Re-dither everything that was repainted
   ditherRegion(mapCtx, x0, y0, x1 - x0, y1 - y0);
 }
 
@@ -1123,9 +1245,11 @@ const DITCH_COLOR = "#3a6ea8"; // water-filled drainage ditches
 const roadStamps = new Map();
 
 function addStamp(x, y, r, color) {
+  // The margin past r covers the painted ellipse plus its one-pixel ink rim,
+  // so every pixel a stamp can touch lies in a tile that knows the stamp
   const touched = new Set();
-  for (const dx of [-r, r])
-    for (const dy of [-r, r]) touched.add(tileKey(x + dx, y + dy));
+  for (const dx of [-r - 2, r + 2])
+    for (const dy of [-r - 2, r + 2]) touched.add(tileKey(x + dx, y + dy));
   for (const k of touched) {
     if (!roadStamps.has(k)) roadStamps.set(k, []);
     roadStamps.get(k).push({ x, y, r, color });
@@ -1505,6 +1629,57 @@ function makeMap() {
     }
   }
 
+  // Dirt cliffs along the two near (bottom) edges of the map diamond. They
+  // go down before the ink so a border tile's repaint reproduces the same
+  // layering: cliff below, its boundary line on top.
+  const east = mp(MAP_SIZE, 0);
+  const south = mp(MAP_SIZE, MAP_SIZE);
+  const west = mp(0, MAP_SIZE);
+  for (const [a, b, color] of [
+    [east, south, "#8a6540"],
+    [south, west, "#6f4d2c"],
+  ]) {
+    mapCtx.fillStyle = shade(color, 1);
+    mapCtx.beginPath();
+    mapCtx.moveTo(a.x, a.y);
+    mapCtx.lineTo(b.x, b.y);
+    mapCtx.lineTo(b.x, b.y + EDGE_DEPTH);
+    mapCtx.lineTo(a.x, a.y + EDGE_DEPTH);
+    mapCtx.closePath();
+    mapCtx.fill();
+  }
+
+  // Close the island's ink silhouette under the cliffs; their top edge is
+  // drawn by the border tiles' own boundary lines
+  mapCtx.strokeStyle = INK;
+  mapCtx.lineWidth = 1;
+  mapCtx.beginPath();
+  mapCtx.moveTo(east.x, east.y);
+  mapCtx.lineTo(east.x, east.y + EDGE_DEPTH);
+  mapCtx.lineTo(south.x, south.y + EDGE_DEPTH);
+  mapCtx.lineTo(west.x, west.y + EDGE_DEPTH);
+  mapCtx.lineTo(west.x, west.y);
+  mapCtx.stroke();
+
+  // Ink every terrain boundary before the roads go down on top
+  for (let ty = 0; ty < MAP_TILES; ty++)
+    for (let tx = 0; tx < MAP_TILES; tx++) tileInk(tx, ty);
+
+  // One ink pass under every road and ditch stamp: the fills that follow
+  // cover all of it except a one-pixel rim around the union
+  const allStamps = new Set();
+  for (const list of roadStamps.values()) for (const s of list) allStamps.add(s);
+  mapCtx.save();
+  clipMapDiamond();
+  mapCtx.fillStyle = INK;
+  for (const s of allStamps) {
+    const c = mp(s.x, s.y);
+    mapCtx.beginPath();
+    mapCtx.ellipse(c.x, c.y, s.r * 1.5 + 1, s.r * 0.75 + 1, 0, 0, Math.PI * 2);
+    mapCtx.fill();
+  }
+  mapCtx.restore();
+
   // Ditches go down before the roads, so crossings read as culverts
   for (const d of ditchSamples) {
     const c = mp(d.x, d.y);
@@ -1518,14 +1693,7 @@ function makeMap() {
   // shaded like the terrain under them. Clipped to the map diamond so roads
   // running past the edge are cut off cleanly, as if continuing beyond.
   mapCtx.save();
-  mapCtx.beginPath();
-  for (const [ex, ey] of [[0, 0], [MAP_SIZE, 0], [MAP_SIZE, MAP_SIZE], [0, MAP_SIZE]]) {
-    const c = mp(ex, ey);
-    if (ex === 0 && ey === 0) mapCtx.moveTo(c.x, c.y);
-    else mapCtx.lineTo(c.x, c.y);
-  }
-  mapCtx.closePath();
-  mapCtx.clip();
+  clipMapDiamond();
   for (const road of roads) {
     for (const p of road.pts) {
       const c = mp(p.x, p.y);
@@ -1556,6 +1724,9 @@ function makeMap() {
   mapCtx.beginPath();
   mapCtx.ellipse(fc.x, fc.y, FARM_RADIUS * 1.8, FARM_RADIUS * 0.9, 0, 0, Math.PI * 2);
   mapCtx.fill();
+  mapCtx.strokeStyle = INK;
+  mapCtx.lineWidth = 1;
+  mapCtx.stroke();
   mapCtx.fillStyle = shade("#8f6940", 1);
   for (let i = 0; i < 40; i++) {
     const a = rand() * Math.PI * 2;
@@ -1566,25 +1737,7 @@ function makeMap() {
     mapCtx.fillRect(px, py, 1, 1);
   }
 
-  // Dirt cliffs along the two near (bottom) edges of the map diamond
-  const east = mp(MAP_SIZE, 0);
-  const south = mp(MAP_SIZE, MAP_SIZE);
-  const west = mp(0, MAP_SIZE);
-  for (const [a, b, color] of [
-    [east, south, "#8a6540"],
-    [south, west, "#6f4d2c"],
-  ]) {
-    mapCtx.fillStyle = shade(color, 1);
-    mapCtx.beginPath();
-    mapCtx.moveTo(a.x, a.y);
-    mapCtx.lineTo(b.x, b.y);
-    mapCtx.lineTo(b.x, b.y + EDGE_DEPTH);
-    mapCtx.lineTo(a.x, a.y + EDGE_DEPTH);
-    mapCtx.closePath();
-    mapCtx.fill();
-  }
-
-  // Dither everything painted after the tiles (yard, cliffs); tiles are
+  // Dither everything painted after the tiles (ink, roads, yard); tiles are
   // already dithered and the pass leaves them unchanged
   ditherRegion(mapCtx, 0, 0, mapCanvas.width, mapCanvas.height);
 }
@@ -2336,8 +2489,6 @@ const inkCanvas = document.createElement("canvas");
 inkCanvas.width = VIEW_W;
 inkCanvas.height = VIEW_H;
 const inkCtx = inkCanvas.getContext("2d");
-
-const INK = "#4a3827";
 
 function drawScene(camX, camY) {
   const pose = implementPose();
