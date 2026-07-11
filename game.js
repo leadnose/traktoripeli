@@ -3355,7 +3355,16 @@ function draw() {
         : null;
     seg(`SEEDS: ${seeds}   `, seedColor);
   }
-  if (tractor.implement === "trailer") seg(`CARGO: ${cargo}/${TRAILER_CAP}   `);
+  if (tractor.implement === "trailer") {
+    // Flash when the trailer is full while rolling over a field — passing
+    // by grain sacks it has no room to pick up
+    const fullRun =
+      cargo === TRAILER_CAP &&
+      Math.abs(tractor.speed) > 2 &&
+      implementOverField();
+    const cargoColor = fullRun && ((worldTime * 6) | 0) % 2 === 0 ? RED : null;
+    seg(`CARGO: ${cargo}/${TRAILER_CAP}   `, cargoColor);
+  }
   seg(`CASH: €${cash}   `, cash < SEED_PRICE ? RED : "#ffd94f");
   seg(`SOLD: ${sold}   `);
   seg(`@FARM 1:PLOW 2:SEED 3:HARVEST 4:TRAILER`, "#d8c49a");
