@@ -3338,7 +3338,23 @@ function draw() {
   seg(`GEAR: ${tractor.fastGear ? "FAST" : "SLOW"} [Shift]   `, flashGear ? RED : null);
   const state = imp.liftable ? (tractor.implDown ? " DOWN" : " UP") : "";
   seg(`${imp.label}${state} [Space]   `, flashImpl ? RED : null);
-  if (tractor.implement === "seeder") seg(`SEEDS: ${seeds}   `, seeds === 0 ? RED : null);
+  if (tractor.implement === "seeder") {
+    // Solid red when the hopper is empty; flashing when it's empty AND the
+    // seeder is down working a field — driving along planting nothing
+    const dryRun =
+      seeds === 0 &&
+      tractor.implLift < 0.3 &&
+      Math.abs(tractor.speed) > 2 &&
+      implementOverField();
+    const seedColor = dryRun
+      ? ((worldTime * 6) | 0) % 2 === 0
+        ? RED
+        : null
+      : seeds === 0
+        ? RED
+        : null;
+    seg(`SEEDS: ${seeds}   `, seedColor);
+  }
   if (tractor.implement === "trailer") seg(`CARGO: ${cargo}/${TRAILER_CAP}   `);
   seg(`CASH: €${cash}   `, cash < SEED_PRICE ? RED : "#ffd94f");
   seg(`SOLD: ${sold}   `);
