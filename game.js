@@ -30,10 +30,13 @@ const seedParam = parseInt(urlParams.get("seed"), 10);
 const SEED = Number.isFinite(seedParam) ? seedParam : (Math.random() * 1e9) | 0;
 
 // Game mode: "classic" is the timed one-season round, "survival" rolls year
-// after year with a property tax due every Oct 31. Chosen in the start menu;
-// reloads carry the mode in the URL next to the seed, and a fresh visit
-// (no mode in the URL) opens the start menu before anything moves.
-let mode = urlParams.get("mode") === "survival" ? "survival" : "classic";
+// after year with a property tax due every Oct 31, and "sandbox" rolls the
+// years with no taxes, no failure and no end — just roaming. Chosen in the
+// start menu; reloads carry the mode in the URL next to the seed, and a
+// fresh visit (no mode in the URL) opens the start menu before anything
+// moves.
+const MODES = ["classic", "survival", "sandbox"];
+let mode = MODES.includes(urlParams.get("mode")) ? urlParams.get("mode") : "classic";
 let gameStarted = urlParams.has("mode");
 
 const rand = (function mulberry32(a) {
@@ -352,6 +355,18 @@ function playTax() {
 const keys = {};
 const IMPLEMENT_KEYS = { 1: "plow", 2: "seeder", 3: "harvester", 4: "trailer" };
 
+// Music and sound toggles work both in-game and inside the menu (which
+// swallows all other input), so they live in shared helpers
+function toggleMusic() {
+  musicMuted = !musicMuted;
+  audio.musicGain.gain.setTargetAtTime(musicMuted ? 0 : 1, audio.ac.currentTime, 0.02);
+}
+
+function toggleSound() {
+  soundMuted = !soundMuted;
+  audio.master.gain.setTargetAtTime(soundMuted ? 0 : 0.5, audio.ac.currentTime, 0.02);
+}
+
 // F1 opens the menu, the only place the seed and mode can be picked. It is
 // also the start menu: a fresh visit begins with it open and the clock held.
 let menuOpen = !gameStarted;
@@ -399,14 +414,19 @@ window.addEventListener("keydown", (e) => {
     } else if (e.key === "r" || e.key === "R") {
       menuSeed = String((Math.random() * 1e9) | 0);
     } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
-      menuMode = menuMode === "classic" ? "survival" : "classic";
-    } else if (e.key === "t" || e.key === "T") {
+      const dir = e.key === "ArrowDown" ? 1 : -1;
+      menuMode = MODES[(MODES.indexOf(menuMode) + dir + MODES.length) % MODES.length];
+    } else if ((e.key === "t" || e.key === "T") && !e.repeat) {
       awayClock = !awayClock;
       try {
         localStorage.setItem(AWAY_CLOCK_KEY, awayClock ? "1" : "0");
       } catch {
         // not persisted, still applies to this session
       }
+    } else if ((e.key === "m" || e.key === "M") && !e.repeat) {
+      toggleMusic();
+    } else if ((e.key === "q" || e.key === "Q") && !e.repeat) {
+      toggleSound();
     } else if (e.key === "Escape") {
       if (gameStarted) menuOpen = false;
     } else if (e.key === "Backspace") {
@@ -440,14 +460,8 @@ window.addEventListener("keydown", (e) => {
       playHydraulic(true);
     }
   }
-  if ((e.key === "m" || e.key === "M") && !e.repeat) {
-    musicMuted = !musicMuted;
-    audio.musicGain.gain.setTargetAtTime(musicMuted ? 0 : 1, audio.ac.currentTime, 0.02);
-  }
-  if ((e.key === "q" || e.key === "Q") && !e.repeat) {
-    soundMuted = !soundMuted;
-    audio.master.gain.setTargetAtTime(soundMuted ? 0 : 0.5, audio.ac.currentTime, 0.02);
-  }
+  if ((e.key === "m" || e.key === "M") && !e.repeat) toggleMusic();
+  if ((e.key === "q" || e.key === "Q") && !e.repeat) toggleSound();
   if (e.key === "Shift" && !e.repeat) {
     tractor.fastGear = !tractor.fastGear;
     if (tractor.fastGear) tractor.implDown = false; // lift before shifting up
@@ -2741,9 +2755,21 @@ let propertyTax = TAX_BASE;
 let taxFlash = 0; // seconds left of the "tax paid" banner
 let taxPaid = 0; // amount shown in that banner
 
+// Sandbox mode: the same rolling years, but nothing is ever due and
+// nothing ever ends. A fat wallet so seeds are never a worry.
+const SANDBOX_START_CASH = 1000;
+
+function modeStartCash(m) {
+  return m === "survival"
+    ? SURVIVAL_START_CASH
+    : m === "sandbox"
+      ? SANDBOX_START_CASH
+      : START_CASH;
+}
+
 function startGame(m) {
   mode = m;
-  cash = m === "survival" ? SURVIVAL_START_CASH : START_CASH;
+  cash = modeStartCash(m);
   gameStarted = true;
   menuOpen = false;
 }
@@ -2780,6 +2806,10 @@ function advanceTime(sec) {
       sec -= timeLeft;
       timeLeft = 0;
       if (!collectTax()) return;
+    } else if (mode === "sandbox") {
+      sec -= timeLeft;
+      year++;
+      timeLeft = ROUND_TIME;
     } else {
       timeLeft = 0;
       endRound();
@@ -2831,9 +2861,9 @@ function endSurvival() {
   }
 }
 
-// € — enough starting capital for the first bag of seeds; survival starts
-// with a bit more as a buffer against the first tax bill
-let cash = mode === "survival" ? SURVIVAL_START_CASH : START_CASH;
+// Starting capital by mode: classic gets enough for the first bag of
+// seeds, survival a buffer against the first tax bill, sandbox plenty
+let cash = modeStartCash(mode);
 let seeds = 0; // start empty: buy seeds at the farm
 let cargo = 0; // sacks on the trailer
 let sold = 0; // total sacks delivered to the farm
@@ -2918,6 +2948,9 @@ function update(dt) {
   if (timeLeft === 0) {
     if (mode === "survival") {
       if (!collectTax()) return;
+    } else if (mode === "sandbox") {
+      year++;
+      timeLeft = ROUND_TIME;
     } else {
       endRound();
       return;
@@ -3118,6 +3151,46 @@ function updateCamera(dt) {
 // Rendering
 // ---------------------------------------------------------------------------
 
+// Tiny pixel icons for the top bar: a note for the music, a speaker for the
+// sound effects. Muted draws dim with a red strike across.
+function iconStrike(x, y) {
+  screenCtx.fillStyle = "#ff5040";
+  for (let i = 0; i < 6; i++) screenCtx.fillRect(x + i * 2, y + 10 - i * 2, 2, 2);
+}
+
+function drawNoteIcon(x, y, on) {
+  screenCtx.fillStyle = on ? "#f5e9c8" : "#4a2f1a";
+  screenCtx.fillRect(x + 3, y + 1, 7, 2); // beam
+  screenCtx.fillRect(x + 3, y + 1, 2, 8); // stems
+  screenCtx.fillRect(x + 8, y + 1, 2, 8);
+  screenCtx.fillRect(x + 1, y + 8, 4, 3); // note heads
+  screenCtx.fillRect(x + 6, y + 8, 4, 3);
+  if (!on) iconStrike(x, y);
+}
+
+function drawSpeakerIcon(x, y, on) {
+  screenCtx.fillStyle = on ? "#f5e9c8" : "#4a2f1a";
+  screenCtx.fillRect(x, y + 4, 3, 4); // box
+  screenCtx.beginPath(); // cone
+  screenCtx.moveTo(x + 3, y + 6);
+  screenCtx.lineTo(x + 7, y + 2);
+  screenCtx.lineTo(x + 7, y + 10);
+  screenCtx.closePath();
+  screenCtx.fill();
+  if (on) {
+    screenCtx.strokeStyle = "#f5e9c8"; // sound waves
+    screenCtx.lineWidth = 1;
+    screenCtx.beginPath();
+    screenCtx.arc(x + 7, y + 6, 3, -0.8, 0.8);
+    screenCtx.stroke();
+    screenCtx.beginPath();
+    screenCtx.arc(x + 7, y + 6, 5.5, -0.8, 0.8);
+    screenCtx.stroke();
+  } else {
+    iconStrike(x, y);
+  }
+}
+
 function draw() {
   const camX = Math.round(cam.x);
   const camY = Math.round(cam.y);
@@ -3177,38 +3250,63 @@ function draw() {
   seg(`SOLD: ${sold}   `);
   seg(`@FARM 1:PLOW 2:SEED 3:HARVEST 4:TRAILER`, "#d8c49a");
 
-  // Seed readout on a little leather tag, so a nice map can be shared
-  screenCtx.font = "11px monospace";
-  const infoText =
-    `SEED ${SEED}   [F1] MENU  ` +
-    `[M] MUSIC ${musicMuted ? "OFF" : "ON"}  [Q] SOUND ${soundMuted ? "OFF" : "ON"}`;
-  screenCtx.fillStyle = "rgba(58,40,24,0.55)";
-  screenCtx.fillRect(6, 6, screenCtx.measureText(infoText).width + 12, 36);
-  label(infoText, 12, 20, "#f5e9c8");
-  label(`${fps.toFixed(0)} FPS`, 12, 36, "#d8c49a");
+  // The top HUD is a single-line plank bar matching the bottom one, trim
+  // mirrored: mode and seed on the left, the season calendar in the middle
+  // with the year folded into its date label, and the menu key, mute icons
+  // and FPS on the right
+  const topH = 28;
+  screenCtx.fillStyle = "#7a4f2d";
+  screenCtx.fillRect(0, 0, screenCanvas.width, topH);
+  screenCtx.fillStyle = "#4a2f1a";
+  screenCtx.fillRect(0, topH, screenCanvas.width, 3);
+  screenCtx.fillStyle = "rgba(0,0,0,0.12)"; // plank seams
+  for (let px = 40; px < screenCanvas.width; px += 80) screenCtx.fillRect(px, 0, 1, topH);
+  screenCtx.fillStyle = "rgba(255,240,200,0.15)"; // sun-bleached lower edge
+  screenCtx.fillRect(0, topH - 1, screenCanvas.width, 1);
 
-  // Season calendar instead of a clock: the current date counts from spring
-  // toward the end date, with a progress bar in between. Flashes red for
-  // the last 30 seconds of the round.
+  screenCtx.font = "11px monospace";
+  const topY = 18; // shared text baseline in the bar
+
+  // Left: mode and seed
+  let topX = 12;
+  const topSeg = (text, color) => {
+    label(text, topX, topY, color || "#f5e9c8");
+    topX += screenCtx.measureText(text).width;
+  };
+  topSeg(`${mode.toUpperCase()}  `, "#ffd94f");
+  topSeg(`SEED ${SEED}`);
+
+  // Season calendar instead of a clock: the year and date count from spring
+  // toward Oct 31 along a wooden trough; in survival the tax bill waits at
+  // the far end of it. Flashes red for the last 30 seconds of the year.
   const progress = 1 - timeLeft / ROUND_TIME;
   const date = new Date(
     2000, 3, 1 + Math.min(SEASON_DAYS, Math.floor(progress * (SEASON_DAYS + 1)))
   );
-  const barW = 170;
+  const barW = 140;
   const barH = 8;
   const bx = (screenCanvas.width - barW) / 2;
-  const by = 14;
-  const flash = timeLeft < 30 && ((timeLeft * 2) | 0) % 2 === 0;
-  screenCtx.font = "bold 13px monospace";
+  const by = 10;
+  // Nothing is due at year's end in sandbox, so no red urgency flash there
+  const flash =
+    mode !== "sandbox" && timeLeft < 30 && ((timeLeft * 2) | 0) % 2 === 0;
+  const taxJustPaid = mode === "survival" && taxFlash > 0 && !gameOver;
   screenCtx.textAlign = "right";
   label(
-    `${MONTH_NAMES[date.getMonth()]} ${date.getDate()}`,
-    bx - 10,
-    by + barH,
+    (mode === "classic" ? "" : `Y${year} `) +
+      `${MONTH_NAMES[date.getMonth()]} ${date.getDate()}`,
+    bx - 8,
+    topY,
     flash ? "#ff5040" : "#f5e9c8"
   );
   screenCtx.textAlign = "left";
-  label("OCT 31", bx + barW + 10, by + barH, "#d8c49a");
+  const endLabel =
+    mode === "survival"
+      ? taxJustPaid
+        ? `-€${taxPaid} PAID`
+        : `TAX €${propertyTax}`
+      : "OCT 31";
+  label(endLabel, bx + barW + 8, topY, taxJustPaid ? "#ff5040" : "#d8c49a");
   // The season grows along a wooden trough
   screenCtx.fillStyle = "#4a2f1a";
   screenCtx.fillRect(bx - 2, by - 2, barW + 4, barH + 4);
@@ -3217,23 +3315,18 @@ function draw() {
   screenCtx.fillStyle = flash ? "#ff5040" : seasonHex(SEASON_BAR_COLORS);
   screenCtx.fillRect(bx, by, Math.round(barW * progress), barH);
 
-  // Survival: the year and the tax bill waiting at the end of it, swapped
-  // for a red receipt banner for a few seconds after the tax is collected
-  if (mode === "survival") {
-    screenCtx.font = "bold 11px monospace";
-    screenCtx.textAlign = "center";
-    if (taxFlash > 0 && !gameOver) {
-      label(`PROPERTY TAX PAID: -€${taxPaid}`, bx + barW / 2, by + barH + 16, "#ff5040");
-    } else {
-      label(
-        `YEAR ${year} — TAX DUE OCT 31: €${propertyTax}`,
-        bx + barW / 2,
-        by + barH + 16,
-        "#f5e9c8"
-      );
-    }
-    screenCtx.textAlign = "left";
-  }
+  // Right: menu key, music & sound icons, FPS
+  screenCtx.textAlign = "right";
+  let rx = screenCanvas.width - 12;
+  const fpsText = `${fps.toFixed(0)} FPS`;
+  label(fpsText, rx, topY, "#d8c49a");
+  rx -= screenCtx.measureText(fpsText).width + 12;
+  drawSpeakerIcon(rx - 13, 8, !soundMuted);
+  rx -= 13 + 10;
+  drawNoteIcon(rx - 12, 8, !musicMuted);
+  rx -= 12 + 10;
+  label("[F1] MENU", rx, topY, "#d8c49a");
+  screenCtx.textAlign = "left";
 
   // Game over: final score and the all-time best list
   if (gameOver) {
@@ -3295,7 +3388,7 @@ function draw() {
   const mmW = minimapCanvas.width * mmScale;
   const mmH = minimapCanvas.height * mmScale;
   const mmX = screenCanvas.width - mmW - 12;
-  const mmY = 12;
+  const mmY = topH + 11; // tucked under the top plank bar
   // Wooden picture frame around the map
   screenCtx.fillStyle = "#4a2f1a";
   screenCtx.fillRect(mmX - 8, mmY - 8, mmW + 16, mmH + 16);
@@ -3329,7 +3422,7 @@ function draw() {
   // opens it before the clock starts; F1 brings it back later.
   if (menuOpen) {
     const w = 420;
-    const h = 216;
+    const h = 256;
     const x = (screenCanvas.width - w) / 2;
     const y = (screenCanvas.height - h) / 2;
     const cx = screenCanvas.width / 2;
@@ -3355,6 +3448,7 @@ function draw() {
     const modeRows = [
       ["classic", "CLASSIC  — ONE SEASON, RACE FOR PROFIT"],
       ["survival", "SURVIVAL — PAY THE YEARLY TAX, SURVIVE"],
+      ["sandbox", "SANDBOX  — NO CLOCK PRESSURE, JUST ROAM"],
     ];
     modeRows.forEach(([m, text], i) => {
       const sel = menuMode === m;
@@ -3365,8 +3459,14 @@ function draw() {
     label(
       `[T] AWAY CLOCK: ${awayClock ? "ON " : "OFF"} — TIME PASSES WHILE THE TAB IS HIDDEN`,
       cx,
-      y + 152,
+      y + 172,
       awayClock ? "#c9e6a8" : "#d8c49a"
+    );
+    label(
+      `[M] MUSIC: ${musicMuted ? "OFF" : "ON "}      [Q] SOUND: ${soundMuted ? "OFF" : "ON "}`,
+      cx,
+      y + 192,
+      "#d8c49a"
     );
     label(
       "[↑↓] MODE   [R] RANDOM SEED   [ENTER] START" +
