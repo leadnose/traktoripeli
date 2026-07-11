@@ -2322,6 +2322,23 @@ function onScreen(wx, wy, camX, camY) {
   return x > -40 && x < VIEW_W + 40 && y > -80 && y < VIEW_H + 80;
 }
 
+// Scene models render onto their own transparent canvas so an ink pass can
+// outline them: the canvas alpha stamped at the four cardinal offsets, minus
+// the scene itself, is exactly a one-pixel line around every silhouette.
+// Overlapping models merge into one inked shape, so no line ever cuts
+// through a correct occlusion, and the draw order stays untouched.
+const sceneCanvas = document.createElement("canvas");
+sceneCanvas.width = VIEW_W;
+sceneCanvas.height = VIEW_H;
+const sceneCtx = sceneCanvas.getContext("2d");
+
+const inkCanvas = document.createElement("canvas");
+inkCanvas.width = VIEW_W;
+inkCanvas.height = VIEW_H;
+const inkCtx = inkCanvas.getContext("2d");
+
+const INK = "#4a3827";
+
 function drawScene(camX, camY) {
   const pose = implementPose();
 
@@ -2441,32 +2458,33 @@ function drawScene(camX, camY) {
   }
   items.sort((a, b) => a.depth - b.depth);
 
+  sceneCtx.clearRect(0, 0, VIEW_W, VIEW_H);
   for (const item of items) {
     if (item.blob) {
       // Soft sphere: base ellipse with a lighter highlight up and to the left
-      ctx.fillStyle = shade(item.color, item.k);
-      ctx.beginPath();
-      ctx.ellipse(item.blob.x, item.blob.y, item.rx, item.ry, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = shade(item.color, item.k * 1.16);
-      ctx.beginPath();
-      ctx.ellipse(
+      sceneCtx.fillStyle = shade(item.color, item.k);
+      sceneCtx.beginPath();
+      sceneCtx.ellipse(item.blob.x, item.blob.y, item.rx, item.ry, 0, 0, Math.PI * 2);
+      sceneCtx.fill();
+      sceneCtx.fillStyle = shade(item.color, item.k * 1.16);
+      sceneCtx.beginPath();
+      sceneCtx.ellipse(
         item.blob.x - item.rx * 0.25,
         item.blob.y - item.ry * 0.3,
         item.rx * 0.55,
         item.ry * 0.5,
         0, 0, Math.PI * 2
       );
-      ctx.fill();
+      sceneCtx.fill();
       continue;
     }
     if (item.poly) {
-      ctx.fillStyle = shade(item.color, item.k);
-      ctx.beginPath();
-      ctx.moveTo(item.poly[0].x, item.poly[0].y);
-      for (const p of item.poly.slice(1)) ctx.lineTo(p.x, p.y);
-      ctx.closePath();
-      ctx.fill();
+      sceneCtx.fillStyle = shade(item.color, item.k);
+      sceneCtx.beginPath();
+      sceneCtx.moveTo(item.poly[0].x, item.poly[0].y);
+      for (const p of item.poly.slice(1)) sceneCtx.lineTo(p.x, p.y);
+      sceneCtx.closePath();
+      sceneCtx.fill();
       continue;
     }
     for (const face of FACES) {
@@ -2478,14 +2496,30 @@ function drawScene(camX, camY) {
       const d = nx * LIGHT.x + ny * LIGHT.y + face.n[2] * LIGHT.z;
       const k = Math.min(1, Math.max(0.3, 0.3 + d));
 
-      ctx.fillStyle = shade(item.box.color, k);
-      ctx.beginPath();
-      ctx.moveTo(pts[0].x, pts[0].y);
-      for (const p of pts.slice(1)) ctx.lineTo(p.x, p.y);
-      ctx.closePath();
-      ctx.fill();
+      sceneCtx.fillStyle = shade(item.box.color, k);
+      sceneCtx.beginPath();
+      sceneCtx.moveTo(pts[0].x, pts[0].y);
+      for (const p of pts.slice(1)) sceneCtx.lineTo(p.x, p.y);
+      sceneCtx.closePath();
+      sceneCtx.fill();
     }
   }
+
+  // Ink pass: dilate the scene's alpha one pixel in each cardinal direction,
+  // cut the scene itself back out, and tint the remaining ring
+  inkCtx.globalCompositeOperation = "source-over";
+  inkCtx.clearRect(0, 0, VIEW_W, VIEW_H);
+  for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]])
+    inkCtx.drawImage(sceneCanvas, dx, dy);
+  inkCtx.globalCompositeOperation = "destination-out";
+  inkCtx.drawImage(sceneCanvas, 0, 0);
+  inkCtx.globalCompositeOperation = "source-in";
+  inkCtx.fillStyle = INK;
+  inkCtx.fillRect(0, 0, VIEW_W, VIEW_H);
+
+  // The line goes under the models: outline first, scene on top
+  ctx.drawImage(inkCanvas, 0, 0);
+  ctx.drawImage(sceneCanvas, 0, 0);
 }
 
 // ---------------------------------------------------------------------------
