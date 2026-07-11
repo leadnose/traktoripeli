@@ -372,6 +372,9 @@ function toggleSound() {
 let menuOpen = !gameStarted;
 let menuSeed = "1"; // the start menu defaults to seed 1; R rolls a random one
 let menuMode = mode;
+// The autosave the menu offers to continue, read once when the menu opens
+// (parsing the save JSON every drawn frame would be wasteful)
+let menuSaveInfo = null;
 
 // Away clock, toggled in the menu: rAF stops in a hidden tab, so normally
 // game time freezes there. With this on, the lost time is applied in one
@@ -394,6 +397,7 @@ window.addEventListener("keydown", (e) => {
     menuOpen = !menuOpen;
     menuSeed = String(SEED); // mid-game the field opens on the current map
     menuMode = mode;
+    if (menuOpen) menuSaveInfo = loadSave();
     return;
   }
   if (menuOpen) {
@@ -404,13 +408,21 @@ window.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       const n = parseInt(menuSeed, 10);
       if (Number.isFinite(n)) {
+        clearSave(); // Enter always begins a fresh run
         if (!gameStarted && n === SEED) {
           // Same map as the one already generated: start without a reload
           startGame(menuMode);
         } else {
+          // The reload's pagehide must not re-save the run just discarded
+          savingDisabled = true;
           location.search = `?seed=${n}&mode=${menuMode}`;
         }
       }
+    } else if (e.key === "c" || e.key === "C") {
+      // Continue the autosaved run: reloading with its seed and mode in
+      // the URL restores the save at boot
+      if (menuSaveInfo)
+        location.search = `?seed=${menuSaveInfo.seed}&mode=${menuSaveInfo.mode}`;
     } else if (e.key === "r" || e.key === "R") {
       menuSeed = String((Math.random() * 1e9) | 0);
     } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
@@ -2820,6 +2832,7 @@ function advanceTime(sec) {
 function endRound() {
   gameOver = true;
   tractor.speed = 0;
+  clearSave(); // a finished run must not resurrect on reload
   const entry = { score: cash - START_CASH, seed: SEED, date: Date.now() };
   let scores;
   try {
@@ -2838,11 +2851,85 @@ function endRound() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Save games: the whole mutable state autosaves to localStorage, so a reload
+// (or updating the game) resumes the run. Terrain, roads, water and scenery
+// all regenerate deterministically from the seed and aren't saved; only the
+// tile arrays and the player's numbers are.
+// ---------------------------------------------------------------------------
+
+const SAVE_KEY = "traktoripeli.save";
+const SAVE_VERSION = 1; // bump when map generation changes: stale saves drop
+let saveTimer = 0;
+let savingDisabled = false; // set when navigating away from a discarded run
+
+function saveGame() {
+  if (!gameStarted || gameOver || savingDisabled) return;
+  const data = {
+    v: SAVE_VERSION,
+    seed: SEED,
+    mode,
+    tiles,
+    dirs,
+    growth: growth.map((row) => row.map((g) => Math.round(g * 10) / 10)),
+    sacks,
+    cash,
+    seeds,
+    cargo,
+    sold,
+    year,
+    propertyTax,
+    timeLeft: Math.round(timeLeft * 10) / 10,
+    tractor: {
+      x: tractor.x,
+      y: tractor.y,
+      angle: tractor.angle,
+      fastGear: tractor.fastGear,
+      implement: tractor.implement,
+      implAngle: tractor.implAngle,
+      implDown: tractor.implDown,
+      implLift: tractor.implLift,
+    },
+  };
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+  } catch {
+    // private browsing etc: the run just isn't saved
+  }
+}
+
+function loadSave() {
+  try {
+    const s = JSON.parse(localStorage.getItem(SAVE_KEY));
+    return s && s.v === SAVE_VERSION && s.tiles && s.tiles.length === MAP_TILES
+      ? s
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function clearSave() {
+  try {
+    localStorage.removeItem(SAVE_KEY);
+  } catch {
+    // nothing to do
+  }
+}
+
+// Save on the way out (tab closed, hidden or navigated away), on top of
+// the periodic autosave from update()
+window.addEventListener("pagehide", saveGame);
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) saveGame();
+});
+
 // Bankruptcy ends a survival run; the score is how many years the farm held
 // out, with the closing balance as the tiebreak
 function endSurvival() {
   gameOver = true;
   tractor.speed = 0;
+  clearSave(); // a finished run must not resurrect on reload
   const entry = { years: year, cash, seed: SEED, date: Date.now() };
   let scores;
   try {
@@ -3128,6 +3215,13 @@ function update(dt) {
 
   updateTracks(dt);
   updateCrops(dt);
+
+  // Periodic autosave so even a crash or hard reload loses only moments
+  saveTimer += dt;
+  if (saveTimer >= 5) {
+    saveTimer = 0;
+    saveGame();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -3468,6 +3562,14 @@ function draw() {
       y + 192,
       "#d8c49a"
     );
+    if (menuSaveInfo) {
+      label(
+        `[C] CONTINUE — ${menuSaveInfo.mode.toUpperCase()}, SEED ${menuSaveInfo.seed}, YEAR ${menuSaveInfo.year}`,
+        cx,
+        y + 212,
+        "#c9e6a8"
+      );
+    }
     label(
       "[↑↓] MODE   [R] RANDOM SEED   [ENTER] START" +
         (gameStarted ? "   [ESC] CLOSE" : ""),
@@ -3482,6 +3584,41 @@ function draw() {
 // ---------------------------------------------------------------------------
 // Main loop
 // ---------------------------------------------------------------------------
+
+// Resume an autosaved run when the URL points at its map and mode. The
+// world has just been generated fresh from the seed, so only the tiles the
+// player changed need repainting; the season's colors then catch up through
+// the usual gradual background repaint.
+// A fresh visit opens the start menu: let it offer the autosaved run
+if (menuOpen) menuSaveInfo = loadSave();
+
+{
+  const s = gameStarted ? loadSave() : null;
+  if (s && s.seed === SEED && s.mode === mode) {
+    const dirty = [];
+    for (let ty = 0; ty < MAP_TILES; ty++)
+      for (let tx = 0; tx < MAP_TILES; tx++)
+        if (tiles[ty][tx] !== s.tiles[ty][tx]) dirty.push([tx, ty]);
+    for (let ty = 0; ty < MAP_TILES; ty++) {
+      tiles[ty] = s.tiles[ty];
+      dirs[ty] = s.dirs[ty];
+      growth[ty] = s.growth[ty];
+    }
+    sacks.push(...s.sacks);
+    cash = s.cash;
+    seeds = s.seeds;
+    cargo = s.cargo;
+    sold = s.sold;
+    year = s.year;
+    propertyTax = s.propertyTax;
+    timeLeft = s.timeLeft;
+    Object.assign(tractor, s.tractor);
+    cam.x = projX(tractor.x, tractor.y) - VIEW_W / 2;
+    cam.y =
+      projY(tractor.x, tractor.y, terrainHeight(tractor.x, tractor.y)) - VIEW_H / 2;
+    for (const [tx, ty] of dirty) drawTile(tx, ty);
+  }
+}
 
 let lastTime = performance.now();
 let fps = 0;
