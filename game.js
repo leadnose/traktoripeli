@@ -1230,8 +1230,11 @@ function updateCrops(dt) {
 }
 
 // Roads are generated inside makeMap; the samples and covered tiles are kept
-// so field patches, trees and bushes can stay off them. The field patch
-// rectangles are kept for the hedgerows planted along their edges.
+// so field patches, trees and bushes can stay off them, and the roads
+// themselves (point sequences) so the delivery van can drive the network.
+// The field patch rectangles are kept for the hedgerows planted along their
+// edges.
+const roads = [];
 const roadSamples = [];
 const roadTiles = new Set();
 const patches = [];
@@ -1443,7 +1446,6 @@ function makeMap() {
   // from the nearest existing road to each field. Roads run octilinearly —
   // one 45-degree diagonal leg and one axis-aligned leg, in either order —
   // like grid-country farm roads.
-  const roads = [];
   const net = [{ x: FARM.x, y: FARM.y }];
 
   const traceRoad = (from, tx, ty, r) => {
@@ -2009,8 +2011,13 @@ const ANIMAL_SPECS = {
 
 const animals = [];
 
+// Every spawned group is registered as a herd, so routines can send its
+// members somewhere together (see updateHerds) by moving their home anchor
+const herds = [];
+
 function spawnHerd(species, hx, hy, count) {
   const n = count || 3 + ((rand() * 4) | 0);
+  const members = [];
   for (let i = 0; i < n; i++) {
     // Keep trying offsets until the animal actually stands on grass —
     // otherwise it can spawn in the water beside a shoreline home spot
@@ -2028,7 +2035,7 @@ function spawnHerd(species, hx, hy, count) {
         break;
       }
     }
-    animals.push({
+    const a = {
       species,
       hx,
       hy,
@@ -2039,8 +2046,18 @@ function spawnHerd(species, hx, hy, count) {
       // Unique depth tiebreak: animals standing at the same depth keep a
       // consistent order instead of interleaving their parts
       tie: animals.length * 0.004,
-    });
+    };
+    animals.push(a);
+    members.push(a);
   }
+  herds.push({
+    species,
+    homeX: hx,
+    homeY: hy,
+    members,
+    out: false,
+    next: 20 + rand() * 60, // time until the first outing
+  });
 }
 
 // The farm always keeps one herd of each species grazing close by
@@ -2066,7 +2083,7 @@ for (const species of ["cow", "sheep", "horse"]) {
 spawnHerd("chicken", FARM.x, FARM.y, 6 + ((rand() * 4) | 0));
 
 // Plus a few wild-placed herds further out
-for (let herds = 0, tries = 0; herds < 4 && tries < 400; tries++) {
+for (let placed = 0, tries = 0; placed < 4 && tries < 400; tries++) {
   const hx = 30 + rand() * (MAP_SIZE - 60);
   const hy = 30 + rand() * (MAP_SIZE - 60);
   if (tileTypeAt(hx, hy) !== 0) continue;
@@ -2074,8 +2091,17 @@ for (let herds = 0, tries = 0; herds < 4 && tries < 400; tries++) {
   if (Math.hypot(hx - FARM.x, hy - FARM.y) < FARM_RADIUS + 24) continue;
   const r = rand();
   spawnHerd(r < 0.4 ? "cow" : r < 0.75 ? "sheep" : "horse", hx, hy);
-  herds++;
+  placed++;
 }
+
+// Grass banks beside water, where the herds can amble down for a drink
+const shoreSpots = [];
+for (let sy = 0; sy < MAP_TILES; sy++)
+  for (let sx = 0; sx < MAP_TILES; sx++) {
+    if (tiles[sy][sx] !== 0 || roadTiles.has(sy * MAP_TILES + sx)) continue;
+    if (isWater(sx + 1, sy) || isWater(sx - 1, sy) || isWater(sx, sy + 1) || isWater(sx, sy - 1))
+      shoreSpots.push({ x: (sx + 0.5) * TILE, y: (sy + 0.5) * TILE });
+  }
 
 function updateAnimals(dt) {
   for (const a of animals) {
@@ -2106,20 +2132,32 @@ function updateAnimals(dt) {
         a.wx += rand() - 0.5; // unstick exact overlaps
       }
     }
-    // Spooked animals get clear of the tractor — sideways off its path,
+    // The delivery van spooks animals just like the tractor does: flee
+    // whichever machine is nearer
+    let spook = tractor;
+    let spookDist = tractorDist;
+    let spookSpeed = Math.abs(tractor.speed);
+    if (van.on) {
+      const vd = Math.hypot(a.wx - van.x, a.wy - van.y);
+      if (vd < spookDist) {
+        spook = van;
+        spookDist = vd;
+        spookSpeed = van.moving;
+      }
+    }
+    // Spooked animals get clear of the machine — sideways off its path,
     // not down the line of travel — turning at the species' own pace but
     // always smoothly (no snaps)
-    if (spec.spook && tractorDist < spec.spook) {
+    if (spec.spook && spookDist < spec.spook) {
       a.pause = 0;
-      const tdx = a.wx - tractor.x;
-      const tdy = a.wy - tractor.y;
-      const hx = Math.cos(tractor.angle);
-      const hy = Math.sin(tractor.angle);
+      const tdx = a.wx - spook.x;
+      const tdy = a.wy - spook.y;
+      const hx = Math.cos(spook.angle);
+      const hy = Math.sin(spook.angle);
       const side = tdx * -hy + tdy * hx >= 0 ? 1 : -1;
-      const fx = -hy * side + (tdx / (tractorDist || 1)) * 0.5;
-      const fy = hx * side + (tdy / (tractorDist || 1)) * 0.5;
-      const want =
-        Math.abs(tractor.speed) > 3 ? Math.atan2(fy, fx) : Math.atan2(tdy, tdx);
+      const fx = -hy * side + (tdx / (spookDist || 1)) * 0.5;
+      const fy = hx * side + (tdy / (spookDist || 1)) * 0.5;
+      const want = spookSpeed > 3 ? Math.atan2(fy, fx) : Math.atan2(tdy, tdx);
       const d = Math.atan2(Math.sin(want - a.angle), Math.cos(want - a.angle));
       a.angle += Math.max(-spec.fleeTurn * dt, Math.min(spec.fleeTurn * dt, d));
       const nx = a.wx + Math.cos(a.angle) * spec.flee * dt;
@@ -2157,6 +2195,153 @@ function updateAnimals(dt) {
       a.pause = spec.pauseDur[0] + rand() * spec.pauseDur[1];
     }
   }
+}
+
+// Herd routines: every so often a grazing herd ambles to the nearest water
+// for a drink, lingers on the bank, and heads home again. Only the home
+// anchor moves — the members' ordinary wander-and-home behavior walks them
+// there at their own pace.
+function updateHerds(dt) {
+  for (const h of herds) {
+    if (h.species === "chicken") continue; // the flock keeps to the yard
+    h.next -= dt;
+    if (h.next > 0) continue;
+    if (h.out) {
+      for (const a of h.members) {
+        a.hx = h.homeX;
+        a.hy = h.homeY;
+      }
+      h.out = false;
+      h.next = 60 + rand() * 90;
+      continue;
+    }
+    let spot = null;
+    let bd = Infinity;
+    for (const s of shoreSpots) {
+      const d = Math.hypot(s.x - h.homeX, s.y - h.homeY);
+      if (d < bd) {
+        bd = d;
+        spot = s;
+      }
+    }
+    if (!spot || bd > 140 || bd < 20) {
+      // No water worth the walk (or they graze on the bank already)
+      h.next = 300;
+      continue;
+    }
+    for (const a of h.members) {
+      a.hx = spot.x;
+      a.hy = spot.y;
+    }
+    h.out = true;
+    h.next = 30 + rand() * 25; // drink and linger, then head back
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The delivery van: putters around the road network all day, pauses at dead
+// ends to drop something off, and waits politely for the tractor to pass.
+// Road points are 3 world units apart, so pts index maps to distance.
+// ---------------------------------------------------------------------------
+
+const VAN_SPEED = 13;
+
+const VAN_BOXES = [
+  { x0: -3.6, x1: 0.6, y0: -2.0, y1: 2.0, z0: 1.3, z1: 5.6, color: "#e8a92e" }, // cargo box
+  { x0: 0.6, x1: 3.4, y0: -1.8, y1: 1.8, z0: 1.3, z1: 3.4, color: "#e8a92e" }, // hood
+  { x0: 0.6, x1: 2.4, y0: -1.6, y1: 1.6, z0: 3.4, z1: 4.9, color: "#bfeaf5" }, // cab glass
+  { x0: 0.4, x1: 2.6, y0: -1.8, y1: 1.8, z0: 4.9, z1: 5.5, color: "#f2e6cc" }, // cab roof
+];
+
+const VAN_WHEELS = [
+  { x: -2.3, y0: 2.0, y1: 2.8, z: 1.0, r: 1.0 },
+  { x: -2.3, y0: -2.8, y1: -2.0, z: 1.0, r: 1.0 },
+  { x: 2.3, y0: 1.8, y1: 2.6, z: 1.0, r: 1.0 },
+  { x: 2.3, y0: -2.6, y1: -1.8, z: 1.0, r: 1.0 },
+];
+
+// The van's driver sits at the cab glass box's local depth center (x 1.5)
+// with small biases, like the tractor's, so the painter's sort always puts
+// him just in front of the glass (depth 4.15) and behind the roof (5.2)
+const VAN_DRIVER = [
+  { blob: true, x: 1.5, y: 0, z: 3.9, r: 0.7, color: "#f2c091", bias: 0.5 }, // head
+  { blob: true, x: 1.5, y: 0, z: 4.5, r: 0.55, color: "#4a6fa5", bias: 0.55 }, // cap
+];
+
+const van = { on: false, x: 0, y: 0, angle: 0, road: null, seg: 0, dir: 1, pause: 0, moving: 0 };
+
+// Start somewhere along the network
+{
+  const usable = roads.filter((r) => r.pts.length > 4);
+  if (usable.length) {
+    van.road = usable[(rand() * usable.length) | 0];
+    van.seg = 1 + ((rand() * (van.road.pts.length - 2)) | 0);
+    van.dir = rand() < 0.5 ? 1 : -1;
+    const p = van.road.pts[van.seg];
+    van.x = p.x;
+    van.y = p.y;
+    van.angle = p.dir + (van.dir < 0 ? Math.PI : 0);
+    van.on = true;
+  }
+}
+
+function updateVan(dt) {
+  if (!van.on) return;
+  if (van.pause > 0) {
+    van.pause -= dt;
+    van.moving = 0;
+    return;
+  }
+  // Wait for the tractor to pass rather than drive through it
+  if (Math.hypot(tractor.x - van.x, tractor.y - van.y) < 10) {
+    van.moving = 0;
+    return;
+  }
+  van.moving = VAN_SPEED;
+  van.seg += (van.dir * VAN_SPEED * dt) / 3;
+  const pts = van.road.pts;
+  if (van.seg <= 0 || van.seg >= pts.length - 1) {
+    // Reached an end of this road: make the delivery, then take any road
+    // passing the spot — one of them is usually the road back
+    van.seg = Math.max(0, Math.min(pts.length - 1, van.seg));
+    const end = pts[Math.round(van.seg)];
+    van.pause = 2.5 + rand() * 3;
+    const options = [];
+    for (const r of roads) {
+      if (r.pts.length < 5) continue;
+      // Enter at the road's point nearest the junction, so resuming does
+      // not visibly hop, and head into its longer side so the trip amounts
+      // to something
+      let bi = -1;
+      let bd = 25; // squared: consider points within 5 units
+      for (let i = 0; i < r.pts.length; i++) {
+        const q = r.pts[i];
+        const dd = (q.x - end.x) * (q.x - end.x) + (q.y - end.y) * (q.y - end.y);
+        if (dd < bd) {
+          bd = dd;
+          bi = i;
+        }
+      }
+      if (bi >= 0) options.push({ road: r, seg: bi, dir: bi < r.pts.length / 2 ? 1 : -1 });
+    }
+    const pick = options.length
+      ? options[(rand() * options.length) | 0]
+      : { road: van.road, seg: Math.round(van.seg), dir: -van.dir };
+    van.road = pick.road;
+    van.seg = pick.seg;
+    van.dir = pick.dir;
+    return;
+  }
+  const i = Math.floor(van.seg);
+  const f = van.seg - i;
+  const a = pts[i];
+  const b = pts[i + 1];
+  van.x = a.x + (b.x - a.x) * f;
+  van.y = a.y + (b.y - a.y) * f;
+  // Ease the heading toward the direction of travel (never snap)
+  const want = Math.atan2((b.y - a.y) * van.dir, (b.x - a.x) * van.dir);
+  const d = Math.atan2(Math.sin(want - van.angle), Math.cos(want - van.angle));
+  van.angle += Math.max(-4 * dt, Math.min(4 * dt, d));
 }
 
 const birds = [];
@@ -2519,6 +2704,8 @@ function drawScene(camX, camY) {
   ctx.beginPath();
   shadowQuad(tractor.x, tractor.y, tractor.angle, -6, 8.5, 5.5);
   shadowQuad(pose.x, pose.y, pose.angle, impRear, -6.5, 6);
+  if (van.on && onScreen(van.x, van.y, camX, camY))
+    shadowQuad(van.x, van.y, van.angle, -4, 4, 2.8);
   for (const t of trees) {
     if (!onScreen(t.wx, t.wy, camX, camY)) continue;
     const sx = Math.round(projX(t.wx, t.wy) - camX);
@@ -2558,6 +2745,11 @@ function drawScene(camX, camY) {
   makeWheels(items, imp.wheels, pose.x, pose.y, pose.angle, liftZ, camX, camY);
   makeItems(items, FARM_BOXES, FARM.x, FARM.y, FARM.angle, 0, camX, camY);
   makeRoundItems(items, FARM_SHAPES, FARM.x, FARM.y, FARM.angle, 0, camX, camY);
+  if (van.on && onScreen(van.x, van.y, camX, camY)) {
+    makeItems(items, VAN_BOXES, van.x, van.y, van.angle, 0, camX, camY);
+    makeWheels(items, VAN_WHEELS, van.x, van.y, van.angle, 0, camX, camY);
+    makeRoundItems(items, VAN_DRIVER, van.x, van.y, van.angle, 0, camX, camY);
+  }
   for (const t of trees) {
     if (!onScreen(t.wx, t.wy, camX, camY)) continue;
     const kind = TREE_KINDS[t.kind];
@@ -3238,6 +3430,8 @@ function update(dt) {
   updateSmoke(dt);
   updateButterflies(dt);
   updateAnimals(dt);
+  updateHerds(dt);
+  updateVan(dt);
   updateBirds(dt);
   updateSeason();
   if (!gameStarted || gameOver) return;
