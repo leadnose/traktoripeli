@@ -3370,8 +3370,10 @@ function draw() {
   const flashGear = tractor.gearFlash > 0 && ((tractor.gearFlash * 8) | 0) % 2 === 0;
   const flashImpl = tractor.implFlash > 0 && ((tractor.implFlash * 8) | 0) % 2 === 0;
   seg(`GEAR: ${tractor.fastGear ? "FAST" : "SLOW"} [Shift]   `, flashGear ? RED : null);
+  // The attached implement is named by the highlight in the farm list, so
+  // this segment just carries the lift state and its key
   const state = imp.liftable ? (tractor.implDown ? " DOWN" : " UP") : "";
-  seg(`${imp.label}${state} [Space]   `, flashImpl ? RED : null);
+  seg(`IMPLEMENT${state} [Space]   `, flashImpl ? RED : null);
   if (tractor.implement === "seeder") {
     // Solid red when the hopper is empty; flashing when it's empty AND the
     // seeder is down working a field — driving along planting nothing
@@ -3401,7 +3403,15 @@ function draw() {
   }
   seg(`CASH: €${cash}   `, cash < SEED_PRICE ? RED : "#ffd94f");
   seg(`SOLD: ${sold}   `);
-  seg(`@FARM 1:PLOW 2:SEED 3:HARVEST 4:TRAILER`, "#d8c49a");
+  // The implement list at the farm, with the attached one lit up
+  seg(`@FARM `, "#d8c49a");
+  const IMPLEMENT_HINTS = { plow: "PLOW", seeder: "SEED", harvester: "HARVEST", trailer: "TRAILER" };
+  for (const [key, impName] of Object.entries(IMPLEMENT_KEYS)) {
+    seg(
+      `${key}:${IMPLEMENT_HINTS[impName]} `,
+      tractor.implement === impName ? "#ffd94f" : "#d8c49a"
+    );
+  }
 
   // The top HUD is a single-line plank bar matching the bottom one, trim
   // mirrored: mode and seed on the left, the season calendar in the middle
