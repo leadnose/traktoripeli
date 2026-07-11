@@ -2359,8 +2359,8 @@ const VAN_WHEELS = [
 ];
 
 // The van's driver sits at the cab glass box's local depth center (x 1.5)
-// with small biases, like the tractor's, so the painter's sort always puts
-// him just in front of the glass (depth 4.15) and behind the roof (5.2)
+// with small biases, so the painter's sort always puts him just in front
+// of the glass (depth 4.15) and behind the roof (5.2) at every heading
 const VAN_DRIVER = [
   { blob: true, x: 1.5, y: 0, z: 3.9, r: 0.7, color: "#f2c091", bias: 0.5 }, // head
   { blob: true, x: 1.5, y: 0, z: 4.5, r: 0.55, color: "#4a6fa5", bias: 0.55 }, // cap
@@ -2499,33 +2499,45 @@ const HUB = "#f7e8b8";
 
 const BOXES = [
   { x0: -7.0, x1: 3.0, y0: -3.0, y1: 3.0, z0: 2.5, z1: 6.0, color: "#f25c3f" }, // chassis
-  { x0: 3.0, x1: 7.0, y0: -2.2, y1: 2.2, z0: 2.5, z1: 5.5, color: "#f25c3f" }, // hood
-  { x0: -6.5, x1: -1.0, y0: -2.6, y1: 2.6, z0: 6.0, z1: 10.0, color: "#bfeaf5" }, // cab glass
-  { x0: -7.0, x1: -0.5, y0: -3.0, y1: 3.0, z0: 10.0, z1: 11.0, color: "#d94a2e" }, // roof
-  { x0: 1.5, x1: 2.5, y0: -0.5, y1: 0.5, z0: 5.5, z1: 9.5, color: "#7a7a7a" }, // exhaust
+  { x0: 3.0, x1: 6.2, y0: -2.2, y1: 2.2, z0: 2.5, z1: 5.3, color: "#f25c3f" }, // hood
+  { x0: 6.2, x1: 7.0, y0: -1.8, y1: 1.8, z0: 2.5, z1: 4.4, color: "#d94a2e" }, // nose, stepped down for a snub front
+  { x0: 7.0, x1: 7.4, y0: -1.5, y1: 1.5, z0: 2.6, z1: 4.2, color: "#5a5148" }, // radiator grille
+  { x0: -7.9, x1: -7.0, y0: -0.8, y1: 0.8, z0: 2.8, z1: 3.9, color: "#6b6b6b" }, // hitch block; implement drawbars butt against it
+  { x0: -6.2, x1: -2.8, y0: 3.0, y1: 5.4, z0: 6.0, z1: 6.7, color: "#d94a2e" }, // rear fender L
+  { x0: -6.2, x1: -2.8, y0: -5.4, y1: -3.0, z0: 6.0, z1: 6.7, color: "#d94a2e" }, // rear fender R
+  { x0: -4.7, x1: -2.9, y0: -1.3, y1: 1.3, z0: 6.0, z1: 7.0, color: "#d94a2e" }, // sprung seat, out in the open
+  { x0: -4.9, x1: -4.4, y0: -1.3, y1: 1.3, z0: 7.0, z1: 8.6, color: "#d94a2e" }, // seat back
+  { x0: 1.5, x1: 2.5, y0: -0.5, y1: 0.5, z0: 5.3, z1: 9.5, color: "#7a7a7a" }, // exhaust stack
 ];
 
 // Wheels are round: a disc on each face plus a slim inset box for the tread.
-// x/z is the axle center, r the tire radius, y0..y1 the width.
+// x/z is the axle center, r the tire radius, y0..y1 the width. The rear
+// pair is outsized on purpose — their tops sit level with the chassis top.
 const TRACTOR_WHEELS = [
-  { x: -4.5, y0: 3.0, y1: 5.0, z: 2.5, r: 2.5 }, // rear L
-  { x: -4.5, y0: -5.0, y1: -3.0, z: 2.5, r: 2.5 }, // rear R
+  { x: -4.5, y0: 3.0, y1: 5.3, z: 3.0, r: 3.0 }, // rear L
+  { x: -4.5, y0: -5.3, y1: -3.0, z: 3.0, r: 3.0 }, // rear R
   { x: 5.0, y0: 2.3, y1: 3.9, z: 1.6, r: 1.6 }, // front L
   { x: 5.0, y0: -3.9, y1: -2.3, z: 1.6, r: 1.6 }, // front R
 ];
 
-// Round beacon light on the cab roof
-const TRACTOR_SHAPES = [{ blob: true, x: -4.9, y: 0, z: 11.6, r: 0.8, color: "#ffb433" }];
+// Round details: the steering wheel ahead of the seat and two headlamps
+// perched on the nose. Their depth against the body swaps naturally with
+// the heading — the wheel sits in front of the driver toward the camera and
+// hides behind him driving away; the far-side lamp ducks behind the hood.
+const TRACTOR_SHAPES = [
+  { blob: true, x: -2.2, y: 0, z: 7.3, r: 0.55, color: "#33363d" }, // steering wheel
+  { blob: true, x: 6.6, y: 1.2, z: 4.8, r: 0.45, color: "#ffe66b" }, // headlamp L
+  { blob: true, x: 6.6, y: -1.2, z: 4.8, r: 0.45, color: "#ffe66b" }, // headlamp R
+];
 
-// The driver: a round little figure on the seat, visible through the cab
-// glass. All parts sit at the glass box's local depth center (x -3.75, y 0)
-// so their sort order against the cab is angle-independent: the biases put
-// them just in front of the glass (depth 8) and below the roof (10.5) at
-// every heading. `rest` is the seated height; z gets a bounce added per frame.
+// The driver: a round little figure out in the open on the seat. All parts
+// stack at one local depth center (x -3.7, y 0) with rising z, so their
+// paint order — overalls, head, straw hat — holds at every heading.
+// `rest` is the seated height; z gets a bounce added per frame.
 const DRIVER_SHAPES = [
-  { blob: true, x: -3.75, y: 0, rest: 7.0, z: 7.0, r: 1.5, color: "#4a6fa5", bias: 1.3 }, // overalls
-  { blob: true, x: -3.75, y: 0, rest: 8.6, z: 8.6, r: 1.0, color: "#f2c091" }, // head
-  { blob: true, x: -3.75, y: 0, rest: 9.35, z: 9.35, r: 0.8, color: "#e8b13d", bias: 0.05 }, // straw hat
+  { blob: true, x: -3.7, y: 0, rest: 7.5, z: 7.5, r: 1.5, color: "#4a6fa5" }, // overalls
+  { blob: true, x: -3.7, y: 0, rest: 9.1, z: 9.1, r: 1.0, color: "#f2c091" }, // head
+  { blob: true, x: -3.7, y: 0, rest: 9.85, z: 9.85, r: 0.8, color: "#e8b13d", bias: 0.05 }, // straw hat
 ];
 
 // Implements hang behind the tractor; liftable ones get a z offset from the
