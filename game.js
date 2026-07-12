@@ -30,7 +30,8 @@ const seedParam = parseInt(urlParams.get("seed"), 10);
 const SEED = Number.isFinite(seedParam) ? seedParam : (Math.random() * 1e9) | 0;
 
 // Game mode: "classic" is the timed one-season round, "survival" rolls year
-// after year with a property tax due every Oct 31, and "sandbox" rolls the
+// after year — each turning through a short snowed-in winter — with a
+// property tax due every Oct 31, and "sandbox" rolls the same wintered
 // years with no taxes, no failure and no end — just roaming. Chosen in the
 // start menu; reloads carry the mode in the URL next to the seed, and a
 // fresh visit (no mode in the URL) opens the start menu before anything
@@ -155,7 +156,8 @@ const MUSIC_BASE = 440; // arpeggio around A4; the bass sits two octaves down
 const ARP_PATTERN = [0, 1, 2, 3, 1, 2, 3, 2];
 
 // The tune follows the season: spring is quick and bright, summer eases
-// into the familiar lazy progression, autumn slows down and turns minor
+// into the familiar lazy progression, autumn slows down and turns minor,
+// and winter is slower still — sparse, hushed notes over the snow
 const MUSIC_SEASONS = [
   {
     bpm: 112,
@@ -187,6 +189,16 @@ const MUSIC_SEASONS = [
       { root: -5, minor: false }, // E
     ],
   },
+  {
+    bpm: 66,
+    dur: 1.1,
+    chords: [
+      { root: 2, minor: true }, // Bm
+      { root: -3, minor: true }, // F#m
+      { root: -7, minor: false }, // D
+      { root: -5, minor: false }, // E
+    ],
+  },
 ];
 
 function musicNote(freq, at, dur, vol) {
@@ -213,7 +225,8 @@ function scheduleMusic() {
     const at = audio.musicTime;
     // The season's arrangement is picked up at bar boundaries
     if (step % 8 === 0 || !audio.musicSeason) {
-      audio.musicSeason = MUSIC_SEASONS[seasonQ < 0.33 ? 0 : seasonQ < 0.72 ? 1 : 2];
+      audio.musicSeason =
+        MUSIC_SEASONS[seasonQ < 0.33 ? 0 : seasonQ < 0.72 ? 1 : seasonQ <= 1 ? 2 : 3];
     }
     const cfg = audio.musicSeason;
     const chord = cfg.chords[((step / 8) | 0) % cfg.chords.length];
@@ -237,7 +250,7 @@ function updateAudio() {
   const set = (param, v, tc) => param.setTargetAtTime(v, t, tc);
 
   // Engine pitch and volume track speed, with a bump while throttling
-  const throttle = !gameOver && (keys.ArrowUp || keys.ArrowDown) ? 1 : 0;
+  const throttle = !gameOver && !paused && (keys.ArrowUp || keys.ArrowDown) ? 1 : 0;
   const rpm = gameOver
     ? 0
     : 0.25 + 0.55 * Math.min(1, Math.abs(tractor.speed) / GEAR_FAST) + 0.2 * throttle;
@@ -370,6 +383,15 @@ function toggleSound() {
 // F1 opens the menu, the only place the seed and mode can be picked. It is
 // also the start menu: a fresh visit begins with it open and the clock held.
 let menuOpen = !gameStarted;
+// P holds the whole world still — clock, crops, critters — until P again.
+// Unlike the F1 menu, which leaves the calendar running, pause means pause.
+let paused = false;
+// D opens a little date field: type MMDD and Enter fast-forwards the
+// calendar to that date — through winter into next year in the cyclical
+// modes — growing crops and collecting taxes on the way, exactly like the
+// away clock would.
+let dateJump = null; // null = closed, else the digits typed so far
+let dateJumpError = false; // the last Enter was an impossible or past date
 let menuSeed = "1"; // the start menu defaults to seed 1; R rolls a random one
 let menuMode = mode;
 // The autosave the menu offers to continue, read once when the menu opens
@@ -395,6 +417,7 @@ window.addEventListener("keydown", (e) => {
     e.preventDefault();
     if (!gameStarted) return; // the start menu stays until a mode is picked
     menuOpen = !menuOpen;
+    dateJump = null; // one sign at a time
     menuSeed = String(SEED); // mid-game the field opens on the current map
     menuMode = mode;
     if (menuOpen) menuSaveInfo = loadSave();
@@ -450,11 +473,36 @@ window.addEventListener("keydown", (e) => {
     }
     return;
   }
+  // The date-jump field swallows all input while it is open: type the
+  // digits of MMDD, Enter jumps, Esc (or D again) closes
+  if (dateJump !== null) {
+    e.preventDefault();
+    if (e.key === "Enter") {
+      tryDateJump();
+    } else if (e.key === "Escape" || e.key === "d" || e.key === "D") {
+      dateJump = null;
+    } else if (e.key === "Backspace") {
+      dateJump = dateJump.slice(0, -1);
+      dateJumpError = false;
+    } else if (/^[0-9]$/.test(e.key) && dateJump.length < 4) {
+      dateJump += e.key;
+      dateJumpError = false;
+    }
+    return;
+  }
   if (e.key.startsWith("Arrow")) e.preventDefault();
   keys[e.key] = true;
   if ((e.key === "m" || e.key === "M") && !e.repeat) toggleMusic();
   if ((e.key === "q" || e.key === "Q") && !e.repeat) toggleSound();
   if ((e.key === "f" || e.key === "F") && !e.repeat) fpsShown = !fpsShown;
+  if ((e.key === "p" || e.key === "P") && !e.repeat && gameStarted && !gameOver)
+    paused = !paused;
+  if (paused) return; // the frozen world ignores gear and implement keys
+  if ((e.key === "d" || e.key === "D") && !e.repeat && gameStarted && !gameOver) {
+    dateJump = "";
+    dateJumpError = false;
+    return;
+  }
   if (e.key === " " && !e.repeat) {
     e.preventDefault();
     // One toggle for the whole maneuver: road mode is the fast gear with the
@@ -673,8 +721,15 @@ function tileTypeAt(wx, wy) {
 // updateSeason() rewrites them as the round progresses
 let GRASS = "#72ca55";
 const GRASS_DOTS = ["#5fb944", "#8adf70", "#97e87e", "#52a63f"];
-const DIRT = "#a87e50";
+let DIRT = "#a87e50";
 const DIRT_DOTS = ["#8f6940", "#bb9264"];
+
+// The season color wheel, declared here because the initial map paint
+// already reads it (through winterDepth): 0 = spring, 0.5 = summer,
+// 1 = autumn, 1.5 = midwinter; 2 wraps back onto spring. Continuous —
+// mixHex quantizes the blends, so colors still move in tiny ticks.
+let seasonQ = 0;
+let seasonStep = -1; // sky repaint trigger, on a fine grid of seasonQ
 const FLOWER_COLORS = ["#ff9ed2", "#ffffff", "#c9a6ff", "#ffb27d"];
 
 const mp = (wx, wy) => ({
@@ -1047,8 +1102,8 @@ function paintTile(tx, ty) {
     }
 
     // Little meadow flowers: four petals around a yellow heart; forests
-    // keep their floor bare
-    if (!forestTiles.has(ty * MAP_TILES + tx) && tr() < 0.5) {
+    // keep their floor bare, and deep winter buries the meadows' too
+    if (!forestTiles.has(ty * MAP_TILES + tx) && tr() < 0.5 && winterDepth() < 0.4) {
       const p = mp(
         (tx + 0.2 + tr() * 0.6) * TILE,
         (ty + 0.2 + tr() * 0.6) * TILE
@@ -1828,7 +1883,8 @@ const TREE_BOXES = [
 ];
 
 // Cloud-shaped canopy: one big blob with two smaller ones tucked against it.
-// Spring colors; updateSeason() recolors them through summer into autumn.
+// Spring colors; updateSeason() recolors them through summer into autumn,
+// and in the cyclical modes on under a cap of winter snow.
 const TREE_BLOBS = [
   { blob: true, x: 0, y: 0, z: 7.2, r: 4.2, color: "#57b754" },
   { blob: true, x: 1.5, y: -1.5, z: 9.6, r: 2.7, color: "#68c765", bias: 0.05 },
@@ -1907,11 +1963,11 @@ for (let attempts = 0; trees.length < loneTarget && attempts < 5000; attempts++)
 // Bushes: little round shrubs on the meadows
 // ---------------------------------------------------------------------------
 
-// Each variant is [spring, summer, autumn]
+// Each variant is [spring, summer, autumn, winter]
 const BUSH_COLORS = [
-  ["#4db554", "#3f9e3e", "#b07a35"],
-  ["#5cc25f", "#4fae4a", "#c08d3a"],
-  ["#45a94b", "#379139", "#9c6a2e"],
+  ["#4db554", "#3f9e3e", "#b07a35", "#dfe9ee"],
+  ["#5cc25f", "#4fae4a", "#c08d3a", "#e7eff3"],
+  ["#45a94b", "#379139", "#9c6a2e", "#d6e2e9"],
 ];
 const bushes = [];
 for (let attempts = 0; bushes.length < 110 && attempts < 6000; attempts++) {
@@ -1935,11 +1991,11 @@ for (let attempts = 0; bushes.length < 110 && attempts < 6000; attempts++) {
 
 // Hedgerows: rows of darker shrubs along some field edges. Gaps open up
 // wherever a road or driveway passes.
-// Each variant is [spring, summer, autumn]
+// Each variant is [spring, summer, autumn, winter]
 const HEDGE_COLORS = [
-  ["#3f9440", "#357f36", "#96612d"],
-  ["#489e45", "#3d8f3c", "#a5722f"],
-  ["#3a8a3c", "#2f7531", "#8a5c2a"],
+  ["#3f9440", "#357f36", "#96612d", "#cfdde5"],
+  ["#489e45", "#3d8f3c", "#a5722f", "#d7e3ea"],
+  ["#3a8a3c", "#2f7531", "#8a5c2a", "#c7d6df"],
 ];
 for (const p of patches) {
   const x0 = p.px * TILE;
@@ -3124,33 +3180,39 @@ function restampTracks(tx, ty) {
 }
 
 // ---------------------------------------------------------------------------
-// Seasons: the round runs from spring through summer into autumn. Colors
-// interpolate through three keyframes, and the ground takes the new colors
-// gradually as a few random tiles repaint every frame.
+// Seasons: the round runs from spring through summer into autumn, and the
+// cyclical modes keep going through a snowy winter that melts back into
+// spring. Colors interpolate around four keyframes, and the ground takes
+// the new colors gradually as a few random tiles repaint every frame.
 // ---------------------------------------------------------------------------
 
-const GRASS_SEASONS = ["#72ca55", "#55b043", "#bda355"];
+const GRASS_SEASONS = ["#72ca55", "#55b043", "#bda355", "#e9f1f5"];
 const GRASS_DOT_SEASONS = [
-  ["#5fb944", "#47a136", "#a89043"],
-  ["#8adf70", "#6cc957", "#cdb45e"],
-  ["#97e87e", "#78d364", "#d9c06a"],
-  ["#52a63f", "#3f8f31", "#96813c"],
+  ["#5fb944", "#47a136", "#a89043", "#d8e5ec"],
+  ["#8adf70", "#6cc957", "#cdb45e", "#f6fafc"],
+  ["#97e87e", "#78d364", "#d9c06a", "#ffffff"],
+  ["#52a63f", "#3f8f31", "#96813c", "#cfdfe8"],
+];
+// Bare fields stay brown until the snow settles on them
+const DIRT_SEASONS = ["#a87e50", "#a87e50", "#a87e50", "#e2eaee"];
+const DIRT_DOT_SEASONS = [
+  ["#8f6940", "#8f6940", "#8f6940", "#c9d8e0"],
+  ["#bb9264", "#bb9264", "#bb9264", "#f2f7fa"],
 ];
 const TREE_BLOB_SEASONS = [
-  ["#57b754", "#4fae4a", "#c67b2e"],
-  ["#68c765", "#5fc257", "#d99a33"],
-  ["#7cd678", "#72d367", "#e8b84a"],
+  ["#57b754", "#4fae4a", "#c67b2e", "#dde9ee"],
+  ["#68c765", "#5fc257", "#d99a33", "#eaf2f5"],
+  ["#7cd678", "#72d367", "#e8b84a", "#f6fafc"],
 ];
-const SKY_TOP_SEASONS = ["#7ac9ef", "#6fc3e8", "#8fb8d8"];
-const SKY_BOTTOM_SEASONS = ["#c8ecf8", "#c2e8f2", "#ecdcc0"];
+const SKY_TOP_SEASONS = ["#7ac9ef", "#6fc3e8", "#8fb8d8", "#9db9cf"];
+const SKY_BOTTOM_SEASONS = ["#c8ecf8", "#c2e8f2", "#ecdcc0", "#e9eef2"];
 
-let seasonQ = 0; // 0 = spring, 0.5 = summer, 1 = autumn (quantized)
-let seasonStep = -1;
-
-// The round is presented as a calendar: April 1st through October 31st
+// The round is presented as a calendar: April 1st through October 31st,
+// and in the cyclical modes the winter break carries it on to March 31st
 const MONTH_NAMES = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
 const SEASON_DAYS = 213; // days from Apr 1 to Oct 31
-const SEASON_BAR_COLORS = ["#6fce58", "#4fae4a", "#d99a33"];
+const WINTER_DAYS = 150; // days from Nov 1 to Mar 31
+const SEASON_BAR_COLORS = ["#6fce58", "#4fae4a", "#d99a33", "#eef4f7"];
 
 const mixCache = {};
 function mixHex(a, b, t) {
@@ -3166,28 +3228,47 @@ function mixHex(a, b, t) {
   return (mixCache[key] = out);
 }
 
-function seasonHex(triple) {
-  return seasonQ < 0.5
-    ? mixHex(triple[0], triple[1], seasonQ * 2)
-    : mixHex(triple[1], triple[2], (seasonQ - 0.5) * 2);
+function seasonHex(colors) {
+  const seg = Math.min(3, (seasonQ * 2) | 0);
+  return mixHex(colors[seg], colors[(seg + 1) % 4], seasonQ * 2 - seg);
+}
+
+// How deep in the snow the world is: 0 outside winter, 1 at midwinter
+function winterDepth() {
+  return seasonQ <= 1 ? 0 : Math.max(0, 1 - Math.abs(seasonQ - 1.5) * 2);
 }
 
 function updateSeason() {
-  const t = Math.min(1, Math.max(0, 1 - timeLeft / ROUND_TIME));
-  const step = Math.min(32, (t * 33) | 0);
+  // The color wheel runs 0→1 spring to autumn over the round, then 1→2
+  // through the winter break and wraps back onto spring green. It moves
+  // continuously every frame; the blends themselves are quantized by
+  // mixHex's cache, so trees, bushes and sky glide instead of ticking.
+  seasonQ =
+    winterLeft > 0
+      ? 1 + Math.min(1, Math.max(0, 1 - winterLeft / WINTER_TIME))
+      : Math.min(1, Math.max(0, 1 - timeLeft / ROUND_TIME));
+  GRASS = seasonHex(GRASS_SEASONS);
+  DIRT = seasonHex(DIRT_SEASONS);
+  for (let i = 0; i < GRASS_DOTS.length; i++)
+    GRASS_DOTS[i] = seasonHex(GRASS_DOT_SEASONS[i]);
+  for (let i = 0; i < DIRT_DOTS.length; i++)
+    DIRT_DOTS[i] = seasonHex(DIRT_DOT_SEASONS[i]);
+  for (let i = 0; i < TREE_BLOBS.length; i++)
+    TREE_BLOBS[i].color = seasonHex(TREE_BLOB_SEASONS[i]);
+  // The sky is a full-canvas dithered repaint, so it only redraws on a
+  // step grid — fine enough that each redraw is an invisible nudge even
+  // at winter's pace
+  const step = Math.round(seasonQ * 128);
   if (step !== seasonStep) {
     seasonStep = step;
-    seasonQ = step / 32;
-    GRASS = seasonHex(GRASS_SEASONS);
-    for (let i = 0; i < GRASS_DOTS.length; i++)
-      GRASS_DOTS[i] = seasonHex(GRASS_DOT_SEASONS[i]);
-    for (let i = 0; i < TREE_BLOBS.length; i++)
-      TREE_BLOBS[i].color = seasonHex(TREE_BLOB_SEASONS[i]);
     paintSky();
   }
-  // The ground turns gradually: a few random tiles repaint per frame with
-  // the current colors (wheel marks survive: drawTile restamps them)
-  for (let i = 0; i < 8; i++) {
+  // The ground turns gradually: random tiles repaint each frame with the
+  // current colors (wheel marks survive: drawTile restamps them). Winter
+  // moves the colors ~7x faster than the round does, so it churns more
+  // tiles per frame to keep the patchwork spread just as tight.
+  const repaints = winterLeft > 0 ? 24 : 8;
+  for (let i = 0; i < repaints; i++) {
     drawTile((rand() * MAP_TILES) | 0, (rand() * MAP_TILES) | 0);
   }
 }
@@ -3255,6 +3336,45 @@ function drawClouds(camX, camY) {
 }
 
 // ---------------------------------------------------------------------------
+// Snowfall: a light screen-space flurry while winter holds the farm. The
+// flakes are laid out by golden-ratio hops instead of the seeded RNG, so
+// world generation stays byte-identical for a given seed.
+// ---------------------------------------------------------------------------
+
+const SNOWFLAKES = [];
+for (let i = 0; i < 70; i++) {
+  SNOWFLAKES.push({
+    x: ((i * 0.618034) % 1) * (VIEW_W + 40),
+    y: ((i * 0.381966) % 1) * VIEW_H,
+    speed: 14 + ((i * 7) % 13),
+    sway: (i * 2.399963) % (Math.PI * 2), // golden angle, in radians
+    size: i % 3 === 0 ? 2 : 1,
+  });
+}
+
+function drawSnow(camX, camY) {
+  const depth = winterDepth();
+  if (depth <= 0) return;
+  // The flurry builds as the snow settles and thins away through the melt
+  const n = Math.ceil(SNOWFLAKES.length * Math.min(1, depth * 2));
+  ctx.fillStyle = "#ffffff";
+  ctx.globalAlpha = 0.5 + 0.4 * depth;
+  const wrapX = VIEW_W + 40;
+  for (let i = 0; i < n; i++) {
+    const f = SNOWFLAKES[i];
+    const sx =
+      ((((f.x + Math.sin(worldTime * 0.8 + f.sway) * 14 - camX * 0.4) % wrapX) +
+        wrapX) %
+        wrapX) -
+      20;
+    const sy =
+      (((f.y + worldTime * f.speed - camY * 0.4) % VIEW_H) + VIEW_H) % VIEW_H;
+    ctx.fillRect(sx | 0, sy | 0, f.size, f.size);
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ---------------------------------------------------------------------------
 // Butterflies fluttering over the meadows
 // ---------------------------------------------------------------------------
 
@@ -3284,7 +3404,11 @@ function updateButterflies(dt) {
 }
 
 function drawButterflies(camX, camY) {
-  for (const b of butterflies) {
+  // The meadows empty as the snow deepens: fewer and fewer butterflies
+  // brave the cold, and midwinter grounds them all
+  const n = Math.round(butterflies.length * (1 - winterDepth()));
+  for (let i = 0; i < n; i++) {
+    const b = butterflies[i];
     const wz = terrainHeight(b.wx, b.wy) + 4 + Math.sin(worldTime * 3 + b.phase) * 1.5;
     const x = Math.round(projX(b.wx, b.wy) - camX);
     const y = Math.round(projY(b.wx, b.wy, wz) - camY);
@@ -3485,6 +3609,14 @@ const SANDBOX_GROW_DAYS = 90;
 const SANDBOX_GROW_FACTOR =
   CROP_STAGES[2] / ((SANDBOX_GROW_DAYS * ROUND_TIME) / SEASON_DAYS);
 
+// Winter: in the cyclical modes the year doesn't jump from Oct 31 straight
+// back to spring — a snowed-in Nov 1 – Mar 31 passes first. It runs on the
+// wall clock in both modes: nothing grows and nothing falls due, the world
+// just whitens, rests, and melts back to green. Classic ends at Oct 31 and
+// never sees one.
+const WINTER_TIME = 45; // real seconds from Nov 1 to Mar 31
+let winterLeft = 0; // counts down while winter is running
+
 function sandboxClockRate() {
   return timeLeft > SUMMER_START_LEFT
     ? SANDBOX_SPRING_RATE
@@ -3515,9 +3647,10 @@ function startGame(m) {
   cash = modeStartCash(m);
   gameStarted = true;
   menuOpen = false;
+  paused = false;
 }
 
-// Oct 31: the tax collector comes around, then a new year begins.
+// Oct 31: the tax collector comes around, then winter settles in.
 // Returns false when the bill bankrupts the farm and the run is over.
 function collectTax() {
   cash -= propertyTax;
@@ -3528,23 +3661,37 @@ function collectTax() {
     endSurvival();
     return false;
   }
-  year++;
   propertyTax += TAX_STEP;
-  timeLeft = ROUND_TIME;
+  winterLeft = WINTER_TIME;
   return true;
+}
+
+// Mar 31: the snow is gone and a new year begins
+function startSpring() {
+  year++;
+  timeLeft = ROUND_TIME;
 }
 
 // Away-clock catch-up: time the frame loop never saw (rAF stops in a
 // hidden tab) is applied in one step. Crops grow and the calendar keeps
-// turning — year by year in survival, taxes and all.
+// turning — year by year in survival, taxes, winters and all.
 function advanceTime(sec) {
-  if (!gameStarted || gameOver) return;
+  // Paused means paused: time away from the tab stays off the books too
+  if (!gameStarted || gameOver || paused) return;
   worldTime += sec;
-  if (mode === "sandbox") {
-    // The calendar runs at a phase-dependent speed and the crops grow on
-    // the calendar, so the catch-up walks phase by phase: each step spends
-    // the real seconds the current phase's remainder costs at its rate.
-    while (sec > 0) {
+  while (sec > 0 && !gameOver) {
+    // Winter runs on the wall clock in both cyclical modes; crops sleep
+    if (winterLeft > 0) {
+      const used = Math.min(sec, winterLeft);
+      winterLeft -= used;
+      sec -= used;
+      if (winterLeft === 0) startSpring();
+      continue;
+    }
+    if (mode === "sandbox") {
+      // The calendar runs at a phase-dependent speed and the crops grow on
+      // the calendar, so the catch-up walks phase by phase: each step spends
+      // the real seconds the current phase's remainder costs at its rate.
       const rate = sandboxClockRate();
       const floor = sandboxPhaseFloor();
       const span = timeLeft - floor; // calendar seconds left in this phase
@@ -3552,32 +3699,84 @@ function advanceTime(sec) {
         updateCrops(span * SANDBOX_GROW_FACTOR);
         sec -= span / rate;
         timeLeft = floor;
-        if (floor === 0) {
-          year++;
-          timeLeft = ROUND_TIME;
-        }
+        if (floor === 0) winterLeft = WINTER_TIME;
       } else {
         updateCrops(sec * rate * SANDBOX_GROW_FACTOR);
         timeLeft -= sec * rate;
         sec = 0;
       }
+      continue;
     }
-    return;
-  }
-  updateCrops(sec);
-  while (sec > 0 && !gameOver) {
+    // Classic and survival run on the wall clock
     if (timeLeft > sec) {
+      updateCrops(sec);
       timeLeft -= sec;
       sec = 0;
     } else if (mode === "survival") {
+      updateCrops(timeLeft);
       sec -= timeLeft;
       timeLeft = 0;
       if (!collectTax()) return;
     } else {
+      updateCrops(timeLeft);
       timeLeft = 0;
       endRound();
     }
   }
+}
+
+// Where the calendar stands as a day index of the game year: Apr 1 = 0,
+// Oct 31 = 213 (SEASON_DAYS), Nov 1 = 214, Mar 31 = 364. Mirrors the HUD's
+// date arithmetic exactly, so a jump lands on the date the player reads.
+function currentCalendarDay() {
+  if (winterLeft > 0) {
+    const p = 1 - winterLeft / WINTER_TIME;
+    return SEASON_DAYS + 1 + Math.min(WINTER_DAYS, Math.floor(p * (WINTER_DAYS + 1)));
+  }
+  const p = 1 - timeLeft / ROUND_TIME;
+  return Math.min(SEASON_DAYS, Math.floor(p * (SEASON_DAYS + 1)));
+}
+
+// Enter in the date-jump field: parse the typed MMDD and fast-forward the
+// calendar to that date's next occurrence. The world advances in small
+// real-time steps through advanceTime, so crops grow, winters pass and
+// taxes fall due exactly as if the time had really been played.
+function tryDateJump() {
+  if (dateJump.length !== 4) {
+    dateJumpError = true;
+    return;
+  }
+  const mm = +dateJump.slice(0, 2);
+  const dd = +dateJump.slice(2);
+  // The game year runs Apr 2000 – Mar 2001 (not a leap February)
+  const y = mm >= 4 ? 2000 : 2001;
+  if (
+    mm < 1 ||
+    mm > 12 ||
+    dd < 1 ||
+    new Date(Date.UTC(y, mm - 1, dd)).getUTCDate() !== dd
+  ) {
+    dateJumpError = true;
+    return;
+  }
+  const target = (Date.UTC(y, mm - 1, dd) - Date.UTC(2000, 3, 1)) / 86400000;
+  // Classic is a single Apr–Oct season: only dates still ahead exist
+  if (
+    mode === "classic" &&
+    (target > SEASON_DAYS || target <= currentCalendarDay())
+  ) {
+    dateJumpError = true;
+    return;
+  }
+  // Always at least one step forward: jumping to today's date rolls a
+  // whole year around in the cyclical modes. The guard comfortably covers
+  // the longest year (sandbox's slow phases plus a winter) and the loop
+  // stops early if the jump itself ends the run (a tax it can't cover).
+  for (let guard = 0; guard < 12000 && !gameOver; guard++) {
+    advanceTime(0.2);
+    if (currentCalendarDay() === target) break;
+  }
+  dateJump = null;
 }
 
 function endRound() {
@@ -3631,6 +3830,7 @@ function saveGame() {
     year,
     propertyTax,
     timeLeft: Math.round(timeLeft * 10) / 10,
+    winterLeft: Math.round(winterLeft * 10) / 10,
     tractor: {
       x: tractor.x,
       y: tractor.y,
@@ -3772,6 +3972,7 @@ function implementOverField() {
 }
 
 function update(dt) {
+  if (paused) return;
   // Ambient life keeps moving even after the round ends
   worldTime += dt;
   updateSmoke(dt);
@@ -3784,19 +3985,24 @@ function update(dt) {
   updateSeason();
   if (!gameStarted || gameOver) return;
 
-  timeLeft = Math.max(
-    0,
-    timeLeft - dt * (mode === "sandbox" ? sandboxClockRate() : 1)
-  );
-  if (timeLeft === 0) {
-    if (mode === "survival") {
-      if (!collectTax()) return;
-    } else if (mode === "sandbox") {
-      year++;
-      timeLeft = ROUND_TIME;
-    } else {
-      endRound();
-      return;
+  // Winter runs on the wall clock; when the snow melts a new year begins
+  if (winterLeft > 0) {
+    winterLeft = Math.max(0, winterLeft - dt);
+    if (winterLeft === 0) startSpring();
+  } else {
+    timeLeft = Math.max(
+      0,
+      timeLeft - dt * (mode === "sandbox" ? sandboxClockRate() : 1)
+    );
+    if (timeLeft === 0) {
+      if (mode === "survival") {
+        if (!collectTax()) return;
+      } else if (mode === "sandbox") {
+        winterLeft = WINTER_TIME;
+      } else {
+        endRound();
+        return;
+      }
     }
   }
   taxFlash = Math.max(0, taxFlash - dt);
@@ -3969,9 +4175,11 @@ function update(dt) {
   }
 
   updateTracks(dt);
-  updateCrops(
-    mode === "sandbox" ? dt * sandboxClockRate() * SANDBOX_GROW_FACTOR : dt
-  );
+  // Nothing grows under the snow: winter freezes the crops where they stand
+  if (winterLeft === 0)
+    updateCrops(
+      mode === "sandbox" ? dt * sandboxClockRate() * SANDBOX_GROW_FACTOR : dt
+    );
 
   // Periodic autosave so even a crash or hard reload loses only moments
   saveTimer += dt;
@@ -4161,6 +4369,7 @@ function draw() {
   drawButterflies(camX, camY);
   drawLadybug(camX, camY);
   drawBirds(camX, camY);
+  drawSnow(camX, camY);
 
   screenCtx.drawImage(view, 0, 0, screenCanvas.width, screenCanvas.height);
 
@@ -4251,18 +4460,27 @@ function draw() {
 
   // Season calendar instead of a clock: the year and date count from spring
   // toward Oct 31 along a wooden trough; in survival the tax bill waits at
-  // the far end of it. Flashes red for the last 30 seconds of the year.
-  const progress = 1 - timeLeft / ROUND_TIME;
-  const date = new Date(
-    2000, 3, 1 + Math.min(SEASON_DAYS, Math.floor(progress * (SEASON_DAYS + 1)))
-  );
+  // the far end of it. Flashes red for the last 30 seconds before the bill.
+  // The cyclical modes carry on through the winter toward Mar 31.
+  const winter = winterLeft > 0;
+  const progress = winter
+    ? 1 - winterLeft / WINTER_TIME
+    : 1 - timeLeft / ROUND_TIME;
+  const date = winter
+    ? new Date(
+        2000, 10, 1 + Math.min(WINTER_DAYS, Math.floor(progress * (WINTER_DAYS + 1)))
+      )
+    : new Date(
+        2000, 3, 1 + Math.min(SEASON_DAYS, Math.floor(progress * (SEASON_DAYS + 1)))
+      );
   const barW = 140;
   const barH = 8;
   const bx = (screenCanvas.width - barW) / 2;
   const by = 10;
-  // Nothing is due at year's end in sandbox, so no red urgency flash there
+  // Nothing is due at year's end in sandbox, so no red urgency flash there;
+  // nothing is due in winter either, in any mode
   const flash =
-    mode !== "sandbox" && timeLeft < 30 && ((timeLeft * 2) | 0) % 2 === 0;
+    mode !== "sandbox" && !winter && timeLeft < 30 && ((timeLeft * 2) | 0) % 2 === 0;
   const taxJustPaid = mode === "survival" && taxFlash > 0 && !gameOver;
   screenCtx.textAlign = "right";
   label(
@@ -4273,12 +4491,13 @@ function draw() {
     flash ? "#ff5040" : "#f5e9c8"
   );
   screenCtx.textAlign = "left";
-  const endLabel =
-    mode === "survival"
-      ? taxJustPaid
-        ? `-€${taxPaid} PAID`
-        : `TAX €${propertyTax}`
-      : "OCT 31";
+  const endLabel = taxJustPaid
+    ? `-€${taxPaid} PAID`
+    : winter
+      ? "MAR 31"
+      : mode === "survival"
+        ? `TAX €${propertyTax}`
+        : "OCT 31";
   label(endLabel, bx + barW + 8, topY, taxJustPaid ? "#ff5040" : "#d8c49a");
   // The season grows along a wooden trough
   screenCtx.fillStyle = "#4a2f1a";
@@ -4295,7 +4514,7 @@ function draw() {
   drawNoteIcon(rx - 12, 8, !musicMuted);
   rx -= 12 + 10;
   screenCtx.textAlign = "right";
-  label("[F1] MENU", rx, topY, "#d8c49a");
+  label("[P] PAUSE  [F1] MENU", rx, topY, "#d8c49a");
   screenCtx.textAlign = "left";
 
   // Game over: final score and the all-time best list
@@ -4411,6 +4630,63 @@ function draw() {
   );
   screenCtx.textAlign = "left";
 
+  // Paused: dusk settles over the farm and a small sign waits for P.
+  // The F1 menu draws after this, so it stays readable on top.
+  if (paused && !menuOpen) {
+    const w = 260;
+    const h = 74;
+    const x = (screenCanvas.width - w) / 2;
+    const y = (screenCanvas.height - h) / 2;
+    const cx = screenCanvas.width / 2;
+    screenCtx.fillStyle = "rgba(24,14,6,0.45)";
+    screenCtx.fillRect(0, 0, screenCanvas.width, screenCanvas.height);
+    // A little wooden sign matching the menu's carpentry
+    screenCtx.fillStyle = "#4a2f1a";
+    screenCtx.fillRect(x - 6, y - 6, w + 12, h + 12);
+    screenCtx.fillStyle = "#7a4f2d";
+    screenCtx.fillRect(x, y, w, h);
+    screenCtx.textAlign = "center";
+    screenCtx.font = "bold 24px monospace";
+    label("PAUSED", cx, y + 34, "#ffd94f");
+    screenCtx.font = "13px monospace";
+    label("[P] RESUME", cx, y + 58, "#c9e6a8");
+    screenCtx.textAlign = "left";
+    screenCtx.font = "11px monospace";
+  }
+
+  // Date-jump field: shows the typed digits in an MM-DD mask; Enter
+  // fast-forwards the calendar to that date. Red digits mean the last
+  // attempt didn't parse as a reachable date.
+  if (dateJump !== null && !menuOpen) {
+    const w = 280;
+    const h = 96;
+    const x = (screenCanvas.width - w) / 2;
+    const y = (screenCanvas.height - h) / 2;
+    const cx = screenCanvas.width / 2;
+    screenCtx.fillStyle = "rgba(24,14,6,0.45)";
+    screenCtx.fillRect(0, 0, screenCanvas.width, screenCanvas.height);
+    // A little wooden sign matching the menu's carpentry
+    screenCtx.fillStyle = "#4a2f1a";
+    screenCtx.fillRect(x - 6, y - 6, w + 12, h + 12);
+    screenCtx.fillStyle = "#7a4f2d";
+    screenCtx.fillRect(x, y, w, h);
+    screenCtx.textAlign = "center";
+    screenCtx.font = "bold 16px monospace";
+    label("JUMP TO DATE", cx, y + 26, "#ffd94f");
+    const digitAt = (i) => dateJump[i] || "_";
+    screenCtx.font = "bold 24px monospace";
+    label(
+      `${digitAt(0)}${digitAt(1)}-${digitAt(2)}${digitAt(3)}`,
+      cx,
+      y + 56,
+      dateJumpError ? "#ff5040" : "#f5e9c8"
+    );
+    screenCtx.font = "11px monospace";
+    label("[0-9] MONTH-DAY   [ENTER] GO   [ESC] CANCEL", cx, y + 80, "#c9e6a8");
+    screenCtx.textAlign = "left";
+    screenCtx.font = "11px monospace";
+  }
+
   // Start / F1 menu: seed and mode on a little wooden sign. A fresh visit
   // opens it before the clock starts; F1 brings it back later.
   if (menuOpen) {
@@ -4524,6 +4800,7 @@ if (menuOpen) menuSaveInfo = loadSave();
     year = s.year;
     propertyTax = s.propertyTax;
     timeLeft = s.timeLeft;
+    winterLeft = s.winterLeft || 0; // saves from before winter existed: spring–autumn
     Object.assign(tractor, s.tractor);
     cam.x = projX(tractor.x, tractor.y) - VIEW_W / 2;
     cam.y =
