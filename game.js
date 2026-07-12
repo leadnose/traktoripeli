@@ -3443,6 +3443,42 @@ let taxPaid = 0; // amount shown in that banner
 // nothing ever ends. A fat wallet so seeds are never a worry.
 const SANDBOX_START_CASH = 1000;
 
+// Sandbox season pacing: the calendar crawls through spring and autumn so
+// there is time to plant every field and haul every sack, and runs at full
+// speed through the summer while the crops ripen. Rates are calendar
+// seconds per real second; the phase boundaries are Jun 1 and Sep 1,
+// expressed as timeLeft values so the frame loop can compare directly.
+const SANDBOX_SPRING_RATE = 0.25; // Apr 1 – May 31: planting
+const SANDBOX_SUMMER_RATE = 1; // Jun 1 – Aug 31: growing
+const SANDBOX_AUTUMN_RATE = 0.25; // Sep 1 – Oct 31: harvest and hauling
+const SUMMER_START_LEFT = ROUND_TIME * (1 - 61 / SEASON_DAYS);
+const AUTUMN_START_LEFT = ROUND_TIME * (1 - 153 / SEASON_DAYS);
+
+// In sandbox crops grow on the calendar instead of the wall clock: seed to
+// mature spans this many calendar days, so a spring planting sprouts slowly,
+// shoots up over summer and stands golden by September whatever the
+// real-time pace of each phase.
+const SANDBOX_GROW_DAYS = 90;
+const SANDBOX_GROW_FACTOR =
+  CROP_STAGES[2] / ((SANDBOX_GROW_DAYS * ROUND_TIME) / SEASON_DAYS);
+
+function sandboxClockRate() {
+  return timeLeft > SUMMER_START_LEFT
+    ? SANDBOX_SPRING_RATE
+    : timeLeft > AUTUMN_START_LEFT
+      ? SANDBOX_SUMMER_RATE
+      : SANDBOX_AUTUMN_RATE;
+}
+
+// The timeLeft value where the current phase's rate stops applying
+function sandboxPhaseFloor() {
+  return timeLeft > SUMMER_START_LEFT
+    ? SUMMER_START_LEFT
+    : timeLeft > AUTUMN_START_LEFT
+      ? AUTUMN_START_LEFT
+      : 0;
+}
+
 function modeStartCash(m) {
   return m === "survival"
     ? SURVIVAL_START_CASH
@@ -3481,6 +3517,30 @@ function collectTax() {
 function advanceTime(sec) {
   if (!gameStarted || gameOver) return;
   worldTime += sec;
+  if (mode === "sandbox") {
+    // The calendar runs at a phase-dependent speed and the crops grow on
+    // the calendar, so the catch-up walks phase by phase: each step spends
+    // the real seconds the current phase's remainder costs at its rate.
+    while (sec > 0) {
+      const rate = sandboxClockRate();
+      const floor = sandboxPhaseFloor();
+      const span = timeLeft - floor; // calendar seconds left in this phase
+      if (sec * rate >= span) {
+        updateCrops(span * SANDBOX_GROW_FACTOR);
+        sec -= span / rate;
+        timeLeft = floor;
+        if (floor === 0) {
+          year++;
+          timeLeft = ROUND_TIME;
+        }
+      } else {
+        updateCrops(sec * rate * SANDBOX_GROW_FACTOR);
+        timeLeft -= sec * rate;
+        sec = 0;
+      }
+    }
+    return;
+  }
   updateCrops(sec);
   while (sec > 0 && !gameOver) {
     if (timeLeft > sec) {
@@ -3490,10 +3550,6 @@ function advanceTime(sec) {
       sec -= timeLeft;
       timeLeft = 0;
       if (!collectTax()) return;
-    } else if (mode === "sandbox") {
-      sec -= timeLeft;
-      year++;
-      timeLeft = ROUND_TIME;
     } else {
       timeLeft = 0;
       endRound();
@@ -3706,7 +3762,10 @@ function update(dt) {
   updateSeason();
   if (!gameStarted || gameOver) return;
 
-  timeLeft = Math.max(0, timeLeft - dt);
+  timeLeft = Math.max(
+    0,
+    timeLeft - dt * (mode === "sandbox" ? sandboxClockRate() : 1)
+  );
   if (timeLeft === 0) {
     if (mode === "survival") {
       if (!collectTax()) return;
@@ -3889,7 +3948,9 @@ function update(dt) {
   }
 
   updateTracks(dt);
-  updateCrops(dt);
+  updateCrops(
+    mode === "sandbox" ? dt * sandboxClockRate() * SANDBOX_GROW_FACTOR : dt
+  );
 
   // Periodic autosave so even a crash or hard reload loses only moments
   saveTimer += dt;
@@ -4355,8 +4416,16 @@ function draw() {
   }
 
   if (fpsShown) {
+    // Debug readout sits over the open world, so it gets its own dark
+    // plate for contrast instead of relying on the stamped shadow alone
     screenCtx.font = "bold 11px monospace";
-    label(`${fpsValue} FPS`, 8, topH + 16, "#f5e9c8");
+    screenCtx.textAlign = "left";
+    const simRate = mode === "sandbox" ? sandboxClockRate() : 1;
+    const text = `${fpsValue} FPS  ${simRate}× SIM`;
+    const textW = screenCtx.measureText(text).width;
+    screenCtx.fillStyle = "rgba(40,24,12,0.8)";
+    screenCtx.fillRect(4, topH + 6, textW + 9, 15);
+    label(text, 8, topH + 17, "#ffe89a");
   }
 }
 
