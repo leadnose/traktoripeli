@@ -452,32 +452,34 @@ window.addEventListener("keydown", (e) => {
   }
   if (e.key.startsWith("Arrow")) e.preventDefault();
   keys[e.key] = true;
-  if (e.key === " " && !e.repeat) {
-    e.preventDefault();
-    const imp = IMPLEMENTS[tractor.implement];
-    // Raising is always allowed; lowering needs the work gear and field dirt
-    if (!imp.liftable) {
-      tractor.implFlash = 0.9; // the trailer has no lift
-    } else if (tractor.implDown) {
-      tractor.implDown = false;
-      playHydraulic(false);
-    } else if (tractor.fastGear) {
-      tractor.gearFlash = 0.9; // refused: too fast — flash the HUD, no movement
-    } else if (!implementOverField()) {
-      tractor.implBounce = 0.6; // it tries, catches, and springs back up
-      playHydraulic(true);
-    } else {
-      tractor.implDown = true;
-      tractor.implBounce = 0;
-      playHydraulic(true);
-    }
-  }
   if ((e.key === "m" || e.key === "M") && !e.repeat) toggleMusic();
   if ((e.key === "q" || e.key === "Q") && !e.repeat) toggleSound();
   if ((e.key === "f" || e.key === "F") && !e.repeat) fpsShown = !fpsShown;
-  if (e.key === "Shift" && !e.repeat) {
-    tractor.fastGear = !tractor.fastGear;
-    if (tractor.fastGear) tractor.implDown = false; // lift before shifting up
+  if (e.key === " " && !e.repeat) {
+    e.preventDefault();
+    // One toggle for the whole maneuver: road mode is the fast gear with the
+    // implement raised, work mode the slow gear with it lowered
+    const imp = IMPLEMENTS[tractor.implement];
+    if (tractor.fastGear) {
+      tractor.fastGear = false;
+      if (imp.liftable) {
+        // Lowering needs field dirt under the working width
+        if (!implementOverField()) {
+          tractor.implBounce = 0.6; // it tries, catches, and springs back up
+        } else {
+          tractor.implDown = true;
+          tractor.implBounce = 0;
+        }
+        playHydraulic(true);
+      }
+    } else {
+      // Lift before shifting up
+      tractor.fastGear = true;
+      if (tractor.implDown) {
+        tractor.implDown = false;
+        playHydraulic(false);
+      }
+    }
   }
   if (IMPLEMENT_KEYS[e.key] && !e.repeat) {
     // Implements are swapped at the farmyard
@@ -3689,13 +3691,12 @@ const tractor = {
   y: FARM.y + 10,
   angle: -2.4, // facing up-left, toward the middle of the map
   speed: 0, // world units/s, positive = forward
-  fastGear: true, // Shift toggles between road and work gear
+  fastGear: true, // Space toggles road mode (fast, lifted) vs work mode (slow, lowered)
   implement: "plow", // current implement: plow / seeder / harvester / trailer
   implAngle: -2.4, // world heading of a towed implement (trails the hitch)
-  implDown: false, // Space toggles the implement
+  implDown: false, // lowered together with the work gear (part of the mode toggle)
   implLift: 1, // animated: 0 = working the ground, 1 = fully raised
   implBounce: 0, // seconds left of the refused-lower dip animation
-  gearFlash: 0, // seconds left of the red HUD flash (refused: gear too fast)
   implFlash: 0, // seconds left of the red HUD flash (implement complaint)
 };
 
@@ -3704,7 +3705,7 @@ const BRAKE = 80;
 const FRICTION = 28;
 const GEAR_FAST = 42;
 const GEAR_SLOW = 16;
-const MAX_REVERSE = -20;
+const MAX_REVERSE = -GEAR_SLOW; // backing up is never faster than the work gear
 // Fixed steering geometry: turn rate scales with speed, so the turning
 // radius stays ~TURN_RADIUS at working speeds — tight enough to U-turn
 // into the adjacent row (one tile = 16 units away).
@@ -3893,7 +3894,6 @@ function update(dt) {
     liftTarget = 1 - 0.5 * Math.sin((Math.PI * (0.6 - tractor.implBounce)) / 0.6);
   }
   tractor.implLift += (liftTarget - tractor.implLift) * Math.min(1, dt * 5);
-  tractor.gearFlash = Math.max(0, tractor.gearFlash - dt);
   tractor.implFlash = Math.max(0, tractor.implFlash - dt);
 
   // Field work under the implement while it's down and moving
@@ -4150,13 +4150,13 @@ function draw() {
     hudX += screenCtx.measureText(text).width;
   };
   const RED = "#ff5040";
-  const flashGear = tractor.gearFlash > 0 && ((tractor.gearFlash * 8) | 0) % 2 === 0;
   const flashImpl = tractor.implFlash > 0 && ((tractor.implFlash * 8) | 0) % 2 === 0;
-  seg(`GEAR: ${tractor.fastGear ? "FAST" : "SLOW"} [Shift]   `, flashGear ? RED : null);
-  // The attached implement is named by the highlight in the farm list, so
-  // this segment just carries the lift state and its key
-  const state = imp.liftable ? (tractor.implDown ? " DOWN" : " UP") : "";
-  seg(`IMPLEMENT${state} [Space]   `, flashImpl ? RED : null);
+  // Gear and implement move as one: road mode is fast with the implement
+  // raised, work mode slow with it lowered — the lift state is still shown,
+  // for the bounce when there's no field dirt to drop into. The attached
+  // implement is named by the highlight in the farm list.
+  const state = imp.liftable ? (tractor.implDown ? ", IMPLEMENT DOWN" : ", IMPLEMENT UP") : "";
+  seg(`MODE: ${tractor.fastGear ? "ROAD" : "WORK"}${state} [Space]   `, flashImpl ? RED : null);
   if (tractor.implement === "seeder") {
     // Solid red when the hopper is empty; flashing when it's empty AND the
     // seeder is down working a field — driving along planting nothing
