@@ -1238,6 +1238,25 @@ function updateCrops(dt) {
   }
 }
 
+// Tally the field tiles by working state for the HUD's ledger tag. Sown
+// splits into growing and ripe, since a mature crop is what the harvester
+// hunts for. The 60×60 map is small enough to recount every frame.
+function countFieldTiles() {
+  const c = { stubble: 0, plowed: 0, sown: 0, ripe: 0 };
+  for (let ty = 0; ty < MAP_TILES; ty++) {
+    for (let tx = 0; tx < MAP_TILES; tx++) {
+      const t = tiles[ty][tx];
+      if (t === 1) c.stubble++;
+      else if (t === 2) c.plowed++;
+      else if (t === 3) {
+        if (cropStage(growth[ty][tx]) >= 3) c.ripe++;
+        else c.sown++;
+      }
+    }
+  }
+  return c;
+}
+
 // Roads are generated inside makeMap; the samples and covered tiles are kept
 // so field patches, trees and bushes can stay off them, and the roads
 // themselves (point sequences) so the delivery van can drive the network.
@@ -1762,8 +1781,10 @@ minimapCanvas.width = MAP_TILES * 2;
 minimapCanvas.height = MAP_TILES;
 const minimapCtx = minimapCanvas.getContext("2d");
 
-// grass, field, plowed, seeded, water; ripe crops turn gold
-const MINIMAP_COLORS = ["#4fa83e", "#a87e50", "#8a6540", "#90c83c", "#3d7dc4"];
+// grass, field, plowed, seeded, water; ripe crops turn gold. Plowed is a
+// clearly darker brown than stubble so the two read apart at a glance,
+// both here and in the field ledger's legend swatches.
+const MINIMAP_COLORS = ["#4fa83e", "#a87e50", "#6b4526", "#90c83c", "#3d7dc4"];
 
 function minimapTile(tx, ty) {
   const type = tiles[ty][tx];
@@ -4072,6 +4093,19 @@ const minimapPanelCanvas = prerenderPanel(mmX - 8, topH, mmW + 16, mmH + 16, (p)
   drawWoodGrain(p, mmX - 5, topH + 3, mmW + 10, mmH + 10);
 });
 
+// The field ledger strip hangs flush under the minimap panel; its plank
+// starts right at the joint so the minimap's bottom rim reads as the
+// seam between the two pieces.
+const tallyY = topH + mmH + 16;
+const tallyH = 20;
+const fieldTallyPanelCanvas = prerenderPanel(mmX - 8, tallyY, mmW + 16, tallyH, (p) => {
+  p.fillStyle = "#4a2f1a"; // rim
+  p.fillRect(mmX - 8, tallyY, mmW + 16, tallyH);
+  p.fillStyle = "rgba(122,79,45,0.95)"; // plank fill
+  p.fillRect(mmX - 5, tallyY, mmW + 10, tallyH - 3);
+  drawWoodGrain(p, mmX - 5, tallyY, mmW + 10, tallyH - 3);
+});
+
 // Tiny pixel icons for the top bar: a note for the music, a speaker for the
 // sound effects. Muted draws dim with a red strike across.
 function iconStrike(x, y) {
@@ -4346,6 +4380,36 @@ function draw() {
   screenCtx.fillStyle = TRACTOR_RED;
   screenCtx.fillRect(tmx - 1, tmy - 1, 2, 2);
   screenCtx.restore();
+
+  // Field ledger strip under the minimap: a count per working state
+  // (stubble, plowed, sown, ripe) with the total at the right end. Each
+  // swatch is the state's minimap tile color, so the strip doubles as the
+  // minimap's legend.
+  screenCtx.drawImage(fieldTallyPanelCanvas, mmX - 8, tallyY);
+  const tally = countFieldTiles();
+  screenCtx.font = "11px monospace";
+  let tallyX = mmX;
+  for (const [count, color] of [
+    [tally.stubble, MINIMAP_COLORS[1]],
+    [tally.plowed, MINIMAP_COLORS[2]],
+    [tally.sown, MINIMAP_COLORS[3]],
+    [tally.ripe, "#e3c355"],
+  ]) {
+    screenCtx.fillStyle = "rgba(40,24,12,0.9)"; // swatch backing, like the text shadow
+    screenCtx.fillRect(tallyX, tallyY + 5, 8, 8);
+    screenCtx.fillStyle = color;
+    screenCtx.fillRect(tallyX + 1, tallyY + 6, 6, 6);
+    label(String(count), tallyX + 11, tallyY + 13, "#f5e9c8");
+    tallyX += 11 + screenCtx.measureText(String(count)).width + 8;
+  }
+  screenCtx.textAlign = "right";
+  label(
+    `=${tally.stubble + tally.plowed + tally.sown + tally.ripe}`,
+    mmX + mmW,
+    tallyY + 13,
+    "#ffd94f"
+  );
+  screenCtx.textAlign = "left";
 
   // Start / F1 menu: seed and mode on a little wooden sign. A fresh visit
   // opens it before the clock starts; F1 brings it back later.
