@@ -621,6 +621,67 @@ function nearFarm() {
   return Math.hypot(tractor.x - FARM.x, tractor.y - FARM.y) < FARM_RADIUS;
 }
 
+// The trodden yard isn't a perfect ellipse: each map bends its rim in and
+// out by a deterministic amount so every farmyard reads as its own trampled
+// patch of ground rather than a stamped-out shape. Keyed by its own hash
+// (not the shared `rand()`) so adding it never shifts the seeded sequence
+// everything after it — hills, decorations — depends on for the hand-tuned
+// map archetypes.
+const YARD_LOBES = 14;
+function yardHash(i) {
+  let s = (SEED ^ Math.imul(i + 1, 0x9e3779b9)) | 0;
+  s = (s + 0x6d2b79f5) | 0;
+  let t = Math.imul(s ^ (s >>> 15), 1 | s);
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+const YARD_SHAPE = [];
+for (let i = 0; i < YARD_LOBES; i++) YARD_SHAPE.push(0.8 + yardHash(i) * 0.4);
+
+// Interpolated rim scale at a given angle (0 = the ellipse's own radius).
+function yardScaleAt(angle) {
+  const t = (((angle / (Math.PI * 2)) % 1) + 1) % 1 * YARD_LOBES;
+  const i0 = Math.floor(t) % YARD_LOBES;
+  const i1 = (i0 + 1) % YARD_LOBES;
+  const f = t - Math.floor(t);
+  return YARD_SHAPE[i0] * (1 - f) + YARD_SHAPE[i1] * f;
+}
+const YARD_MAX_SCALE = Math.max(...YARD_SHAPE);
+
+// A world-space circle matching the yard's screen ellipse (screen ellipse
+// radii are the true isometric projection of a world circle: projX has
+// amplitude r*sqrt(2), projY has amplitude r/sqrt(2), a 2:1 ratio — exactly
+// the ellipse's 1.8/0.9 radii). Used to gate tire tracks on the yard dirt,
+// which otherwise only marks the unplowed-field tile type.
+const YARD_RADIUS = (FARM_RADIUS * 1.8) / Math.SQRT2;
+function inYard(wx, wy) {
+  return Math.hypot(wx - FARM.x, wy - FARM.y) < YARD_RADIUS;
+}
+
+// Traces the yard's smoothed, lobed outline onto mapCtx around screen point
+// fc (as returned by mp()); caller fills/strokes/clips as needed. Points sit
+// at YARD_SHAPE's radii and the path threads their midpoints with quadratic
+// curves, the standard canvas trick for a smooth closed blob through a fixed
+// ring of control points.
+function farmYardPath(fc) {
+  const Rx = FARM_RADIUS * 1.8;
+  const Ry = FARM_RADIUS * 0.9;
+  const pts = YARD_SHAPE.map((scale, i) => {
+    const a = (i / YARD_LOBES) * Math.PI * 2;
+    return { x: fc.x + Math.cos(a) * Rx * scale, y: fc.y + Math.sin(a) * Ry * scale };
+  });
+  const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+  mapCtx.beginPath();
+  const start = mid(pts[YARD_LOBES - 1], pts[0]);
+  mapCtx.moveTo(start.x, start.y);
+  for (let i = 0; i < YARD_LOBES; i++) {
+    const next = pts[(i + 1) % YARD_LOBES];
+    const nm = mid(pts[i], next);
+    mapCtx.quadraticCurveTo(pts[i].x, pts[i].y, nm.x, nm.y);
+  }
+  mapCtx.closePath();
+}
+
 // ---------------------------------------------------------------------------
 // Terrain: smooth rolling hills from summed cosine bumps, fading to flat
 // near the map edges so the dirt cliffs stay level.
@@ -1038,10 +1099,10 @@ function drawTile(tx, ty) {
   let x1 = Math.max(...xs) + 8;
   let y1 = Math.max(...ys) + 8;
   if (nearYard) {
-    x0 = Math.min(x0, fc.x - FARM_RADIUS * 1.8 - 2);
-    x1 = Math.max(x1, fc.x + FARM_RADIUS * 1.8 + 2);
-    y0 = Math.min(y0, fc.y - FARM_RADIUS * 0.9 - 2);
-    y1 = Math.max(y1, fc.y + FARM_RADIUS * 0.9 + 2);
+    x0 = Math.min(x0, fc.x - FARM_RADIUS * 1.8 * YARD_MAX_SCALE - 2);
+    x1 = Math.max(x1, fc.x + FARM_RADIUS * 1.8 * YARD_MAX_SCALE + 2);
+    y0 = Math.min(y0, fc.y - FARM_RADIUS * 0.9 * YARD_MAX_SCALE - 2);
+    y1 = Math.max(y1, fc.y + FARM_RADIUS * 0.9 * YARD_MAX_SCALE + 2);
   }
 
   // Restore road and ditch surfaces: they live on top of the tiles and
@@ -1114,10 +1175,9 @@ function drawTile(tx, ty) {
   // antialiasing seams across the yard.
   if (nearYard) {
     mapCtx.fillStyle = shade("#a87e50", 1);
-    mapCtx.beginPath();
-    mapCtx.ellipse(fc.x, fc.y, FARM_RADIUS * 1.8, FARM_RADIUS * 0.9, 0, 0, Math.PI * 2);
+    farmYardPath(fc);
     mapCtx.fill();
-    mapCtx.strokeStyle = INK;
+    mapCtx.strokeStyle = MAP_INK;
     mapCtx.lineWidth = 1;
     mapCtx.stroke();
     mapCtx.fillStyle = shade("#8f6940", 1);
@@ -1127,7 +1187,24 @@ function drawTile(tx, ty) {
   // Re-dither everything that was repainted
   ditherRegion(mapCtx, x0, y0, x1 - x0, y1 - y0);
 
-  // The ground repaint erased any wheel marks on this tile: stamp them back
+  // The ground repaint erased any wheel marks on this tile: stamp them back.
+  // A yard repaint just blanked every tile under the whole (unclipped) blob,
+  // not only this one, so every tile the yard's world-circle overlaps also
+  // needs its marks replayed — restamping only (tx, ty) would drop tracks
+  // the tractor left elsewhere in the yard the moment any nearby tile
+  // repaints. (tx, ty) itself is restamped separately since the "wake"
+  // radius that triggers a yard repaint reaches slightly further out than
+  // the yard's own tile footprint.
+  if (nearYard) {
+    const yardTileR = Math.ceil((YARD_RADIUS * YARD_MAX_SCALE) / TILE) + 1;
+    const fcx = Math.floor(FARM.x / TILE);
+    const fcy = Math.floor(FARM.y / TILE);
+    for (let ny = Math.max(0, fcy - yardTileR); ny <= Math.min(MAP_TILES - 1, fcy + yardTileR); ny++)
+      for (let nx = Math.max(0, fcx - yardTileR); nx <= Math.min(MAP_TILES - 1, fcx + yardTileR); nx++) {
+        if (nx === tx && ny === ty) continue;
+        restampTracks(nx, ny);
+      }
+  }
   restampTracks(tx, ty);
 }
 
@@ -1928,16 +2005,15 @@ function makeMap() {
   // Trodden dirt yard around the farm buildings
   const fc = mp(FARM.x, FARM.y);
   mapCtx.fillStyle = shade("#a87e50", 1);
-  mapCtx.beginPath();
-  mapCtx.ellipse(fc.x, fc.y, FARM_RADIUS * 1.8, FARM_RADIUS * 0.9, 0, 0, Math.PI * 2);
+  farmYardPath(fc);
   mapCtx.fill();
-  mapCtx.strokeStyle = INK;
+  mapCtx.strokeStyle = MAP_INK;
   mapCtx.lineWidth = 1;
   mapCtx.stroke();
   mapCtx.fillStyle = shade("#8f6940", 1);
   for (let i = 0; i < 40; i++) {
     const a = rand() * Math.PI * 2;
-    const r = Math.sqrt(rand());
+    const r = Math.sqrt(rand()) * yardScaleAt(a) * 0.94; // stay shy of the rim
     const px = Math.round(fc.x + Math.cos(a) * r * FARM_RADIUS * 1.7);
     const py = Math.round(fc.y + Math.sin(a) * r * FARM_RADIUS * 0.85);
     yardPixels.push({ x: px, y: py });
@@ -3334,9 +3410,11 @@ function drawScene(camX, camY) {
 
 // ---------------------------------------------------------------------------
 // Wheel tracks: stamped into the prerendered map canvas while driving over
-// unplowed field dirt. Each mark is also recorded by tile index so drawTile
-// can stamp it back after a repaint (seasons, crop overhangs); working the
-// tile changes its type, which drops the record — field work wipes tracks.
+// unplowed field dirt or the farmyard's trodden yard. Each mark is also
+// recorded by tile index so drawTile can stamp it back after a repaint
+// (seasons, crop overhangs); working a field tile changes its type, which
+// drops the record there — field work wipes tracks (the yard never changes
+// type, so its tracks are permanent, same as real trampled dirt).
 // ---------------------------------------------------------------------------
 
 const TRACK_WHEELS = [
@@ -3368,7 +3446,8 @@ function updateTracks(dt) {
   for (const wheel of TRACK_WHEELS) {
     const wx = tractor.x + wheel.x * cos - wheel.y * sin;
     const wy = tractor.y + wheel.x * sin + wheel.y * cos;
-    if (tileTypeAt(wx, wy) !== 1) continue; // marks only on unplowed field dirt
+    // marks only on unplowed field dirt or the yard's trodden ground
+    if (tileTypeAt(wx, wy) !== 1 && !inYard(wx, wy)) continue;
     const px = Math.round(projX(wx, wy) + MAP_OFFSET_X);
     const py = Math.round(projY(wx, wy, terrainHeight(wx, wy)) + MAP_OFFSET_Y);
     const key = tileKey(wx, wy);
@@ -3389,7 +3468,7 @@ function restampTracks(tx, ty) {
   const key = ty * MAP_TILES + tx;
   const marks = trackMarks.get(key);
   if (!marks) return;
-  if (tiles[ty][tx] !== 1) {
+  if (tiles[ty][tx] !== 1 && !inYard((tx + 0.5) * TILE, (ty + 0.5) * TILE)) {
     trackMarks.delete(key); // the tile was worked: its marks are gone for good
     return;
   }
