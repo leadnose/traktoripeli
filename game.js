@@ -628,6 +628,13 @@ const INK_GAIN = [1.03, 1.0, 0.93];
 // Outline ink shared by the scene silhouettes and the map's boundary lines
 const INK = "#4a3827";
 
+// Same ink, thinned out for the ground's own boundary lines so they read as
+// soft creases in the paper rather than the heavier silhouette lines used
+// elsewhere. The road/ditch rim gets its own, fainter still: stamps overlap
+// along a path, so any tint there stacks up darker than a single tile edge.
+const MAP_INK = "rgba(74, 56, 39, 0.3)";
+const ROAD_INK = "rgba(74, 56, 39, 0.14)";
+
 const shadeCache = {};
 function shade(color, k) {
   const key = color + ((k * 100 + 0.5) | 0);
@@ -830,7 +837,7 @@ function tileInk(tx, ty) {
   const t = tiles[ty][tx];
   const same = t === 4 ? isWater : t > 0 ? isField : () => true;
   const { P, rounded } = tileGeometry(tx, ty, same);
-  mapCtx.strokeStyle = INK;
+  mapCtx.strokeStyle = MAP_INK;
   mapCtx.lineWidth = 1;
   mapCtx.beginPath();
   let any = false;
@@ -993,7 +1000,7 @@ function drawTile(tx, ty) {
     mapCtx.lineTo(c[3].x - 8, c[3].y);
     mapCtx.closePath();
     mapCtx.clip();
-    mapCtx.fillStyle = INK;
+    mapCtx.fillStyle = ROAD_INK;
     for (const s of stamps) {
       const p = mp(s.x, s.y);
       mapCtx.beginPath();
@@ -1755,7 +1762,7 @@ function makeMap() {
   for (const list of roadStamps.values()) for (const s of list) allStamps.add(s);
   mapCtx.save();
   clipMapDiamond();
-  mapCtx.fillStyle = INK;
+  mapCtx.fillStyle = ROAD_INK;
   for (const s of allStamps) {
     const c = mp(s.x, s.y);
     mapCtx.beginPath();
