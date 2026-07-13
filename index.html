@@ -2,13 +2,47 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Traktoripeli</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' shape-rendering='crispEdges'><circle cx='4.5' cy='11.5' r='3.5' fill='%2333363d'/><circle cx='4.5' cy='11.5' r='1.4' fill='%23f7e8b8'/><circle cx='12.5' cy='13' r='2' fill='%2333363d'/><circle cx='12.5' cy='13' r='0.8' fill='%23f7e8b8'/><rect x='2' y='6.6' width='9' height='2.0' fill='%236e6e6e'/><rect x='11' y='6.6' width='2.4' height='4.6' fill='%236e6e6e'/><rect x='1' y='3.6' width='4.2' height='1.0' fill='%23d64535'/><rect x='1.5' y='4.6' width='6.5' height='2.0' fill='%23d64535'/><rect x='8' y='5.0' width='4' height='1.6' fill='%23d64535'/><rect x='12' y='5.2' width='1.3' height='1.4' fill='%23c03a2c'/><rect x='13.3' y='5.4' width='0.7' height='1.0' fill='%235a5148'/><rect x='6.6' y='1.5' width='1.6' height='1.9' fill='%238f8f8f'/><rect x='6.9' y='3.4' width='1' height='1.6' fill='%237a7a7a'/><rect x='7.1' y='0.6' width='0.6' height='1' fill='%237a7a7a'/><circle cx='13.6' cy='6.0' r='0.4' fill='%23ffe66b'/></svg>">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <canvas id="game" width="960" height="600"></canvas>
+
+  <!-- Touch controls: hidden on mouse/trackpad devices via CSS, shown on
+       touch devices. Buttons dispatch synthetic keyboard events so all the
+       existing keyboard-driven game logic (driving, menus, implements)
+       works unchanged for touch input. -->
+  <div id="touch-controls" aria-hidden="true">
+    <div id="touch-dpad">
+      <button class="tbtn" id="td-up" data-key="ArrowUp" aria-label="Throttle">▲</button>
+      <button class="tbtn" id="td-left" data-key="ArrowLeft" aria-label="Steer left">◀</button>
+      <button class="tbtn" id="td-right" data-key="ArrowRight" aria-label="Steer right">▶</button>
+      <button class="tbtn" id="td-down" data-key="ArrowDown" aria-label="Reverse / brake">▼</button>
+    </div>
+    <div id="touch-right">
+      <div id="touch-implements">
+        <button class="tbtn tbtn-small" data-key="1" aria-label="Plow">1</button>
+        <button class="tbtn tbtn-small" data-key="2" aria-label="Seeder">2</button>
+        <button class="tbtn tbtn-small" data-key="3" aria-label="Harvester">3</button>
+        <button class="tbtn tbtn-small" data-key="4" aria-label="Trailer">4</button>
+      </div>
+      <button class="tbtn tbtn-big" id="td-space" data-key=" " aria-label="Toggle gear / implement">⇅</button>
+    </div>
+    <div id="touch-topbar">
+      <button class="tbtn tbtn-tiny" id="td-fullscreen" aria-label="Fullscreen">⛶</button>
+      <button class="tbtn tbtn-tiny" data-key="m" aria-label="Toggle music">♪</button>
+      <button class="tbtn tbtn-tiny" data-key="q" aria-label="Toggle sound">🔊</button>
+      <button class="tbtn tbtn-tiny" data-key="p" aria-label="Pause">⏸</button>
+      <button class="tbtn tbtn-tiny" id="td-menu" data-key="F1" aria-label="Menu">☰</button>
+    </div>
+    <button class="tbtn" id="td-enter" data-key="Enter" aria-label="Confirm / start">ENTER</button>
+  </div>
+
   <script src="game.js"></script>
 </body>
 </html>

@@ -587,6 +587,75 @@ window.addEventListener("keyup", (e) => {
 });
 
 // ---------------------------------------------------------------------------
+// Touch controls: on-screen buttons for phones/tablets (CSS shows them only
+// on coarse, hover-less pointers). Every button just dispatches the same
+// synthetic keyboard events the handlers above already process, so driving,
+// menus and implement switching all work identically to keyboard input
+// without a second code path to keep in sync.
+// ---------------------------------------------------------------------------
+
+(function setupTouchControls() {
+  const root = document.getElementById("touch-controls");
+  if (!root) return;
+
+  function fireKey(type, key) {
+    initAudio(); // a touch is a user gesture too; unlocks audio the same way
+    if (audio.ac.state === "suspended") audio.ac.resume();
+    window.dispatchEvent(new KeyboardEvent(type, { key }));
+  }
+
+  // Tracked by pointerId (not just per-button) so a finger that slides off
+  // a button, or a cancelled touch, can never leave a key stuck down.
+  const activePointers = new Map();
+
+  function release(pointerId) {
+    const entry = activePointers.get(pointerId);
+    if (!entry) return;
+    activePointers.delete(pointerId);
+    entry.btn.classList.remove("tbtn-active");
+    fireKey("keyup", entry.key);
+  }
+
+  root.querySelectorAll(".tbtn[data-key]").forEach((btn) => {
+    const key = btn.dataset.key;
+    btn.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      btn.classList.add("tbtn-active");
+      activePointers.set(e.pointerId, { btn, key });
+      fireKey("keydown", key);
+    });
+    btn.addEventListener("pointerup", (e) => release(e.pointerId));
+    btn.addEventListener("pointercancel", (e) => release(e.pointerId));
+    btn.addEventListener("pointerleave", (e) => release(e.pointerId));
+    btn.addEventListener("contextmenu", (e) => e.preventDefault());
+  });
+  window.addEventListener("pointerup", (e) => release(e.pointerId));
+  window.addEventListener("pointercancel", (e) => release(e.pointerId));
+
+  const fsBtn = document.getElementById("td-fullscreen");
+  fsBtn.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    initAudio();
+    if (audio.ac.state === "suspended") audio.ac.resume();
+    if (document.fullscreenElement) {
+      document.exitFullscreen();
+    } else if (screenCanvas.requestFullscreen) {
+      screenCanvas.requestFullscreen().catch(() => {});
+    }
+  });
+
+  // The Enter button and the driving-only controls (gear/implements) are
+  // shown or hidden depending on whether a menu or the date-jump field is
+  // currently open, so idle buttons never sit in the way of the other mode.
+  function syncVisibility() {
+    const menuish = !gameStarted || menuOpen || dateJump !== null;
+    document.body.classList.toggle("menu-mode", menuish);
+    requestAnimationFrame(syncVisibility);
+  }
+  requestAnimationFrame(syncVisibility);
+})();
+
+// ---------------------------------------------------------------------------
 // Isometric projection (2:1, SimCity 2000 style)
 // ---------------------------------------------------------------------------
 
