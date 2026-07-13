@@ -29,15 +29,14 @@ const urlParams = new URLSearchParams(location.search);
 const seedParam = parseInt(urlParams.get("seed"), 10);
 const SEED = Number.isFinite(seedParam) ? seedParam : (Math.random() * 1e9) | 0;
 
-// Game mode: "classic" is the timed one-season round, "survival" rolls year
-// after year — each turning through a short snowed-in winter — with a
-// property tax due every Oct 31, and "sandbox" rolls the same wintered
-// years with no taxes, no failure and no end — just roaming. Chosen in the
-// start menu; reloads carry the mode in the URL next to the seed, and a
-// fresh visit (no mode in the URL) opens the start menu before anything
-// moves.
-const MODES = ["classic", "survival", "sandbox"];
-let mode = MODES.includes(urlParams.get("mode")) ? urlParams.get("mode") : "classic";
+// Game mode: "survival" rolls year after year — each turning through a
+// short snowed-in winter — with a property tax due every Oct 31, and
+// "sandbox" rolls the same wintered years with no taxes, no failure and
+// no end — just roaming. Chosen in the start menu; reloads carry the mode
+// in the URL next to the seed, and a fresh visit (no mode in the URL)
+// opens the start menu before anything moves.
+const MODES = ["survival", "sandbox"];
+let mode = MODES.includes(urlParams.get("mode")) ? urlParams.get("mode") : "survival";
 let gameStarted = urlParams.has("mode");
 
 const rand = (function mulberry32(a) {
@@ -3562,11 +3561,7 @@ const TRAILER_CAP = 12; // sacks the trailer can carry
 const SEED_PRICE = 2; // € per seed, bought automatically at the farm
 const SACK_PRICE = 10; // € earned per sack of grain sold
 
-// Classic rounds are timed; the score is the profit made before time runs
-// out. The five best scores are kept in localStorage.
 const ROUND_TIME = 300; // seconds — one Apr 1 – Oct 31 season in either mode
-const START_CASH = 100;
-const SCORES_KEY = "traktoripeli.best";
 let timeLeft = ROUND_TIME;
 let gameOver = false;
 let bestScores = [];
@@ -3575,7 +3570,7 @@ let finalRank = -1; // this round's place in the best list, -1 if none
 // Survival mode: the years keep rolling and every Oct 31 the property tax
 // is collected, growing a little each year, income or not. Seeds can go on
 // credit down to the debt limit; sink below it and the bank takes the farm.
-// Its scoreboard is the longest runs in years, kept apart from the classic.
+// The scoreboard is the longest runs in years, kept in localStorage.
 const SURVIVAL_START_CASH = 250;
 const TAX_BASE = 150; // € — the first year's property tax
 const TAX_STEP = 75; // € added to the tax each following year
@@ -3609,11 +3604,10 @@ const SANDBOX_GROW_DAYS = 90;
 const SANDBOX_GROW_FACTOR =
   CROP_STAGES[2] / ((SANDBOX_GROW_DAYS * ROUND_TIME) / SEASON_DAYS);
 
-// Winter: in the cyclical modes the year doesn't jump from Oct 31 straight
-// back to spring — a snowed-in Nov 1 – Mar 31 passes first. It runs on the
-// wall clock in both modes: nothing grows and nothing falls due, the world
-// just whitens, rests, and melts back to green. Classic ends at Oct 31 and
-// never sees one.
+// Winter: the year doesn't jump from Oct 31 straight back to spring — a
+// snowed-in Nov 1 – Mar 31 passes first. It runs on the wall clock in both
+// modes: nothing grows and nothing falls due, the world just whitens,
+// rests, and melts back to green.
 const WINTER_TIME = 45; // real seconds from Nov 1 to Mar 31
 let winterLeft = 0; // counts down while winter is running
 
@@ -3635,11 +3629,7 @@ function sandboxPhaseFloor() {
 }
 
 function modeStartCash(m) {
-  return m === "survival"
-    ? SURVIVAL_START_CASH
-    : m === "sandbox"
-      ? SANDBOX_START_CASH
-      : START_CASH;
+  return m === "sandbox" ? SANDBOX_START_CASH : SURVIVAL_START_CASH;
 }
 
 function startGame(m) {
@@ -3707,20 +3697,16 @@ function advanceTime(sec) {
       }
       continue;
     }
-    // Classic and survival run on the wall clock
+    // Survival runs on the wall clock
     if (timeLeft > sec) {
       updateCrops(sec);
       timeLeft -= sec;
       sec = 0;
-    } else if (mode === "survival") {
+    } else {
       updateCrops(timeLeft);
       sec -= timeLeft;
       timeLeft = 0;
       if (!collectTax()) return;
-    } else {
-      updateCrops(timeLeft);
-      timeLeft = 0;
-      endRound();
     }
   }
 }
@@ -3760,14 +3746,6 @@ function tryDateJump() {
     return;
   }
   const target = (Date.UTC(y, mm - 1, dd) - Date.UTC(2000, 3, 1)) / 86400000;
-  // Classic is a single Apr–Oct season: only dates still ahead exist
-  if (
-    mode === "classic" &&
-    (target > SEASON_DAYS || target <= currentCalendarDay())
-  ) {
-    dateJumpError = true;
-    return;
-  }
   // Always at least one step forward: jumping to today's date rolls a
   // whole year around in the cyclical modes. The guard comfortably covers
   // the longest year (sandbox's slow phases plus a winter) and the loop
@@ -3777,28 +3755,6 @@ function tryDateJump() {
     if (currentCalendarDay() === target) break;
   }
   dateJump = null;
-}
-
-function endRound() {
-  gameOver = true;
-  tractor.speed = 0;
-  clearSave(); // a finished run must not resurrect on reload
-  const entry = { score: cash - START_CASH, seed: SEED, date: Date.now() };
-  let scores;
-  try {
-    scores = JSON.parse(localStorage.getItem(SCORES_KEY)) || [];
-  } catch {
-    scores = [];
-  }
-  scores.push(entry);
-  scores.sort((a, b) => b.score - a.score);
-  bestScores = scores.slice(0, 5);
-  finalRank = bestScores.indexOf(entry);
-  try {
-    localStorage.setItem(SCORES_KEY, JSON.stringify(bestScores));
-  } catch {
-    // private browsing etc: scores just aren't persisted
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -3899,8 +3855,8 @@ function endSurvival() {
   }
 }
 
-// Starting capital by mode: classic gets enough for the first bag of
-// seeds, survival a buffer against the first tax bill, sandbox plenty
+// Starting capital by mode: survival a buffer against the first tax bill,
+// sandbox plenty
 let cash = modeStartCash(mode);
 let seeds = 0; // start empty: buy seeds at the farm
 let cargo = 0; // sacks on the trailer
@@ -3998,11 +3954,8 @@ function update(dt) {
     if (timeLeft === 0) {
       if (mode === "survival") {
         if (!collectTax()) return;
-      } else if (mode === "sandbox") {
-        winterLeft = WINTER_TIME;
       } else {
-        endRound();
-        return;
+        winterLeft = WINTER_TIME;
       }
     }
   }
@@ -4507,8 +4460,7 @@ function draw() {
   const taxJustPaid = mode === "survival" && taxFlash > 0 && !gameOver;
   screenCtx.textAlign = "right";
   label(
-    (mode === "classic" ? "" : `Y${year} `) +
-      `${MONTH_NAMES[date.getMonth()]} ${date.getDate()}`,
+    `Y${year} ${MONTH_NAMES[date.getMonth()]} ${date.getDate()}`,
     bx - 8,
     topY,
     flash ? "#ff5040" : "#f5e9c8"
@@ -4559,38 +4511,23 @@ function draw() {
     for (let py = y + 52; py < y + h; py += 52) screenCtx.fillRect(x, py, w, 1);
     screenCtx.textAlign = "center";
     screenCtx.font = "bold 24px monospace";
-    if (mode === "survival") {
-      label("BANKRUPT — THE FARM IS LOST", cx, y + 40, "#ff7a5c");
-      screenCtx.font = "bold 18px monospace";
+    label("BANKRUPT — THE FARM IS LOST", cx, y + 40, "#ff7a5c");
+    screenCtx.font = "bold 18px monospace";
+    label(
+      `SURVIVED ${year} YEAR${year === 1 ? "" : "S"}   (€${cash})`,
+      cx,
+      y + 74,
+      "#f5e9c8"
+    );
+    screenCtx.font = "13px monospace";
+    bestScores.forEach((entry, i) => {
       label(
-        `SURVIVED ${year} YEAR${year === 1 ? "" : "S"}   (€${cash})`,
+        `${i + 1}.  ${entry.years} YEAR${entry.years === 1 ? " " : "S"}   €${entry.cash}   (seed ${entry.seed})`,
         cx,
-        y + 74,
-        "#f5e9c8"
+        y + 106 + i * 20,
+        i === finalRank ? "#ffd94f" : "#e0d0a8"
       );
-      screenCtx.font = "13px monospace";
-      bestScores.forEach((entry, i) => {
-        label(
-          `${i + 1}.  ${entry.years} YEAR${entry.years === 1 ? " " : "S"}   €${entry.cash}   (seed ${entry.seed})`,
-          cx,
-          y + 106 + i * 20,
-          i === finalRank ? "#ffd94f" : "#e0d0a8"
-        );
-      });
-    } else {
-      label("OCT 31 — SEASON'S END", cx, y + 40, "#ffd94f");
-      screenCtx.font = "bold 18px monospace";
-      label(`PROFIT: €${cash - START_CASH}`, cx, y + 74, "#f5e9c8");
-      screenCtx.font = "13px monospace";
-      bestScores.forEach((entry, i) => {
-        label(
-          `${i + 1}.  €${entry.score}   (seed ${entry.seed})`,
-          cx,
-          y + 106 + i * 20,
-          i === finalRank ? "#ffd94f" : "#e0d0a8"
-        );
-      });
-    }
+    });
     label("[F1] MENU — NEW GAME, MAP OR MODE", cx, y + h - 18, "#c9e6a8");
     screenCtx.textAlign = "left";
   }
@@ -4738,7 +4675,6 @@ function draw() {
 
     screenCtx.font = "bold 12px monospace";
     const modeRows = [
-      ["classic", "CLASSIC  — ONE SEASON, RACE FOR PROFIT"],
       ["survival", "SURVIVAL — PAY THE YEARLY TAX, SURVIVE"],
       ["sandbox", "SANDBOX  — NO CLOCK PRESSURE, JUST ROAM"],
     ];
