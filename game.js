@@ -764,9 +764,16 @@ function isWater(tx, ty) {
   return tiles[ty][tx] === 4;
 }
 
-// Corners of a tile that are outer corners of its patch (nothing of the same
-// kind around them); those corners get rounded off. Works for both field
-// patches and water bodies via the `same` predicate.
+// Corners of a tile that are outer corners of its patch (both edge-neighbors
+// touching that corner are a different kind); those corners get rounded
+// off. Works for both field patches and water bodies via the `same`
+// predicate. Deliberately ignores the diagonal neighbor: a fine zigzag
+// shoreline is mostly "saddle" vertices (two of one kind and two of the
+// other, meeting only corner-to-corner) rather than one tile alone against
+// three — requiring the diagonal too would leave every one of those sharp,
+// which is most of a jagged coast. Each of the (up to) four tiles touching
+// such a vertex rounds its own corner independently; together they turn the
+// crossing into a small rounded pinwheel instead of a hard point.
 function tileGeometry(tx, ty, same) {
   const P = [
     mp(tx * TILE, ty * TILE),
@@ -776,10 +783,10 @@ function tileGeometry(tx, ty, same) {
   ];
   const other = (ax, ay) => !same(ax, ay);
   const rounded = [
-    other(tx, ty - 1) && other(tx - 1, ty) && other(tx - 1, ty - 1),
-    other(tx, ty - 1) && other(tx + 1, ty) && other(tx + 1, ty - 1),
-    other(tx + 1, ty) && other(tx, ty + 1) && other(tx + 1, ty + 1),
-    other(tx - 1, ty) && other(tx, ty + 1) && other(tx - 1, ty + 1),
+    other(tx, ty - 1) && other(tx - 1, ty),
+    other(tx, ty - 1) && other(tx + 1, ty),
+    other(tx + 1, ty) && other(tx, ty + 1),
+    other(tx - 1, ty) && other(tx, ty + 1),
   ];
   return { P, rounded };
 }
@@ -837,6 +844,39 @@ function tileInk(tx, ty) {
   const t = tiles[ty][tx];
   const same = t === 4 ? isWater : t > 0 ? isField : () => true;
   const { P, rounded } = tileGeometry(tx, ty, same);
+
+  // Grass has no patch of its own to round (`same` above is trivially true
+  // for it), but a spit of grass against water gets the same crescent
+  // treatment paintTile gives its fill: borrow the water-inverse geometry
+  // so its own tip arcs here too.
+  if (t === 0) {
+    const wr = tileGeometry(tx, ty, (ax, ay) => !isWater(ax, ay)).rounded;
+    for (let i = 0; i < 4; i++) rounded[i] = wr[i];
+  }
+  // `trim` extends `rounded` for straight-edge cutting only — never for
+  // drawing this tile's own arc. Grass never draws its own edges (water
+  // always outranks it), so at a corner where a lone grass tile rounds
+  // (surrounded by water on both sides there), the water tile on either
+  // side needs to stop its straight edge short to meet the grass tile's
+  // arc — but that water tile's *other* edge at the same corner is often
+  // just more water, an edge with no boundary at all, and letting the
+  // ordinary rounded-corner code arc toward it would draw a stray line
+  // into open water. (Saddle corners, where water is genuinely alone
+  // against two grass edges, don't have this problem — both of the
+  // corner's edges are real there, so self-detection via `same` above
+  // already covers it, arc included.)
+  const trim = rounded.slice();
+  if (t === 4) {
+    for (let i = 0; i < 4; i++) {
+      const nx = tx + EDGE_NEIGHBOR[i][0];
+      const ny = ty + EDGE_NEIGHBOR[i][1];
+      if (nx < 0 || ny < 0 || nx >= MAP_TILES || ny >= MAP_TILES || tiles[ny][nx] !== 0) continue;
+      const gr = tileGeometry(nx, ny, (ax, ay) => !isWater(ax, ay)).rounded;
+      if (gr[(i + 3) % 4]) trim[i] = true;
+      if (gr[(i + 2) % 4]) trim[(i + 1) % 4] = true;
+    }
+  }
+
   mapCtx.strokeStyle = MAP_INK;
   mapCtx.lineWidth = 1;
   mapCtx.beginPath();
@@ -861,11 +901,11 @@ function tileInk(tx, ty) {
     // Straight edge, cut short where a rounded corner replaces it
     let x0 = cur.x, y0 = cur.y;
     let x1 = next.x, y1 = next.y;
-    if (rounded[i]) {
+    if (trim[i]) {
       x0 = cur.x + (next.x - cur.x) * CORNER_T;
       y0 = cur.y + (next.y - cur.y) * CORNER_T;
     }
-    if (rounded[(i + 1) % 4]) {
+    if (trim[(i + 1) % 4]) {
       x1 = next.x + (cur.x - next.x) * CORNER_T;
       y1 = next.y + (cur.y - next.y) * CORNER_T;
     }
@@ -1123,6 +1163,35 @@ function paintTile(tx, ty) {
       mapCtx.fillRect(x, y + 1, 1, 1);
       mapCtx.fillStyle = shade("#ffd94f", kc);
       mapCtx.fillRect(x, y, 1, 1);
+    }
+
+    // Round every corner this grass tile turns against water: same crescent
+    // trick the water/field patches use to round their own outer corners,
+    // mirrored here so grass's corners get cut back too — otherwise only
+    // the water side ever rounded and the shore read as sharp wherever land
+    // poked the other way (which, along a jagged coast, is most corners)
+    {
+      const { P, rounded } = tileGeometry(tx, ty, (ax, ay) => !isWater(ax, ay));
+      for (let i = 0; i < 4; i++) {
+        if (!rounded[i]) continue;
+        const cur = P[i];
+        const prev = P[(i + 3) % 4];
+        const next = P[(i + 1) % 4];
+        const ax = cur.x + (prev.x - cur.x) * CORNER_T;
+        const ay = cur.y + (prev.y - cur.y) * CORNER_T;
+        const bx = cur.x + (next.x - cur.x) * CORNER_T;
+        const by = cur.y + (next.y - cur.y) * CORNER_T;
+        mapCtx.fillStyle = shade("#3d7dc4", 1); // matches the water fill
+        mapCtx.beginPath();
+        mapCtx.moveTo(ax, ay);
+        mapCtx.quadraticCurveTo(cur.x, cur.y, bx, by);
+        mapCtx.lineTo(cur.x, cur.y);
+        mapCtx.closePath();
+        mapCtx.fill();
+        mapCtx.strokeStyle = mapCtx.fillStyle;
+        mapCtx.lineWidth = 1;
+        mapCtx.stroke();
+      }
     }
     return;
   }
