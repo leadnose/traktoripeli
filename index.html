@@ -18,11 +18,12 @@
        existing keyboard-driven game logic (driving, menus, implements)
        works unchanged for touch input. -->
   <div id="touch-controls" aria-hidden="true">
-    <div id="touch-dpad">
-      <button class="tbtn" id="td-up" data-key="ArrowUp" aria-label="Throttle">▲</button>
-      <button class="tbtn" id="td-left" data-key="ArrowLeft" aria-label="Steer left">◀</button>
-      <button class="tbtn" id="td-right" data-key="ArrowRight" aria-label="Steer right">▶</button>
-      <button class="tbtn" id="td-down" data-key="ArrowDown" aria-label="Reverse / brake">▼</button>
+    <!-- One-thumb drag joystick: driving forward/back and steering left/
+         right are independent axes read off the same drag, so pushing the
+         knob up-and-left throttles and steers at once instead of needing a
+         second finger to hit a separate button. -->
+    <div id="td-joystick" aria-label="Drive">
+      <div id="td-joystick-knob"></div>
     </div>
     <div id="touch-right">
       <div id="touch-implements">

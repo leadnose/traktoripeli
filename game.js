@@ -616,6 +616,70 @@ window.addEventListener("keyup", (e) => {
     fireKey("keyup", entry.key);
   }
 
+  // Drive joystick: a single drag reads as two independent axes (throttle
+  // and steering) so pushing the knob up-and-left, say, holds ArrowUp and
+  // ArrowLeft together — one thumb can accelerate and turn at the same
+  // time instead of needing to reach two separate buttons.
+  (function setupJoystick() {
+    const base = document.getElementById("td-joystick");
+    const knob = document.getElementById("td-joystick-knob");
+    if (!base || !knob) return;
+    const RADIUS = 40; // px the knob can travel from center
+    const DEADZONE = 0.35; // fraction of RADIUS before an axis engages
+    let pointerId = null;
+    const dir = { ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false };
+
+    function setDir(key, on) {
+      if (dir[key] === on) return;
+      dir[key] = on;
+      fireKey(on ? "keydown" : "keyup", key);
+    }
+
+    function resetAll() {
+      for (const key of Object.keys(dir)) setDir(key, false);
+      knob.style.transform = "translate(0, 0)";
+    }
+
+    function handleMove(e) {
+      const rect = base.getBoundingClientRect();
+      const dx = e.clientX - (rect.left + rect.width / 2);
+      const dy = e.clientY - (rect.top + rect.height / 2);
+      const dist = Math.hypot(dx, dy) || 1;
+      const clamped = Math.min(dist, RADIUS);
+      const angle = Math.atan2(dy, dx);
+      knob.style.transform = `translate(${Math.cos(angle) * clamped}px, ${Math.sin(angle) * clamped}px)`;
+
+      const nx = dx / RADIUS;
+      const ny = dy / RADIUS;
+      setDir("ArrowUp", ny < -DEADZONE);
+      setDir("ArrowDown", ny > DEADZONE);
+      setDir("ArrowLeft", nx < -DEADZONE);
+      setDir("ArrowRight", nx > DEADZONE);
+    }
+
+    base.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      pointerId = e.pointerId;
+      base.setPointerCapture(pointerId);
+      initAudio();
+      if (audio.ac.state === "suspended") audio.ac.resume();
+      handleMove(e);
+    });
+    base.addEventListener("pointermove", (e) => {
+      if (e.pointerId !== pointerId) return;
+      handleMove(e);
+    });
+    function end(e) {
+      if (pointerId === null || e.pointerId !== pointerId) return;
+      pointerId = null;
+      resetAll();
+    }
+    base.addEventListener("pointerup", end);
+    base.addEventListener("pointercancel", end);
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
+  })();
+
   root.querySelectorAll(".tbtn[data-key]").forEach((btn) => {
     const key = btn.dataset.key;
     btn.addEventListener("pointerdown", (e) => {
@@ -647,9 +711,22 @@ window.addEventListener("keyup", (e) => {
   // The Enter button and the driving-only controls (gear/implements) are
   // shown or hidden depending on whether a menu or the date-jump field is
   // currently open, so idle buttons never sit in the way of the other mode.
+  // The gear button also relabels itself to match the current mode (the
+  // HUD's own "MODE: ROAD/WORK") instead of showing a static glyph, and
+  // flashes the same way the HUD text does when a lower is refused.
+  const spaceBtn = document.getElementById("td-space");
   function syncVisibility() {
     const menuish = !gameStarted || menuOpen || dateJump !== null;
     document.body.classList.toggle("menu-mode", menuish);
+    if (gameStarted) {
+      const flash = tractor.implFlash > 0 && ((tractor.implFlash * 8) | 0) % 2 === 0;
+      spaceBtn.textContent = tractor.fastGear ? "⬆ ROAD" : "⬇ WORK";
+      spaceBtn.classList.toggle("tbtn-warn", flash);
+      spaceBtn.setAttribute(
+        "aria-label",
+        tractor.fastGear ? "Lower implement, work mode" : "Raise implement, road mode"
+      );
+    }
     requestAnimationFrame(syncVisibility);
   }
   requestAnimationFrame(syncVisibility);
