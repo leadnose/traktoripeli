@@ -2038,8 +2038,9 @@ for (const p of patches) {
 }
 
 // ---------------------------------------------------------------------------
-// Animals: cows and sheep graze in small herds on the meadows, and flocks
-// of birds cross the sky.
+// Animals: cows, sheep, pigs and goats graze in small herds on the meadows,
+// horses roam wider, ducks keep to the shoreline, a cat and dog linger
+// around the farmyard, and flocks of birds cross the sky.
 // ---------------------------------------------------------------------------
 
 // The body is split into adjacent segments instead of overlapping boxes:
@@ -2089,6 +2090,57 @@ const CHICKEN_BOXES = [
   { x0: 0.95, x1: 1.25, y0: -0.12, y1: 0.12, z0: 1.5, z1: 1.7, color: "#f0a030" }, // beak
 ];
 
+// Pig: low, round and dusty pink, with a curled tail and a flat snout
+const PIG_BOXES = [
+  { x0: -1.3, x1: -0.7, y0: -0.6, y1: 0.6, z0: 0.0, z1: 0.9, color: "#c98a94" }, // hind legs
+  { x0: 0.6, x1: 1.2, y0: -0.6, y1: 0.6, z0: 0.0, z1: 0.9, color: "#c98a94" }, // front legs
+  { x0: -1.6, x1: 1.3, y0: -1.0, y1: 1.0, z0: 0.9, z1: 2.3, color: "#eeb0bb" }, // body
+  { x0: -1.9, x1: -1.5, y0: -0.25, y1: 0.25, z0: 1.6, z1: 2.1, color: "#d99aa4" }, // curled tail
+  { x0: 1.3, x1: 2.1, y0: -0.55, y1: 0.55, z0: 1.1, z1: 2.1, color: "#eeb0bb" }, // head
+  { x0: 2.1, x1: 2.45, y0: -0.4, y1: 0.4, z0: 1.2, z1: 1.7, color: "#c98a94" }, // snout
+];
+
+// Goat: leaner than a sheep, short-haired, with a pair of small dark horns
+const GOAT_BOXES = [
+  { x0: -1.1, x1: -0.5, y0: -0.55, y1: 0.55, z0: 0.0, z1: 1.1, color: "#8f8672" }, // hind legs
+  { x0: 0.4, x1: 1.0, y0: -0.55, y1: 0.55, z0: 0.0, z1: 1.1, color: "#8f8672" }, // front legs
+  { x0: -1.5, x1: 1.1, y0: -0.7, y1: 0.7, z0: 1.1, z1: 2.3, color: "#c9bfa8" }, // body
+  { x0: 1.1, x1: 1.9, y0: -0.5, y1: 0.5, z0: 1.5, z1: 2.5, color: "#c9bfa8" }, // head
+  { x0: 1.3, x1: 1.6, y0: -0.15, y1: 0.15, z0: 2.5, z1: 2.9, color: "#4a4238" }, // horns
+];
+
+// Duck: small and low to the ground, cream-gray with an orange beak — same
+// legless silhouette convention as the chicken
+const DUCK_BOXES = [
+  { x0: -0.6, x1: 0.6, y0: -0.45, y1: 0.45, z0: 0.3, z1: 1.1, color: "#e3dcc4" }, // body
+  { x0: -0.85, x1: -0.55, y0: -0.2, y1: 0.2, z0: 0.6, z1: 1.0, color: "#e3dcc4" }, // tail
+  { x0: 0.5, x1: 0.85, y0: -0.22, y1: 0.22, z0: 0.9, z1: 1.5, color: "#e3dcc4" }, // head
+  { x0: 0.8, x1: 1.1, y0: -0.12, y1: 0.12, z0: 0.95, z1: 1.15, color: "#e8891f" }, // beak
+];
+
+// Farm dog: brown with an up-curled tail and alert ears
+const DOG_BOXES = [
+  { x0: -0.9, x1: -0.5, y0: -0.4, y1: 0.4, z0: 0.0, z1: 0.9, color: "#8a6a42" }, // hind legs
+  { x0: 0.4, x1: 0.8, y0: -0.4, y1: 0.4, z0: 0.0, z1: 0.9, color: "#8a6a42" }, // front legs
+  { x0: -1.2, x1: 0.9, y0: -0.55, y1: 0.55, z0: 0.8, z1: 1.7, color: "#8a6a42" }, // body
+  { x0: -1.5, x1: -1.15, y0: -0.15, y1: 0.15, z0: 1.1, z1: 1.6, color: "#6a4e30" }, // tail
+  { x0: 0.9, x1: 1.5, y0: -0.4, y1: 0.4, z0: 1.1, z1: 1.9, color: "#8a6a42" }, // head
+  { x0: 1.5, x1: 1.85, y0: -0.25, y1: 0.25, z0: 1.15, z1: 1.55, color: "#6a4e30" }, // snout
+  { x0: 1.05, x1: 1.35, y0: -0.4, y1: -0.15, z0: 1.75, z1: 2.05, color: "#6a4e30" }, // left ear
+  { x0: 1.05, x1: 1.35, y0: 0.15, y1: 0.4, z0: 1.75, z1: 2.05, color: "#6a4e30" }, // right ear
+];
+
+// Farm cat: small, orange tabby, tail curved up
+const CAT_BOXES = [
+  { x0: -0.5, x1: -0.2, y0: -0.3, y1: 0.3, z0: 0.0, z1: 0.55, color: "#b57a3f" }, // hind legs
+  { x0: 0.15, x1: 0.45, y0: -0.3, y1: 0.3, z0: 0.0, z1: 0.55, color: "#b57a3f" }, // front legs
+  { x0: -0.7, x1: 0.5, y0: -0.35, y1: 0.35, z0: 0.5, z1: 1.05, color: "#c98a4a" }, // body
+  { x0: -0.95, x1: -0.65, y0: -0.12, y1: 0.12, z0: 0.9, z1: 1.6, color: "#a5713a" }, // tail
+  { x0: 0.45, x1: 0.85, y0: -0.28, y1: 0.28, z0: 0.75, z1: 1.15, color: "#c98a4a" }, // head
+  { x0: 0.55, x1: 0.7, y0: -0.28, y1: -0.12, z0: 1.15, z1: 1.35, color: "#a5713a" }, // left ear
+  { x0: 0.55, x1: 0.7, y0: 0.12, y1: 0.28, z0: 1.15, z1: 1.35, color: "#a5713a" }, // right ear
+];
+
 // Per-species behavior: chickens are quick, jerky, peck constantly, keep to
 // a small range and may run on roads (the yard is full of them)
 // Every species gets clear of the tractor (spook radius + flee speed +
@@ -2099,6 +2151,25 @@ const ANIMAL_SPECS = {
   sheep: { speed: 2.2, range: 20, sep: 4.5, turn: 1.4, pauseChance: 0.005, pauseDur: [1, 3], shadow: 2.4, spook: 16, flee: 3.8, fleeTurn: 3.5 },
   horse: { speed: 3.2, range: 26, sep: 4.5, turn: 1.4, pauseChance: 0.004, pauseDur: [1, 3], shadow: 3.4, spook: 26, flee: 22, fleeTurn: 8 },
   chicken: { speed: 5, range: 15, sep: 1.6, turn: 4, pauseChance: 0.03, pauseDur: [0.4, 1.2], shadow: 1.0, roads: true, spook: 18, flee: 16, fleeTurn: 8 },
+  pig: { speed: 1.8, range: 14, sep: 3.2, turn: 1.3, pauseChance: 0.008, pauseDur: [1, 3], shadow: 2.4, spook: 14, flee: 10, fleeTurn: 5 },
+  goat: { speed: 2.8, range: 26, sep: 3.6, turn: 1.6, pauseChance: 0.005, pauseDur: [1, 2.5], shadow: 2.0, spook: 18, flee: 14, fleeTurn: 6 },
+  duck: { speed: 1.4, range: 10, sep: 1.4, turn: 3.5, pauseChance: 0.02, pauseDur: [0.3, 1], shadow: 0.8, spook: 10, flee: 9, fleeTurn: 7 },
+  dog: { speed: 3.0, range: 12, sep: 2.0, turn: 2.5, pauseChance: 0.02, pauseDur: [0.5, 2], shadow: 1.6, roads: true, spook: 14, flee: 12, fleeTurn: 8 },
+  cat: { speed: 2.2, range: 10, sep: 1.6, turn: 3, pauseChance: 0.03, pauseDur: [1, 4], shadow: 1.2, roads: true, spook: 10, flee: 14, fleeTurn: 10 },
+};
+
+// Every species draws as one fixed-order box unit except sheep, which pairs
+// a woolly blob (SHEEP_SHAPES) with SHEEP_BOXES and is special-cased where
+// items get built (see the sheep branch there)
+const ANIMAL_BOXES = {
+  cow: COW_BOXES,
+  horse: HORSE_BOXES,
+  chicken: CHICKEN_BOXES,
+  pig: PIG_BOXES,
+  goat: GOAT_BOXES,
+  duck: DUCK_BOXES,
+  dog: DOG_BOXES,
+  cat: CAT_BOXES,
 };
 
 const animals = [];
@@ -2152,8 +2223,32 @@ function spawnHerd(species, hx, hy, count) {
   });
 }
 
-// The farm always keeps one herd of each species grazing close by
-for (const species of ["cow", "sheep", "horse"]) {
+// Grass banks beside water, where the herds can amble down for a drink (and
+// where ducks make their home outright) — computed early so the farm and
+// wild duck herds below can place themselves on the shore
+const shoreSpots = [];
+for (let sy = 0; sy < MAP_TILES; sy++)
+  for (let sx = 0; sx < MAP_TILES; sx++) {
+    if (tiles[sy][sx] !== 0 || roadTiles.has(sy * MAP_TILES + sx)) continue;
+    if (isWater(sx + 1, sy) || isWater(sx - 1, sy) || isWater(sx, sy + 1) || isWater(sx, sy - 1))
+      shoreSpots.push({ x: (sx + 0.5) * TILE, y: (sy + 0.5) * TILE });
+  }
+
+function nearestShoreSpot(x, y) {
+  let spot = null;
+  let bd = Infinity;
+  for (const s of shoreSpots) {
+    const d = Math.hypot(s.x - x, s.y - y);
+    if (d < bd) {
+      bd = d;
+      spot = s;
+    }
+  }
+  return spot && { spot, dist: bd };
+}
+
+// The farm always keeps one herd of each grazing species close by
+for (const species of ["cow", "sheep", "horse", "pig", "goat"]) {
   let hx = FARM.x;
   let hy = FARM.y;
   for (let tries = 0; tries < 200; tries++) {
@@ -2171,29 +2266,40 @@ for (const species of ["cow", "sheep", "horse"]) {
   spawnHerd(species, hx, hy);
 }
 
-// ...and a flock of chickens pecking around the yard itself
+// ...and a flock of chickens pecking around the yard itself, plus one cat
+// and one dog that just linger there rather than wandering as a herd
 spawnHerd("chicken", FARM.x, FARM.y, 6 + ((rand() * 4) | 0));
+spawnHerd("cat", FARM.x, FARM.y, 1);
+spawnHerd("dog", FARM.x, FARM.y, 1);
+
+// A handful of ducks at the waterside nearest the farm, if there's one
+// close enough to be plausibly "theirs"
+{
+  const near = nearestShoreSpot(FARM.x, FARM.y);
+  if (near && near.dist < 260) spawnHerd("duck", near.spot.x, near.spot.y);
+}
 
 // Plus a few wild-placed herds further out
-for (let placed = 0, tries = 0; placed < 4 && tries < 400; tries++) {
+for (let placed = 0, tries = 0; placed < 6 && tries < 400; tries++) {
   const hx = 30 + rand() * (MAP_SIZE - 60);
   const hy = 30 + rand() * (MAP_SIZE - 60);
   if (tileTypeAt(hx, hy) !== 0) continue;
   if (forestTiles.has(tileKey(hx, hy)) || roadTiles.has(tileKey(hx, hy))) continue;
   if (Math.hypot(hx - FARM.x, hy - FARM.y) < FARM_RADIUS + 24) continue;
   const r = rand();
-  spawnHerd(r < 0.4 ? "cow" : r < 0.75 ? "sheep" : "horse", hx, hy);
+  const species =
+    r < 0.2 ? "cow" : r < 0.4 ? "sheep" : r < 0.6 ? "horse" : r < 0.8 ? "pig" : "goat";
+  spawnHerd(species, hx, hy);
   placed++;
 }
 
-// Grass banks beside water, where the herds can amble down for a drink
-const shoreSpots = [];
-for (let sy = 0; sy < MAP_TILES; sy++)
-  for (let sx = 0; sx < MAP_TILES; sx++) {
-    if (tiles[sy][sx] !== 0 || roadTiles.has(sy * MAP_TILES + sx)) continue;
-    if (isWater(sx + 1, sy) || isWater(sx - 1, sy) || isWater(sx, sy + 1) || isWater(sx, sy - 1))
-      shoreSpots.push({ x: (sx + 0.5) * TILE, y: (sy + 0.5) * TILE });
-  }
+// A couple of wild duck herds at shores further from the farm
+for (let placed = 0, tries = 0; placed < 2 && tries < 60 && shoreSpots.length; tries++) {
+  const s = shoreSpots[(rand() * shoreSpots.length) | 0];
+  if (Math.hypot(s.x - FARM.x, s.y - FARM.y) < FARM_RADIUS + 100) continue;
+  spawnHerd("duck", s.x, s.y);
+  placed++;
+}
 
 // ---------------------------------------------------------------------------
 // Signposts: little roadside boards naming the landmarks
@@ -2275,19 +2381,12 @@ else addSign("MAATILA", FARM.x + 24, FARM.y + 24);
 
 // LAMPI at the waterside nearest the farm — where the herds go to drink
 {
-  let spot = null;
-  let bd = Infinity;
-  for (const s of shoreSpots) {
-    const d = Math.hypot(s.x - FARM.x, s.y - FARM.y);
-    if (d < bd) {
-      bd = d;
-      spot = s;
-    }
-  }
-  if (spot && bd < 260) {
+  const near = nearestShoreSpot(FARM.x, FARM.y);
+  if (near && near.dist < 260) {
+    const { spot, dist } = near;
     // A step inland, so it stands clear of the bank where the herds crowd
-    const nx = spot.x + ((FARM.x - spot.x) / bd) * 8;
-    const ny = spot.y + ((FARM.y - spot.y) / bd) * 8;
+    const nx = spot.x + ((FARM.x - spot.x) / dist) * 8;
+    const ny = spot.y + ((FARM.y - spot.y) / dist) * 8;
     if (tileTypeAt(nx, ny) === 0) addSign("LAMPI", nx, ny);
     else addSign("LAMPI", spot.x, spot.y);
   }
@@ -2391,9 +2490,14 @@ function updateAnimals(dt) {
 // for a drink, lingers on the bank, and heads home again. Only the home
 // anchor moves — the members' ordinary wander-and-home behavior walks them
 // there at their own pace.
+// Species that stay put rather than roaming to water on their own: the
+// chicken flock and farm cat/dog keep to the yard, and ducks already live
+// at the shore, so there's nowhere for their routine to send them
+const STATIONARY_HERDS = new Set(["chicken", "cat", "dog", "duck"]);
+
 function updateHerds(dt) {
   for (const h of herds) {
-    if (h.species === "chicken") continue; // the flock keeps to the yard
+    if (STATIONARY_HERDS.has(h.species)) continue;
     h.next -= dt;
     if (h.next > 0) continue;
     if (h.out) {
@@ -3016,9 +3120,7 @@ function drawScene(camX, camY) {
       makeRoundItems(items, SHEEP_SHAPES, a.wx, a.wy, a.angle, 0, camX, camY);
       makeItems(items, SHEEP_BOXES, a.wx, a.wy, a.angle, 0, camX, camY);
     } else {
-      const boxes =
-        a.species === "cow" ? COW_BOXES : a.species === "horse" ? HORSE_BOXES : CHICKEN_BOXES;
-      makeItems(items, boxes, a.wx, a.wy, a.angle, 0, camX, camY);
+      makeItems(items, ANIMAL_BOXES[a.species], a.wx, a.wy, a.angle, 0, camX, camY);
     }
     for (let i = start; i < items.length; i++) {
       items[i].depth = a.sd + 2.5 + (i - start) * 1e-4;
@@ -4045,11 +4147,11 @@ function update(dt) {
     tractor.speed = 0;
   }
 
-  // Cows and sheep are solid: drive into one and the tractor stops until
-  // it has plodded aside (they walk clear of a nearby tractor on their
-  // own). Only blocked while closing in, so backing away always works.
+  // Cows, sheep and pigs are solid: drive into one and the tractor stops
+  // until it has plodded aside (they walk clear of a nearby tractor on
+  // their own). Only blocked while closing in, so backing away always works.
   for (const an of animals) {
-    if (an.species !== "cow" && an.species !== "sheep") continue;
+    if (an.species !== "cow" && an.species !== "sheep" && an.species !== "pig") continue;
     const dNew = Math.hypot(an.wx - tractor.x, an.wy - tractor.y);
     if (dNew < 6.5 && dNew < Math.hypot(an.wx - prevX, an.wy - prevY)) {
       tractor.x = prevX;
