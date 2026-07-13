@@ -2157,6 +2157,18 @@ for (let attempts = 0; trees.length < loneTarget && attempts < 5000; attempts++)
   });
 }
 
+// Trees are solid trunks the tractor collides with. Indexed by tile so a
+// stand-dense map (Deep Woods, Wilderness) doesn't force a scan of every
+// tree on the map each frame — only the tractor's own tile and its ring of
+// neighbors, which always covers TREE_COLLIDE_R since it's under a tile.
+const treesByTile = new Map();
+for (const t of trees) {
+  const key = tileKey(t.wx, t.wy);
+  let list = treesByTile.get(key);
+  if (!list) treesByTile.set(key, (list = []));
+  list.push(t);
+}
+
 // ---------------------------------------------------------------------------
 // Bushes: little round shrubs on the meadows
 // ---------------------------------------------------------------------------
@@ -4341,6 +4353,26 @@ function update(dt) {
     tractor.y = prevY;
     tractor.speed = 0;
   }
+
+  // Trees are solid trunks: driving into one stops the tractor dead, same
+  // as water. Only the tractor's own tile and its ring of neighbors are
+  // checked (TREE_COLLIDE_R never reaches a second tile out).
+  const TREE_COLLIDE_R = 4.5;
+  const ttx = (tractor.x / TILE) | 0;
+  const tty = (tractor.y / TILE) | 0;
+  outer: for (let ny = Math.max(0, tty - 1); ny <= Math.min(MAP_TILES - 1, tty + 1); ny++)
+    for (let nx = Math.max(0, ttx - 1); nx <= Math.min(MAP_TILES - 1, ttx + 1); nx++) {
+      const list = treesByTile.get(ny * MAP_TILES + nx);
+      if (!list) continue;
+      for (const t of list) {
+        if (Math.hypot(t.wx - tractor.x, t.wy - tractor.y) < TREE_COLLIDE_R) {
+          tractor.x = prevX;
+          tractor.y = prevY;
+          tractor.speed = 0;
+          break outer;
+        }
+      }
+    }
 
   // Cows, sheep and pigs are solid: drive into one and the tractor stops
   // until it has plodded aside (they walk clear of a nearby tractor on
