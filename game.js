@@ -20,20 +20,54 @@ view.height = VIEW_H;
 const ctx = view.getContext("2d");
 
 // ---------------------------------------------------------------------------
-// Seeded RNG: the whole world is generated through rand(), so the same seed
-// always produces the same map. The seed is a plain integer, set from the
-// F1 menu (or ?seed= in the URL); anything non-numeric gets replaced.
+// Map profiles: the world is always one of exactly 10 fixed archetypes,
+// each with its own RNG seed (so it's exactly as reproducible as a free
+// seed used to be) and its own target ranges for water/field/forest
+// coverage and hill scale. Within its own ranges a map still rolls organic
+// variation call to call — the bands just keep it from ever drifting into a
+// different archetype the way an arbitrary free-form seed could.
+// water and field are shares the generator always rolled (water: share of
+// the whole grid, field: share of dry land). forest is a share of what's
+// left over after water and field — the open, unfarmed grass — so forest
+// and "free land" are a direct complementary pair: forest: [0,1] means
+// none of that leftover land is wooded (all free/open grass) up to all of
+// it (no free land at all), and every value in between is reachable.
+// hilliness is a multiplier on the hill generator's stock count/height.
+// ---------------------------------------------------------------------------
+
+const MAP_PROFILES = [
+  { name: "Homestead Plains", seed: 1137, water: [0.03, 0.10], field: [0.45, 0.65], forest: [0.10, 0.25], hilliness: [0.4, 0.6] },
+  { name: "River Valley", seed: 1274, water: [0.35, 0.50], field: [0.20, 0.35], forest: [0.15, 0.30], hilliness: [0.8, 1.2] },
+  { name: "Highlands", seed: 1411, water: [0.10, 0.20], field: [0.15, 0.30], forest: [0.30, 0.50], hilliness: [1.7, 2.2] },
+  { name: "Deep Woods", seed: 1548, water: [0.20, 0.35], field: [0.05, 0.15], forest: [0.85, 1.00], hilliness: [0.8, 1.2] },
+  { name: "Patchwork Farm", seed: 1685, water: [0.03, 0.10], field: [0.55, 0.72], forest: [0.00, 0.08], hilliness: [0.4, 0.6] },
+  { name: "Lake District", seed: 1822, water: [0.45, 0.60], field: [0.10, 0.20], forest: [0.10, 0.25], hilliness: [0.4, 0.6] },
+  { name: "Rolling Hills", seed: 1959, water: [0.10, 0.20], field: [0.30, 0.45], forest: [0.30, 0.50], hilliness: [1.3, 1.7] },
+  { name: "Wetlands", seed: 2096, water: [0.35, 0.50], field: [0.05, 0.15], forest: [0.60, 0.80], hilliness: [0.4, 0.6] },
+  { name: "Frontier", seed: 2233, water: [0.03, 0.10], field: [0.05, 0.15], forest: [0.00, 0.08], hilliness: [0.8, 1.2] },
+  { name: "Wilderness", seed: 2370, water: [0.10, 0.20], field: [0.05, 0.15], forest: [0.85, 1.00], hilliness: [1.7, 2.2] },
+];
+
+// ---------------------------------------------------------------------------
+// Seeded RNG: the whole world is generated through rand(), so the same map
+// number always produces the same world. Picked from the F1 menu (or ?map=
+// in the URL, 1-10); anything out of range gets replaced with a random pick.
 // ---------------------------------------------------------------------------
 
 const urlParams = new URLSearchParams(location.search);
-const seedParam = parseInt(urlParams.get("seed"), 10);
-const SEED = Number.isFinite(seedParam) ? seedParam : (Math.random() * 1e9) | 0;
+const mapParam = parseInt(urlParams.get("map"), 10);
+const MAP_INDEX =
+  Number.isInteger(mapParam) && mapParam >= 1 && mapParam <= MAP_PROFILES.length
+    ? mapParam
+    : 1 + ((Math.random() * MAP_PROFILES.length) | 0);
+const PROFILE = MAP_PROFILES[MAP_INDEX - 1];
+const SEED = PROFILE.seed;
 
 // Game mode: "survival" rolls year after year — each turning through a
 // short snowed-in winter — with a property tax due every Oct 31, and
 // "sandbox" rolls the same wintered years with no taxes, no failure and
 // no end — just roaming. Chosen in the start menu; reloads carry the mode
-// in the URL next to the seed, and a fresh visit (no mode in the URL)
+// in the URL next to the map number, and a fresh visit (no mode in the URL)
 // opens the start menu before anything moves.
 const MODES = ["survival", "sandbox"];
 let mode = MODES.includes(urlParams.get("mode")) ? urlParams.get("mode") : "survival";
@@ -48,7 +82,14 @@ const rand = (function mulberry32(a) {
   };
 })(SEED >>> 0);
 
-console.log(`map seed: ${SEED} — reload with ?seed=${SEED} to reproduce`);
+console.log(
+  `map ${MAP_INDEX}/${MAP_PROFILES.length} — ${PROFILE.name} — reload with ?map=${MAP_INDEX} to reproduce`
+);
+
+// Roll a value within one of this map's profile bands (a [min,max] pair)
+function rollBand(range) {
+  return range[0] + rand() * (range[1] - range[0]);
+}
 
 // ---------------------------------------------------------------------------
 // Sound: synthesized with the Web Audio API. A continuous engine loop follows
@@ -379,7 +420,7 @@ function toggleSound() {
   audio.master.gain.setTargetAtTime(soundMuted ? 0 : 0.5, audio.ac.currentTime, 0.02);
 }
 
-// F1 opens the menu, the only place the seed and mode can be picked. It is
+// F1 opens the menu, the only place the map and mode can be picked. It is
 // also the start menu: a fresh visit begins with it open and the clock held.
 let menuOpen = !gameStarted;
 // P holds the whole world still — clock, crops, critters — until P again.
@@ -391,7 +432,7 @@ let paused = false;
 // away clock would.
 let dateJump = null; // null = closed, else the digits typed so far
 let dateJumpError = false; // the last Enter was an impossible or past date
-let menuSeed = "1"; // the start menu defaults to seed 1; R rolls a random one
+let menuMap = 1; // the start menu defaults to map 1; R rolls a random one
 let menuMode = mode;
 // The autosave the menu offers to continue, read once when the menu opens
 // (parsing the save JSON every drawn frame would be wasteful)
@@ -417,39 +458,39 @@ window.addEventListener("keydown", (e) => {
     if (!gameStarted) return; // the start menu stays until a mode is picked
     menuOpen = !menuOpen;
     dateJump = null; // one sign at a time
-    menuSeed = String(SEED); // mid-game the field opens on the current map
+    menuMap = MAP_INDEX; // mid-game the field opens on the current map
     menuMode = mode;
     if (menuOpen) menuSaveInfo = loadSave();
     return;
   }
   if (menuOpen) {
-    // The menu swallows all input: type a seed, arrows pick the mode, R
-    // rolls a random seed into the field, Enter starts, Esc closes (once a
-    // game is running)
+    // The menu swallows all input: left/right pick the map, up/down pick
+    // the mode, digits jump straight to a map, R rolls a random one, Enter
+    // starts, Esc closes (once a game is running)
     e.preventDefault();
     if (e.key === "Enter") {
-      const n = parseInt(menuSeed, 10);
-      if (Number.isFinite(n)) {
-        clearSave(); // Enter always begins a fresh run
-        if (!gameStarted && n === SEED) {
-          // Same map as the one already generated: start without a reload
-          startGame(menuMode);
-        } else {
-          // The reload's pagehide must not re-save the run just discarded
-          savingDisabled = true;
-          location.search = `?seed=${n}&mode=${menuMode}`;
-        }
+      clearSave(); // Enter always begins a fresh run
+      if (!gameStarted && menuMap === MAP_INDEX) {
+        // Same map as the one already generated: start without a reload
+        startGame(menuMode);
+      } else {
+        // The reload's pagehide must not re-save the run just discarded
+        savingDisabled = true;
+        location.search = `?map=${menuMap}&mode=${menuMode}`;
       }
     } else if (e.key === "c" || e.key === "C") {
-      // Continue the autosaved run: reloading with its seed and mode in
+      // Continue the autosaved run: reloading with its map and mode in
       // the URL restores the save at boot
       if (menuSaveInfo)
-        location.search = `?seed=${menuSaveInfo.seed}&mode=${menuSaveInfo.mode}`;
+        location.search = `?map=${menuSaveInfo.map}&mode=${menuSaveInfo.mode}`;
     } else if (e.key === "r" || e.key === "R") {
-      menuSeed = String((Math.random() * 1e9) | 0);
+      menuMap = 1 + ((Math.random() * MAP_PROFILES.length) | 0);
     } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
       const dir = e.key === "ArrowDown" ? 1 : -1;
       menuMode = MODES[(MODES.indexOf(menuMode) + dir + MODES.length) % MODES.length];
+    } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+      const dir = e.key === "ArrowRight" ? 1 : -1;
+      menuMap = ((menuMap - 1 + dir + MAP_PROFILES.length) % MAP_PROFILES.length) + 1;
     } else if ((e.key === "t" || e.key === "T") && !e.repeat) {
       awayClock = !awayClock;
       try {
@@ -463,12 +504,10 @@ window.addEventListener("keydown", (e) => {
       toggleSound();
     } else if (e.key === "Escape") {
       if (gameStarted) menuOpen = false;
-    } else if (e.key === "Backspace") {
-      menuSeed = menuSeed.slice(0, -1);
-    } else if (/^[0-9]$/.test(e.key) && menuSeed.length < 10) {
-      menuSeed += e.key;
-    } else if (e.key === "-" && menuSeed === "") {
-      menuSeed = "-";
+    } else if (/^[0-9]$/.test(e.key)) {
+      // 1-9 jump straight to that map, 0 is map 10
+      const n = e.key === "0" ? 10 : parseInt(e.key, 10);
+      if (n <= MAP_PROFILES.length) menuMap = n;
     }
     return;
   }
@@ -587,13 +626,17 @@ function nearFarm() {
 // near the map edges so the dirt cliffs stay level.
 // ---------------------------------------------------------------------------
 
+// This map's hilliness: a multiplier on both how many hills stack up and
+// how tall each one is, rolled from the profile's band.
+const HILLINESS = rollBand(PROFILE.hilliness);
+
 const HILLS = [];
-for (let i = 0; i < 40; i++) {
+for (let i = 0; i < Math.round(40 * HILLINESS); i++) {
   HILLS.push({
     cx: MAP_SIZE * (0.1 + rand() * 0.8),
     cy: MAP_SIZE * (0.1 + rand() * 0.8),
     r: 60 + rand() * 100,
-    h: 10 + rand() * 16,
+    h: (10 + rand() * 16) * HILLINESS,
   });
 }
 
@@ -1442,8 +1485,8 @@ function makeMap() {
     tiles[ty][tx] = 4;
     waterTiles++;
   };
-  // How watery this map is varies per seed, anywhere up to ~60%
-  const waterTarget = MAP_TILES * MAP_TILES * (0.05 + rand() * 0.55);
+  // How watery this map is comes from its profile
+  const waterTarget = MAP_TILES * MAP_TILES * rollBand(PROFILE.water);
 
   // Seas: each corner has a chance of flooding its low ground
   for (const [cx, cy] of [
@@ -1548,9 +1591,9 @@ function makeMap() {
   }
 
   // Field patches next: the road network is routed to them afterwards.
-  // How much of the dry land is farmed varies per seed; the farm clearing
-  // and road carving eat a little of it back.
-  const targetFieldTiles = (MAP_TILES * MAP_TILES - waterTiles) * (0.2 + rand() * 0.45);
+  // How much of the dry land is farmed comes from this map's profile; the
+  // farm clearing and road carving eat a little of it back.
+  const targetFieldTiles = (MAP_TILES * MAP_TILES - waterTiles) * rollBand(PROFILE.field);
   let fieldTiles = 0;
   for (let i = 0; i < 400 && fieldTiles < targetFieldTiles; i++) {
     const px = 1 + ((rand() * (MAP_TILES - 13)) | 0);
@@ -1760,10 +1803,14 @@ function makeMap() {
     }
   }
 
-  // Forest stands: how much of the land is forested varies per seed. Blobs
-  // grow on free grass; only the tiles are marked here (darker floor and
-  // minimap color) — the trees themselves are planted after the map exists.
-  const forestTarget = (MAP_TILES * MAP_TILES - waterTiles) * (0.08 + rand() * 0.35);
+  // Forest stands: how much of the leftover, unfarmed land is forested (as
+  // opposed to open free grass) comes from this map's profile — a share of
+  // what's left after water and field, so 0 means none of it wooded and 1
+  // means all of it. Blobs grow on free grass; only the tiles are marked
+  // here (darker floor and minimap color) — the trees themselves are
+  // planted after the map exists.
+  const openLand = MAP_TILES * MAP_TILES - waterTiles - fieldTiles;
+  const forestTarget = openLand * rollBand(PROFILE.forest);
   for (let tries = 0; forestTiles.size < forestTarget && tries < 600; tries++) {
     const cx = 2 + ((rand() * (MAP_TILES - 4)) | 0);
     const cy = 2 + ((rand() * (MAP_TILES - 4)) | 0);
@@ -3943,7 +3990,7 @@ function tryDateJump() {
 // ---------------------------------------------------------------------------
 
 const SAVE_KEY = "traktoripeli.save";
-const SAVE_VERSION = 1; // bump when map generation changes: stale saves drop
+const SAVE_VERSION = 2; // bump when map generation changes: stale saves drop
 let saveTimer = 0;
 let savingDisabled = false; // set when navigating away from a discarded run
 
@@ -3951,7 +3998,7 @@ function saveGame() {
   if (!gameStarted || gameOver || savingDisabled) return;
   const data = {
     v: SAVE_VERSION,
-    seed: SEED,
+    map: MAP_INDEX,
     mode,
     tiles,
     dirs,
@@ -4015,7 +4062,7 @@ function endSurvival() {
   gameOver = true;
   tractor.speed = 0;
   clearSave(); // a finished run must not resurrect on reload
-  const entry = { years: year, cash, seed: SEED, date: Date.now() };
+  const entry = { years: year, cash, map: MAP_INDEX, date: Date.now() };
   let scores;
   try {
     scores = JSON.parse(localStorage.getItem(SURVIVAL_SCORES_KEY)) || [];
@@ -4603,14 +4650,14 @@ function draw() {
   screenCtx.font = "11px monospace";
   const topY = 18; // shared text baseline in the bar
 
-  // Left: mode and seed
+  // Left: mode and map
   let topX = 12;
   const topSeg = (text, color) => {
     label(text, topX, topY, color || "#f5e9c8");
     topX += screenCtx.measureText(text).width;
   };
   topSeg(`${mode.toUpperCase()}  `, "#ffd94f");
-  topSeg(`SEED ${SEED}`);
+  topSeg(`MAP ${MAP_INDEX}`);
 
   // Season calendar instead of a clock: the year and date count from spring
   // toward Oct 31 along a wooden trough; in survival the tax bill waits at
@@ -4700,7 +4747,7 @@ function draw() {
     screenCtx.font = "13px monospace";
     bestScores.forEach((entry, i) => {
       label(
-        `${i + 1}.  ${entry.years} YEAR${entry.years === 1 ? " " : "S"}   €${entry.cash}   (seed ${entry.seed})`,
+        `${i + 1}.  ${entry.years} YEAR${entry.years === 1 ? " " : "S"}   €${entry.cash}   (map ${entry.map ?? entry.seed ?? "?"})`,
         cx,
         y + 106 + i * 20,
         i === finalRank ? "#ffd94f" : "#e0d0a8"
@@ -4825,7 +4872,7 @@ function draw() {
     screenCtx.font = "11px monospace";
   }
 
-  // Start / F1 menu: seed and mode on a little wooden sign. A fresh visit
+  // Start / F1 menu: map and mode on a little wooden sign. A fresh visit
   // opens it before the clock starts; F1 brings it back later.
   if (menuOpen) {
     const w = 420;
@@ -4844,12 +4891,16 @@ function draw() {
     label(gameStarted ? "MENU" : "TRAKTORIPELI", cx, y + 26, "#ffd94f");
 
     screenCtx.font = "11px monospace";
-    label("MAP SEED", cx, y + 46, "#d8c49a");
+    label("MAP", cx, y + 46, "#d8c49a");
     screenCtx.fillStyle = "#2e1d10";
     screenCtx.fillRect(x + 90, y + 52, w - 180, 24);
     screenCtx.font = "bold 14px monospace";
-    const caret = ((worldTime * 2) | 0) % 2 === 0 ? "_" : " ";
-    label(menuSeed + caret, cx, y + 69, "#f5e9c8");
+    label(
+      `« ${menuMap} — ${MAP_PROFILES[menuMap - 1].name.toUpperCase()} »`,
+      cx,
+      y + 69,
+      "#f5e9c8"
+    );
 
     screenCtx.font = "bold 12px monospace";
     const modeRows = [
@@ -4876,14 +4927,14 @@ function draw() {
     );
     if (menuSaveInfo) {
       label(
-        `[C] CONTINUE — ${menuSaveInfo.mode.toUpperCase()}, SEED ${menuSaveInfo.seed}, YEAR ${menuSaveInfo.year}`,
+        `[C] CONTINUE — ${menuSaveInfo.mode.toUpperCase()}, MAP ${menuSaveInfo.map}, YEAR ${menuSaveInfo.year}`,
         cx,
         y + 212,
         "#c9e6a8"
       );
     }
     label(
-      "[↑↓] MODE   [R] RANDOM SEED   [ENTER] START" +
+      "[←→] MAP   [↑↓] MODE   [R] RANDOM MAP   [ENTER] START" +
         (gameStarted ? "   [ESC] CLOSE" : ""),
       cx,
       y + h - 14,
@@ -4919,7 +4970,7 @@ if (menuOpen) menuSaveInfo = loadSave();
 
 {
   const s = gameStarted ? loadSave() : null;
-  if (s && s.seed === SEED && s.mode === mode) {
+  if (s && s.map === MAP_INDEX && s.mode === mode) {
     const dirty = [];
     for (let ty = 0; ty < MAP_TILES; ty++)
       for (let tx = 0; tx < MAP_TILES; tx++)
