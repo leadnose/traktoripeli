@@ -3919,6 +3919,7 @@ const tractor = {
   implLift: 1, // animated: 0 = working the ground, 1 = fully raised
   implBounce: 0, // seconds left of the refused-lower dip animation
   implFlash: 0, // seconds left of the red HUD flash (implement complaint)
+  workLane: null, // tile row/column the current pass is locked to (see field work)
 };
 
 const ACCEL = 55;
@@ -4123,19 +4124,41 @@ function update(dt) {
   tractor.implLift += (liftTarget - tractor.implLift) * Math.min(1, dt * 5);
   tractor.implFlash = Math.max(0, tractor.implFlash - dt);
 
-  // Field work under the implement while it's down and moving
+  // Field work under the implement while it's down and moving. A pass is
+  // locked to a single row of tiles: the lane is picked where work starts,
+  // and the lock gates the work — wobbling over a tile boundary works
+  // nothing (never the neighboring row, and never the locked row from a
+  // distance, which would let a zigzag cover two rows in one pass). The
+  // lock moves once the centerline is well inside a neighboring row, or
+  // when the travel axis flips. Raising the implement ends the pass.
   if (imp.liftable && tractor.implLift < 0.3 && Math.abs(tractor.speed) > 2) {
     const pose = implementPose();
     const pcos = Math.cos(pose.angle);
     const psin = Math.sin(pose.angle);
     const alongX = Math.abs(pcos) > Math.abs(psin);
-    for (const oy of [-3.5, 0, 3.5]) {
-      const wx = pose.x - 9.8 * pcos - oy * psin;
-      const wy = pose.y - 9.8 * psin + oy * pcos;
+    const wx = pose.x - 9.8 * pcos;
+    const wy = pose.y - 9.8 * psin;
+    const perp = alongX ? wy : wx;
+    const lane = (perp / TILE) | 0;
+    const lock = tractor.workLane;
+    if (!lock || lock.alongX !== alongX) {
+      tractor.workLane = { alongX, lane };
+    } else if (lane !== lock.lane) {
+      const past =
+        lane > lock.lane ? perp - (lock.lane + 1) * TILE : lock.lane * TILE - perp;
+      // The lock moves sooner the straighter the heading: a calm drift into
+      // the next row is deliberate, while a swinging heading is a zigzag
+      // trying to stitch two rows and gets the full stickiness.
+      const sway = Math.abs(alongX ? psin : pcos);
+      if (past > 1.5 + Math.min(20 * sway, 8)) tractor.workLane = { alongX, lane };
+    }
+    if (tractor.workLane.lane === lane) {
       if (tractor.implement === "plow") plowTileAt(wx, wy, alongX);
       else if (tractor.implement === "seeder") seedTileAt(wx, wy);
       else if (tractor.implement === "harvester") harvestTileAt(wx, wy);
     }
+  } else if (tractor.implLift >= 0.3) {
+    tractor.workLane = null;
   }
 
   // The trailer scoops up grain sacks it passes over
