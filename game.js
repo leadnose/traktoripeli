@@ -4056,6 +4056,11 @@ const TRAILER_CAP = 12; // sacks the trailer can carry
 const SEED_PRICE = 2; // € per seed, bought automatically at the farm
 const SACK_PRICE = 10; // € earned per sack of grain sold
 
+// Fuel: a tank sized so a full one comfortably covers a return trip from
+// anywhere on the map, refilled automatically at the farm like seeds
+const FUEL_CAP = 100;
+const FUEL_PRICE = 1; // € per unit, bought automatically at the farm
+
 const ROUND_TIME = 300; // seconds — one Apr 1 – Oct 31 season in either mode
 let timeLeft = ROUND_TIME;
 let gameOver = false;
@@ -4278,6 +4283,7 @@ function saveGame() {
     seeds,
     cargo,
     sold,
+    fuel,
     year,
     propertyTax,
     timeLeft: Math.round(timeLeft * 10) / 10,
@@ -4356,6 +4362,7 @@ let cash = modeStartCash(mode);
 let seeds = 0; // start empty: buy seeds at the farm
 let cargo = 0; // sacks on the trailer
 let sold = 0; // total sacks delivered to the farm
+let fuel = FUEL_CAP; // start full
 const sacks = []; // grain sacks lying on the fields
 
 const tractor = {
@@ -4379,6 +4386,14 @@ const FRICTION = 28;
 const GEAR_FAST = 42;
 const GEAR_SLOW = 16;
 const MAX_REVERSE = -GEAR_SLOW; // backing up is never faster than the work gear
+// Fuel burn only applies while actually on the gas; coasting or sitting
+// still is free. Road gear burns faster than a work-gear pass, giving the
+// work-mode auto-throttle choice real stakes.
+const FUEL_BURN_WORK = 0.5; // fuel/s, work gear on the gas
+const FUEL_BURN_ROAD = 1.1; // fuel/s, road gear on the gas
+// An empty tank never fully strands the tractor — it limps home at a
+// fraction of its usual top speed instead of stopping dead.
+const FUEL_EMPTY_LIMP = 8;
 // Fixed steering geometry: turn rate scales with speed, so the turning
 // radius stays ~TURN_RADIUS at working speeds — tight enough to U-turn
 // into the adjacent row (one tile = 16 units away).
@@ -4494,11 +4509,22 @@ function update(dt) {
     tractor.speed = 0;
   }
 
+  // Burn fuel only while actually powering the wheels
+  if (throttling) {
+    fuel = Math.max(0, fuel - (tractor.fastGear ? FUEL_BURN_ROAD : FUEL_BURN_WORK) * dt);
+  }
+
   // Top speed from the gear, further reduced by drag when working the ground
   let maxForward =
     (tractor.fastGear ? GEAR_FAST : GEAR_SLOW) *
     (imp.liftable ? 1 - 0.35 * (1 - tractor.implLift) : 1);
   let maxReverse = MAX_REVERSE;
+
+  // Running dry doesn't strand the tractor, just slows it to a limp
+  if (fuel <= 0) {
+    maxForward = Math.min(maxForward, FUEL_EMPTY_LIMP);
+    maxReverse = Math.max(maxReverse, -FUEL_EMPTY_LIMP);
+  }
 
   // Packed dirt roads are ~30% faster than driving across the meadows
   if (roadTiles.has(tileKey(tractor.x, tractor.y))) maxForward *= 1.3;
@@ -4658,8 +4684,19 @@ function update(dt) {
     }
   }
 
-  // Farmyard services: seed purchase and grain delivery
+  // Farmyard services: seed purchase, grain delivery and refueling
   if (nearFarm()) {
+    if (fuel < FUEL_CAP) {
+      // Top up the tank with as many whole units as the cash covers (fuel
+      // itself drains fractionally, cash never should); in survival the
+      // farm sells fuel on credit down to the debt limit, same as seeds
+      const budget = mode === "survival" ? cash + DEBT_LIMIT : cash;
+      const bought = Math.min(Math.ceil(FUEL_CAP - fuel), Math.floor(budget / FUEL_PRICE));
+      if (bought > 0) {
+        fuel = Math.min(FUEL_CAP, fuel + bought);
+        cash -= bought * FUEL_PRICE;
+      }
+    }
     if (tractor.implement === "seeder" && seeds < SEED_CAP) {
       // Top up the hopper with as many seeds as the cash covers; in
       // survival the farm buys on credit down to the debt limit
@@ -4938,6 +4975,8 @@ function draw() {
   const lucky = luckFlash > 0 && ((luckFlash * 8) | 0) % 2 === 0;
   seg(`CASH: €${cash}   `, lucky ? "#c9e6a8" : cash < SEED_PRICE ? RED : "#ffd94f");
   seg(`SOLD: ${sold}   `);
+  const fuelPct = Math.round((fuel / FUEL_CAP) * 100);
+  seg(`FUEL: ${fuelPct}%   `, fuelPct <= 20 ? RED : null);
   // The implement list at the farm, with the attached one lit up
   seg(`@FARM `, "#d8c49a");
   const IMPLEMENT_HINTS = { plow: "PLOW", seeder: "SEED", harvester: "HARVEST", trailer: "TRAILER" };
@@ -5289,6 +5328,7 @@ if (menuOpen) menuSaveInfo = loadSave();
     seeds = s.seeds;
     cargo = s.cargo;
     sold = s.sold;
+    fuel = s.fuel === undefined ? FUEL_CAP : s.fuel; // saves from before fuel existed: start full
     year = s.year;
     propertyTax = s.propertyTax;
     timeLeft = s.timeLeft;
