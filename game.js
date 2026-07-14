@@ -587,6 +587,17 @@ window.addEventListener("keydown", (e) => {
       tractor.implFlash = 0.9;
     }
   }
+  // C cycles which crop the seeder plants next, same farmyard-only rule as
+  // swapping implements: you load a different seed mix at the barn, not out
+  // in the field.
+  if ((e.key === "c" || e.key === "C") && !e.repeat && tractor.implement === "seeder") {
+    if (nearFarm()) {
+      selectedCrop = (selectedCrop + 1) % CROPS.length;
+      playClunk();
+    } else {
+      tractor.implFlash = 0.9;
+    }
+  }
 });
 
 window.addEventListener("keyup", (e) => {
@@ -723,6 +734,7 @@ window.addEventListener("keyup", (e) => {
   // flashes the same way the HUD text does when a lower is refused.
   const spaceBtn = document.getElementById("td-space");
   const autoBtn = document.getElementById("td-auto");
+  const cropBtn = document.getElementById("td-crop");
   function syncVisibility() {
     const menuish = !gameStarted || menuOpen || dateJump !== null;
     document.body.classList.toggle("menu-mode", menuish);
@@ -735,6 +747,11 @@ window.addEventListener("keyup", (e) => {
         tractor.fastGear ? "Lower implement, work mode" : "Raise implement, road mode"
       );
       autoBtn.classList.toggle("tbtn-off", !autoThrottleOn);
+      // Relabels itself with the currently selected crop's glyph, same idea
+      // as the gear button showing the current mode
+      const crop = CROPS[selectedCrop];
+      cropBtn.textContent = crop.glyph;
+      cropBtn.setAttribute("aria-label", `Cycle crop (current: ${crop.name})`);
     }
     requestAnimationFrame(syncVisibility);
   }
@@ -962,16 +979,63 @@ mapCanvas.height = MAP_SIZE + EDGE_DEPTH + MAP_OFFSET_Y;
 const mapCtx = mapCanvas.getContext("2d", { willReadFrequently: true });
 
 // Tile types: 0 = grass, 1 = field (unplowed / stubble), 2 = plowed, 3 = seeded.
-// dirs holds the furrow direction (0 = along world y, 1 = along world x) and
-// growth the seconds since seeding, which drives the crop stages.
+// dirs holds the furrow direction (0 = along world y, 1 = along world x),
+// growth the seconds since seeding (drives the crop stages), and kinds which
+// entry of CROPS was sown there (only meaningful once a tile is seeded).
 const tiles = [];
 const dirs = [];
 const growth = [];
-const CROP_STAGES = [8, 18, 32]; // seconds to reach sprout / young / mature
+const kinds = [];
 
-function cropStage(g) {
+// Three crop types with distinct economics: wheat is the steady all-rounder,
+// barley the cheap fast turnover crop, potato the slow, capital-hungry, most
+// valuable one. stages are seconds (or sandbox-scaled calendar seconds, see
+// SANDBOX_GROW_FACTOR) to reach sprout / young / mature.
+const CROPS = [
+  {
+    name: "Wheat",
+    glyph: "🌾",
+    seedPrice: 2,
+    sackPrice: 10,
+    stages: [8, 18, 32],
+    seedColor: "#6b5228",
+    sproutColor: "#8ee06a",
+    youngColor: "#5cbf47",
+    stalkColor: "#c2a044",
+    headColor: "#f5d96b",
+    ripeColor: "#e3c355",
+  },
+  {
+    name: "Barley",
+    glyph: "🌿",
+    seedPrice: 1,
+    sackPrice: 6,
+    stages: [5, 11, 20],
+    seedColor: "#5b4a24",
+    sproutColor: "#9be378",
+    youngColor: "#74cf57",
+    stalkColor: "#d9c27a",
+    headColor: "#fbeda0",
+    ripeColor: "#eddb8e",
+  },
+  {
+    name: "Potato",
+    glyph: "🥔",
+    seedPrice: 4,
+    sackPrice: 22,
+    stages: [14, 30, 54],
+    seedColor: "#5a4022",
+    sproutColor: "#7cc95f",
+    youngColor: "#3f8a34",
+    stalkColor: "#3f7a34",
+    headColor: "#b57bd6",
+    ripeColor: "#c9a24a",
+  },
+];
+
+function cropStage(g, cropIdx = 0) {
   let s = 0;
-  for (const t of CROP_STAGES) if (g >= t) s++;
+  for (const t of CROPS[cropIdx].stages) if (g >= t) s++;
   return s;
 }
 
@@ -1179,7 +1243,8 @@ function tileInk(tx, ty) {
 // tile's field outline so plants never poke into the surrounding grass
 function drawCropsOn(tx, ty, kc) {
   const alongX = dirs[ty][tx] === 1;
-  const stage = cropStage(growth[ty][tx]);
+  const crop = CROPS[kinds[ty][tx]];
+  const stage = cropStage(growth[ty][tx], kinds[ty][tx]);
   for (const s of [0.25, 0.5, 0.75]) {
     for (const t of [0.15, 0.38, 0.62, 0.85]) {
       const p = alongX
@@ -1188,18 +1253,18 @@ function drawCropsOn(tx, ty, kc) {
       const x = Math.round(p.x);
       const y = Math.round(p.y);
       if (stage === 0) {
-        mapCtx.fillStyle = shade("#6b5228", kc); // seed spot
+        mapCtx.fillStyle = shade(crop.seedColor, kc); // seed spot
         mapCtx.fillRect(x, y, 1, 1);
       } else if (stage === 1) {
-        mapCtx.fillStyle = shade("#8ee06a", kc); // sprout
+        mapCtx.fillStyle = shade(crop.sproutColor, kc); // sprout
         mapCtx.fillRect(x, y - 2, 1, 2);
       } else if (stage === 2) {
-        mapCtx.fillStyle = shade("#5cbf47", kc); // young plant
+        mapCtx.fillStyle = shade(crop.youngColor, kc); // young plant
         mapCtx.fillRect(x, y - 3, 1, 3);
       } else {
-        mapCtx.fillStyle = shade("#c2a044", kc); // mature stalk
+        mapCtx.fillStyle = shade(crop.stalkColor, kc); // mature stalk
         mapCtx.fillRect(x, y - 3, 1, 3);
-        mapCtx.fillStyle = shade("#f5d96b", kc); // grain head
+        mapCtx.fillStyle = shade(crop.headColor, kc); // grain head / flower
         mapCtx.fillRect(x, y - 5, 1, 2);
       }
     }
@@ -1605,29 +1670,33 @@ function plowTileAt(wx, wy, alongX) {
   drawTile(tx, ty);
 }
 
-// Seeder: plant a plowed tile, consuming one seed
+// Seeder: plant a plowed tile with the currently selected crop, consuming
+// one of its seeds
 function seedTileAt(wx, wy) {
-  if (seeds <= 0 || tileTypeAt(wx, wy) !== 2) return;
+  if (seedStocks[selectedCrop] <= 0 || tileTypeAt(wx, wy) !== 2) return;
   const tx = (wx / TILE) | 0;
   const ty = (wy / TILE) | 0;
   tiles[ty][tx] = 3;
   growth[ty][tx] = 0;
-  seeds--;
+  kinds[ty][tx] = selectedCrop;
+  seedStocks[selectedCrop]--;
   drawTile(tx, ty);
 }
 
-// Harvester: cut a mature crop, leaving a grain sack and stubble behind
+// Harvester: cut a mature crop, leaving a grain sack (tagged with its crop,
+// for the right price at the farm) and stubble behind
 function harvestTileAt(wx, wy) {
   if (tileTypeAt(wx, wy) !== 3) return;
   const tx = (wx / TILE) | 0;
   const ty = (wy / TILE) | 0;
-  if (cropStage(growth[ty][tx]) < 3) return;
+  const kind = kinds[ty][tx];
+  if (cropStage(growth[ty][tx], kind) < 3) return;
   tiles[ty][tx] = 1;
   growth[ty][tx] = 0;
   drawTile(tx, ty);
   const cx = (tx + 0.5) * TILE;
   const cy = (ty + 0.5) * TILE;
-  sacks.push({ wx: cx, wy: cy });
+  sacks.push({ wx: cx, wy: cy, crop: kind });
   spawnChaff(cx, cy);
 }
 
@@ -1637,8 +1706,9 @@ function updateCrops(dt) {
     for (let tx = 0; tx < MAP_TILES; tx++) {
       if (tiles[ty][tx] !== 3) continue;
       const g = growth[ty][tx];
+      const kind = kinds[ty][tx];
       growth[ty][tx] = g + dt;
-      if (cropStage(g + dt) !== cropStage(g)) drawTile(tx, ty);
+      if (cropStage(g + dt, kind) !== cropStage(g, kind)) drawTile(tx, ty);
     }
   }
 }
@@ -1654,7 +1724,7 @@ function countFieldTiles() {
       if (t === 1) c.stubble++;
       else if (t === 2) c.plowed++;
       else if (t === 3) {
-        if (cropStage(growth[ty][tx]) >= 3) c.ripe++;
+        if (cropStage(growth[ty][tx], kinds[ty][tx]) >= 3) c.ripe++;
         else c.sown++;
       }
     }
@@ -1700,6 +1770,7 @@ function makeMap() {
     tiles.push(new Array(MAP_TILES).fill(0));
     dirs.push(new Array(MAP_TILES).fill(0));
     growth.push(new Array(MAP_TILES).fill(0));
+    kinds.push(new Array(MAP_TILES).fill(0));
   }
 
   // Water first: seas flood low corners, lakes and ponds sit in hollows,
@@ -2189,16 +2260,20 @@ minimapCanvas.width = MAP_TILES * 2;
 minimapCanvas.height = MAP_TILES;
 const minimapCtx = minimapCanvas.getContext("2d");
 
-// grass, field, plowed, seeded, water; ripe crops turn gold. Plowed is a
-// clearly darker brown than stubble so the two read apart at a glance,
-// both here and in the field ledger's legend swatches.
+// grass, field, plowed, seeded, water; ripe crops turn their own crop's ripe
+// color (see CROPS). Plowed is a clearly darker brown than stubble so the
+// two read apart at a glance, both here and in the field ledger's legend
+// swatches.
 const MINIMAP_COLORS = ["#4fa83e", "#a87e50", "#6b4526", "#90c83c", "#3d7dc4"];
 
 function minimapTile(tx, ty) {
   const type = tiles[ty][tx];
   let color = MINIMAP_COLORS[type];
   if (type === 0 && forestTiles.has(ty * MAP_TILES + tx)) color = "#2f7a2c";
-  if (type === 3 && cropStage(growth[ty][tx]) >= 3) color = "#e3c355";
+  if (type === 3) {
+    const kind = kinds[ty][tx];
+    if (cropStage(growth[ty][tx], kind) >= 3) color = CROPS[kind].ripeColor;
+  }
   minimapCtx.fillStyle = shade(color, 1);
   minimapCtx.fillRect(tx - ty + MAP_TILES - 1, (tx + ty) >> 1, 2, 1);
 }
@@ -4051,10 +4126,10 @@ function drawSmoke(camX, camY) {
 // Tractor state, economy & physics
 // ---------------------------------------------------------------------------
 
-const SEED_CAP = 64; // seeder hopper size, refilled at the farm
-const TRAILER_CAP = 12; // sacks the trailer can carry
-const SEED_PRICE = 2; // € per seed, bought automatically at the farm
-const SACK_PRICE = 10; // € earned per sack of grain sold
+// Seeder hopper size, refilled at the farm — a separate compartment per crop
+// (see CROPS), so switching what you plant never dumps seed you paid for.
+const SEED_CAP = 64;
+const TRAILER_CAP = 12; // sacks the trailer can carry, any mix of crops
 
 const ROUND_TIME = 300; // seconds — one Apr 1 – Oct 31 season in either mode
 let timeLeft = ROUND_TIME;
@@ -4091,13 +4166,16 @@ const SANDBOX_AUTUMN_RATE = 0.25; // Sep 1 – Oct 31: harvest and hauling
 const SUMMER_START_LEFT = ROUND_TIME * (1 - 61 / SEASON_DAYS);
 const AUTUMN_START_LEFT = ROUND_TIME * (1 - 153 / SEASON_DAYS);
 
-// In sandbox crops grow on the calendar instead of the wall clock: seed to
-// mature spans this many calendar days, so a spring planting sprouts slowly,
-// shoots up over summer and stands golden by September whatever the
-// real-time pace of each phase.
+// In sandbox crops grow on the calendar instead of the wall clock: wheat
+// (the reference crop) spans this many calendar days from seed to mature, so
+// a spring planting sprouts slowly, shoots up over summer and stands golden
+// by September whatever the real-time pace of each phase. Growth itself is
+// accumulated the same way for every crop (see updateCrops); only each
+// crop's own stage thresholds differ, so barley still matures faster than
+// wheat and potato slower, in both modes, without any per-crop sandbox math.
 const SANDBOX_GROW_DAYS = 90;
 const SANDBOX_GROW_FACTOR =
-  CROP_STAGES[2] / ((SANDBOX_GROW_DAYS * ROUND_TIME) / SEASON_DAYS);
+  CROPS[0].stages[2] / ((SANDBOX_GROW_DAYS * ROUND_TIME) / SEASON_DAYS);
 
 // Winter: the year doesn't jump from Oct 31 straight back to spring — a
 // snowed-in Nov 1 – Mar 31 passes first. It runs on the wall clock in both
@@ -4273,10 +4351,13 @@ function saveGame() {
     tiles,
     dirs,
     growth: growth.map((row) => row.map((g) => Math.round(g * 10) / 10)),
+    kinds,
     sacks,
     cash,
-    seeds,
+    seedStocks,
+    selectedCrop,
     cargo,
+    cargoByCrop,
     sold,
     year,
     propertyTax,
@@ -4353,8 +4434,10 @@ function endSurvival() {
 // Starting capital by mode: survival a buffer against the first tax bill,
 // sandbox plenty
 let cash = modeStartCash(mode);
-let seeds = 0; // start empty: buy seeds at the farm
+let seedStocks = CROPS.map(() => 0); // start empty: buy seeds at the farm
+let selectedCrop = 0; // index into CROPS; cycled with C while the seeder is equipped
 let cargo = 0; // sacks on the trailer
+let cargoByCrop = CROPS.map(() => 0); // same total, split by crop for the right sale price
 let sold = 0; // total sacks delivered to the farm
 const sacks = []; // grain sacks lying on the fields
 
@@ -4651,6 +4734,7 @@ function update(dt) {
     const by = pose.y - 16 * Math.sin(pose.angle);
     for (let i = sacks.length - 1; i >= 0 && cargo < TRAILER_CAP; i--) {
       if (Math.hypot(sacks[i].wx - bx, sacks[i].wy - by) < 9) {
+        cargoByCrop[sacks[i].crop]++;
         sacks.splice(i, 1);
         cargo++;
         playPickup();
@@ -4660,18 +4744,25 @@ function update(dt) {
 
   // Farmyard services: seed purchase and grain delivery
   if (nearFarm()) {
-    if (tractor.implement === "seeder" && seeds < SEED_CAP) {
+    if (tractor.implement === "seeder" && seedStocks[selectedCrop] < SEED_CAP) {
       // Top up the hopper with as many seeds as the cash covers; in
       // survival the farm buys on credit down to the debt limit
+      const price = CROPS[selectedCrop].seedPrice;
       const budget = mode === "survival" ? cash + DEBT_LIMIT : cash;
-      const bought = Math.min(SEED_CAP - seeds, Math.floor(budget / SEED_PRICE));
+      const bought = Math.min(
+        SEED_CAP - seedStocks[selectedCrop],
+        Math.floor(budget / price)
+      );
       if (bought > 0) {
-        seeds += bought;
-        cash -= bought * SEED_PRICE;
+        seedStocks[selectedCrop] += bought;
+        cash -= bought * price;
       }
     }
     if (tractor.implement === "trailer" && cargo > 0) {
-      cash += cargo * SACK_PRICE;
+      for (let i = 0; i < CROPS.length; i++) {
+        cash += cargoByCrop[i] * CROPS[i].sackPrice;
+        cargoByCrop[i] = 0;
+      }
       sold += cargo;
       cargo = 0;
       const pose = implementPose();
@@ -4909,10 +5000,12 @@ function draw() {
     (autoThrottleOn ? "" : ", AUTO OFF");
   seg(`MODE: ${tractor.fastGear ? "ROAD" : "WORK"}${state} [Space][A]   `, flashImpl ? RED : null);
   if (tractor.implement === "seeder") {
+    const crop = CROPS[selectedCrop];
+    const stock = seedStocks[selectedCrop];
     // Solid red when the hopper is empty; flashing when it's empty AND the
     // seeder is down working a field — driving along planting nothing
     const dryRun =
-      seeds === 0 &&
+      stock === 0 &&
       tractor.implLift < 0.3 &&
       Math.abs(tractor.speed) > 2 &&
       implementOverField();
@@ -4920,10 +5013,10 @@ function draw() {
       ? ((worldTime * 6) | 0) % 2 === 0
         ? RED
         : null
-      : seeds === 0
+      : stock === 0
         ? RED
         : null;
-    seg(`SEEDS: ${seeds}   `, seedColor);
+    seg(`SEEDS: ${stock} ${crop.name.toUpperCase()} [C]   `, seedColor);
   }
   if (tractor.implement === "trailer") {
     // Flash when the trailer is full while rolling over a field — passing
@@ -4936,7 +5029,10 @@ function draw() {
     seg(`CARGO: ${cargo}/${TRAILER_CAP}   `, cargoColor);
   }
   const lucky = luckFlash > 0 && ((luckFlash * 8) | 0) % 2 === 0;
-  seg(`CASH: €${cash}   `, lucky ? "#c9e6a8" : cash < SEED_PRICE ? RED : "#ffd94f");
+  seg(
+    `CASH: €${cash}   `,
+    lucky ? "#c9e6a8" : cash < CROPS[selectedCrop].seedPrice ? RED : "#ffd94f"
+  );
   seg(`SOLD: ${sold}   `);
   // The implement list at the farm, with the attached one lit up
   seg(`@FARM `, "#d8c49a");
@@ -5283,11 +5379,18 @@ if (menuOpen) menuSaveInfo = loadSave();
       tiles[ty] = s.tiles[ty];
       dirs[ty] = s.dirs[ty];
       growth[ty] = s.growth[ty];
+      // Saves from before multiple crop types: default every tile to wheat
+      kinds[ty] = s.kinds ? s.kinds[ty] : new Array(MAP_TILES).fill(0);
     }
-    sacks.push(...s.sacks);
+    // Same fallback for sacks already lying on the ground
+    sacks.push(...s.sacks.map((sk) => ({ wx: sk.wx, wy: sk.wy, crop: sk.crop || 0 })));
     cash = s.cash;
-    seeds = s.seeds;
+    // Legacy saves had one flat `seeds` count and no crop split at all;
+    // credit it all to wheat rather than lose it silently
+    seedStocks = s.seedStocks || CROPS.map((_, i) => (i === 0 ? s.seeds || 0 : 0));
+    selectedCrop = s.selectedCrop || 0;
     cargo = s.cargo;
+    cargoByCrop = s.cargoByCrop || CROPS.map((_, i) => (i === 0 ? s.cargo || 0 : 0));
     sold = s.sold;
     year = s.year;
     propertyTax = s.propertyTax;
