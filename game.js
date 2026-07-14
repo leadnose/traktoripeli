@@ -776,6 +776,32 @@ function nearFarm() {
   return Math.hypot(tractor.x - FARM.x, tractor.y - FARM.y) < FARM_RADIUS;
 }
 
+// The fuel tank sits out near the rim of the trampled yard (YARD_RADIUS
+// is ~51 units; this is ~90% of that, clear of the barn/silo cluster
+// near the center) rather than anywhere within FARM_RADIUS, so refueling
+// (which costs cash) only happens when the player deliberately drives
+// out to it, instead of automatically every time they're at the farm
+// for seed or grain.
+const FUEL_TANK_LOCAL = { x: -8, y: 45 };
+const FUEL_TANK_RADIUS = 16;
+// Shape of the tank itself: a long horizontal cylinder up on legs,
+// see the FARM_BOXES/FARM_SHAPES entries built from these.
+const FUEL_TANK_LEN = 5.0; // half-length of the cylinder
+const FUEL_TANK_R = 2.2; // cylinder radius
+const FUEL_TANK_STAND_H = 2.4; // leg height under the tank
+function fuelTankPos() {
+  const cos = Math.cos(FARM.angle);
+  const sin = Math.sin(FARM.angle);
+  return {
+    x: FARM.x + FUEL_TANK_LOCAL.x * cos - FUEL_TANK_LOCAL.y * sin,
+    y: FARM.y + FUEL_TANK_LOCAL.x * sin + FUEL_TANK_LOCAL.y * cos,
+  };
+}
+function nearFuelTank() {
+  const p = fuelTankPos();
+  return Math.hypot(tractor.x - p.x, tractor.y - p.y) < FUEL_TANK_RADIUS;
+}
+
 // The trodden yard isn't a perfect ellipse: each map bends its rim in and
 // out by a deterministic amount so every farmyard reads as its own trampled
 // patch of ground rather than a stamped-out shape. Keyed by its own hash
@@ -3212,10 +3238,50 @@ const FARM_BOXES = [
   { x0: -17.5, x1: 3.5, y0: -13.5, y1: 3.5, z0: 9.0, z1: 12.0, color: "#7a4a32" }, // barn roof
   { x0: -7.5, x1: -3.5, y0: 1.9, y1: 2.3, z0: 0.0, z1: 6.0, color: "#f7e8d8" }, // barn door
   { x0: 8.0, x1: 17.0, y0: -9.0, y1: 0.0, z0: 0.0, z1: 20.0, color: "#c6ced6" }, // silo
+  // Fuel tank: a horizontal cylinder lying along the local y axis, built
+  // the same way the tractor's own wheels are (an inscribed box for the
+  // silhouette plus a full-radius disc at each end, see FARM_SHAPES) —
+  // a true round profile rather than a boxy body with sphere caps.
+  {
+    x0: FUEL_TANK_LOCAL.x - FUEL_TANK_R * 0.6, x1: FUEL_TANK_LOCAL.x + FUEL_TANK_R * 0.6,
+    y0: FUEL_TANK_LOCAL.y - FUEL_TANK_LEN + 0.3, y1: FUEL_TANK_LOCAL.y - FUEL_TANK_LEN + 0.8,
+    z0: 0.0, z1: FUEL_TANK_STAND_H, color: "#5a5a5a",
+  }, // near leg
+  {
+    x0: FUEL_TANK_LOCAL.x - FUEL_TANK_R * 0.6, x1: FUEL_TANK_LOCAL.x + FUEL_TANK_R * 0.6,
+    y0: FUEL_TANK_LOCAL.y + FUEL_TANK_LEN - 0.8, y1: FUEL_TANK_LOCAL.y + FUEL_TANK_LEN - 0.3,
+    z0: 0.0, z1: FUEL_TANK_STAND_H, color: "#5a5a5a",
+  }, // far leg
+  {
+    x0: FUEL_TANK_LOCAL.x - FUEL_TANK_R * 0.72, x1: FUEL_TANK_LOCAL.x + FUEL_TANK_R * 0.72,
+    y0: FUEL_TANK_LOCAL.y - FUEL_TANK_LEN, y1: FUEL_TANK_LOCAL.y + FUEL_TANK_LEN,
+    z0: FUEL_TANK_STAND_H, z1: FUEL_TANK_STAND_H + FUEL_TANK_R * 1.44,
+    color: "#c0392b",
+  }, // tank body
+  {
+    x0: FUEL_TANK_LOCAL.x - 0.3, x1: FUEL_TANK_LOCAL.x + 0.3,
+    y0: FUEL_TANK_LOCAL.y - 0.3, y1: FUEL_TANK_LOCAL.y + 0.3,
+    z0: FUEL_TANK_STAND_H - 0.8, z1: FUEL_TANK_STAND_H,
+    color: "#3a3a3a",
+  }, // valve hanging below the tank's midpoint
 ];
-
-// Round red dome on the silo
-const FARM_SHAPES = [{ blob: true, x: 12.5, y: -4.5, z: 20.0, r: 4.0, color: "#d94a2e" }];
+// Round red dome on the silo, plus the two end-cap discs that round off
+// the fuel tank's cylinder (same box+disc trick as makeWheels: the disc
+// facing the camera reads as the tank's round end, the box gives its
+// silhouette everywhere else)
+const FARM_SHAPES = [
+  { blob: true, x: 12.5, y: -4.5, z: 20.0, r: 4.0, color: "#d94a2e" },
+];
+for (const [ly, n] of [
+  [FUEL_TANK_LOCAL.y - FUEL_TANK_LEN, -1],
+  [FUEL_TANK_LOCAL.y + FUEL_TANK_LEN, 1],
+]) {
+  const z = FUEL_TANK_STAND_H + FUEL_TANK_R * 0.72;
+  FARM_SHAPES.push(
+    { disc: true, x: FUEL_TANK_LOCAL.x, y: ly, z, r: FUEL_TANK_R, n, color: "#c0392b" },
+    { disc: true, x: FUEL_TANK_LOCAL.x, y: ly, z, r: FUEL_TANK_R * 0.6, n, color: "#8e2b20", bias: 0.06 }
+  );
+}
 
 // Grain sacks dropped by the harvester: plump blobs with a tied-off top
 const SACK_SHAPES = [
@@ -4056,6 +4122,11 @@ const TRAILER_CAP = 12; // sacks the trailer can carry
 const SEED_PRICE = 2; // € per seed, bought automatically at the farm
 const SACK_PRICE = 10; // € earned per sack of grain sold
 
+// Fuel: a tank sized so a full one comfortably covers a return trip from
+// anywhere on the map, refilled automatically at the farm like seeds
+const FUEL_CAP = 100;
+const FUEL_PRICE = 1; // € per unit, bought automatically at the farm
+
 const ROUND_TIME = 300; // seconds — one Apr 1 – Oct 31 season in either mode
 let timeLeft = ROUND_TIME;
 let gameOver = false;
@@ -4278,6 +4349,7 @@ function saveGame() {
     seeds,
     cargo,
     sold,
+    fuel,
     year,
     propertyTax,
     timeLeft: Math.round(timeLeft * 10) / 10,
@@ -4356,6 +4428,7 @@ let cash = modeStartCash(mode);
 let seeds = 0; // start empty: buy seeds at the farm
 let cargo = 0; // sacks on the trailer
 let sold = 0; // total sacks delivered to the farm
+let fuel = FUEL_CAP; // start full
 const sacks = []; // grain sacks lying on the fields
 
 const tractor = {
@@ -4379,6 +4452,14 @@ const FRICTION = 28;
 const GEAR_FAST = 42;
 const GEAR_SLOW = 16;
 const MAX_REVERSE = -GEAR_SLOW; // backing up is never faster than the work gear
+// Fuel burn only applies while actually on the gas; coasting or sitting
+// still is free. Road gear burns faster than a work-gear pass, giving the
+// work-mode auto-throttle choice real stakes.
+const FUEL_BURN_WORK = 0.5; // fuel/s, work gear on the gas
+const FUEL_BURN_ROAD = 1.1; // fuel/s, road gear on the gas
+// An empty tank never fully strands the tractor — it limps home at a
+// fraction of its usual top speed instead of stopping dead.
+const FUEL_EMPTY_LIMP = 4;
 // Fixed steering geometry: turn rate scales with speed, so the turning
 // radius stays ~TURN_RADIUS at working speeds — tight enough to U-turn
 // into the adjacent row (one tile = 16 units away).
@@ -4494,11 +4575,22 @@ function update(dt) {
     tractor.speed = 0;
   }
 
+  // Burn fuel only while actually powering the wheels
+  if (throttling) {
+    fuel = Math.max(0, fuel - (tractor.fastGear ? FUEL_BURN_ROAD : FUEL_BURN_WORK) * dt);
+  }
+
   // Top speed from the gear, further reduced by drag when working the ground
   let maxForward =
     (tractor.fastGear ? GEAR_FAST : GEAR_SLOW) *
     (imp.liftable ? 1 - 0.35 * (1 - tractor.implLift) : 1);
   let maxReverse = MAX_REVERSE;
+
+  // Running dry doesn't strand the tractor, just slows it to a limp
+  if (fuel <= 0) {
+    maxForward = Math.min(maxForward, FUEL_EMPTY_LIMP);
+    maxReverse = Math.max(maxReverse, -FUEL_EMPTY_LIMP);
+  }
 
   // Packed dirt roads are ~30% faster than driving across the meadows
   if (roadTiles.has(tileKey(tractor.x, tractor.y))) maxForward *= 1.3;
@@ -4655,6 +4747,22 @@ function update(dt) {
         cargo++;
         playPickup();
       }
+    }
+  }
+
+  // Refueling happens only at the fuel tank, off in its own corner of the
+  // yard, rather than anywhere in the broader farm radius — refueling costs
+  // cash, so it shouldn't happen incidentally every time the player is at
+  // the farm to sell grain or buy seed.
+  if (nearFuelTank() && fuel < FUEL_CAP) {
+    // Top up the tank with as many whole units as the cash covers (fuel
+    // itself drains fractionally, cash never should); in survival the
+    // farm sells fuel on credit down to the debt limit, same as seeds
+    const budget = mode === "survival" ? cash + DEBT_LIMIT : cash;
+    const bought = Math.min(Math.ceil(FUEL_CAP - fuel), Math.floor(budget / FUEL_PRICE));
+    if (bought > 0) {
+      fuel = Math.min(FUEL_CAP, fuel + bought);
+      cash -= bought * FUEL_PRICE;
     }
   }
 
@@ -4938,6 +5046,11 @@ function draw() {
   const lucky = luckFlash > 0 && ((luckFlash * 8) | 0) % 2 === 0;
   seg(`CASH: €${cash}   `, lucky ? "#c9e6a8" : cash < SEED_PRICE ? RED : "#ffd94f");
   seg(`SOLD: ${sold}   `);
+  const fuelPct = Math.round((fuel / FUEL_CAP) * 100);
+  seg(
+    `FUEL: ${fuelPct}%${nearFuelTank() ? " @TANK" : ""}   `,
+    fuelPct <= 20 ? RED : null
+  );
   // The implement list at the farm, with the attached one lit up
   seg(`@FARM `, "#d8c49a");
   const IMPLEMENT_HINTS = { plow: "PLOW", seeder: "SEED", harvester: "HARVEST", trailer: "TRAILER" };
@@ -5289,6 +5402,7 @@ if (menuOpen) menuSaveInfo = loadSave();
     seeds = s.seeds;
     cargo = s.cargo;
     sold = s.sold;
+    fuel = s.fuel === undefined ? FUEL_CAP : s.fuel; // saves from before fuel existed: start full
     year = s.year;
     propertyTax = s.propertyTax;
     timeLeft = s.timeLeft;
