@@ -4617,8 +4617,12 @@ function update(dt) {
     tractor.workLane = null;
   }
 
-  // The trailer scoops up grain sacks it passes over
-  if (tractor.implement === "trailer") {
+  // The trailer scoops up grain sacks it passes over — only in work mode,
+  // same as the other implements needing their gear down to do their job.
+  // The trailer has no lift of its own to gate this on (it's not
+  // liftable), so without this it would scoop just as well at road-gear
+  // speed, sacks flying into the bed at 40+.
+  if (tractor.implement === "trailer" && !tractor.fastGear) {
     const pose = implementPose();
     const bx = pose.x - 16 * Math.cos(pose.angle);
     const by = pose.y - 16 * Math.sin(pose.angle);
