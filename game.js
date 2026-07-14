@@ -3868,6 +3868,95 @@ function drawSnow(camX, camY) {
 }
 
 // ---------------------------------------------------------------------------
+// Weather: on top of the season cycle, the growing season occasionally turns
+// to a rainy spell or a dry one. Rain washes the view a little grey and
+// streaks past in screen space like the snow does, and softens the ground
+// underfoot (a mild tractor speed cap, slower crop growth); drought is the
+// same slow-growth spell with no rain and a parched tint instead — never a
+// hard stop, just an occasional stretch that asks for a little patience.
+// Spells are timed and typed by the shared seeded rand(), so a map's weather
+// replays the same way on reload but differs map to map, same as its terrain.
+// ---------------------------------------------------------------------------
+
+const WEATHER_GAP_MIN = 60; // real seconds of clear weather between spells, minimum
+const WEATHER_GAP_MAX = 110; // ...maximum — the spread keeps it from feeling metronomic
+const WEATHER_DURATION = 24; // real seconds a rain or drought spell lasts
+const WEATHER_FADE = 4; // seconds to ease a spell in and out at each end
+const WEATHER_RAIN_CHANCE = 0.65; // rain is the common case; drought is the rarer extreme
+
+let weatherType = "clear"; // "clear" | "rain" | "drought"
+let weatherTimer = WEATHER_GAP_MIN + rand() * (WEATHER_GAP_MAX - WEATHER_GAP_MIN);
+let weatherT = 0; // eased 0..1 intensity of the current spell, ramps at both ends
+
+function updateWeather(dt) {
+  if (winterLeft > 0) {
+    // Nothing grows under snow anyway; the slate is clear again by spring
+    weatherType = "clear";
+    weatherT = 0;
+    return;
+  }
+  weatherTimer -= dt;
+  if (weatherTimer <= 0) {
+    if (weatherType === "clear") {
+      weatherType = rand() < WEATHER_RAIN_CHANCE ? "rain" : "drought";
+      weatherTimer = WEATHER_DURATION;
+    } else {
+      weatherType = "clear";
+      weatherTimer = WEATHER_GAP_MIN + rand() * (WEATHER_GAP_MAX - WEATHER_GAP_MIN);
+    }
+  }
+  weatherT =
+    weatherType === "clear"
+      ? 0
+      : Math.min(1, Math.min(WEATHER_DURATION - weatherTimer, weatherTimer) / WEATHER_FADE);
+}
+
+// Mud and mist take a mild bite out of top speed while it rains — a cap,
+// never a stall, and it composes with the gear/road/implement caps already
+// in play rather than fighting them
+function weatherSpeedMult() {
+  return weatherType === "rain" ? 1 - 0.2 * weatherT : 1;
+}
+
+// Overcast rain or a dry spell both slow growth the same amount — drought is
+// the same mechanic as rain, just without the rain
+function weatherGrowthMult() {
+  return weatherType === "clear" ? 1 : 1 - 0.3 * weatherT;
+}
+
+const RAINDROPS = [];
+for (let i = 0; i < 60; i++) {
+  RAINDROPS.push({
+    x: ((i * 0.618034) % 1) * (VIEW_W + 40),
+    y: ((i * 0.381966) % 1) * VIEW_H,
+    speed: 90 + ((i * 11) % 40),
+    len: i % 3 === 0 ? 6 : 4,
+  });
+}
+
+function drawWeather(camX, camY) {
+  if (weatherT <= 0) return;
+  if (weatherType === "drought") {
+    ctx.fillStyle = `rgba(196,164,96,${(0.14 * weatherT).toFixed(2)})`;
+    ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+    return;
+  }
+  ctx.fillStyle = `rgba(90,105,120,${(0.16 * weatherT).toFixed(2)})`;
+  ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  ctx.strokeStyle = `rgba(210,224,235,${(0.55 * weatherT).toFixed(2)})`;
+  ctx.lineWidth = 1;
+  const wrapX = VIEW_W + 40;
+  for (const d of RAINDROPS) {
+    const sx = ((((d.x - camX * 0.5) % wrapX) + wrapX) % wrapX) - 20;
+    const sy = (((d.y + worldTime * d.speed - camY * 0.5) % VIEW_H) + VIEW_H) % VIEW_H;
+    ctx.beginPath();
+    ctx.moveTo(sx, sy);
+    ctx.lineTo(sx - 2, sy + d.len);
+    ctx.stroke();
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Butterflies fluttering over the meadows
 // ---------------------------------------------------------------------------
 
@@ -4445,6 +4534,7 @@ function update(dt) {
   updateBirds(dt);
   updateLadybug(dt);
   updateSeason();
+  updateWeather(dt);
   if (!gameStarted || gameOver) return;
 
   // Winter runs on the wall clock; when the snow melts a new year begins
@@ -4497,7 +4587,8 @@ function update(dt) {
   // Top speed from the gear, further reduced by drag when working the ground
   let maxForward =
     (tractor.fastGear ? GEAR_FAST : GEAR_SLOW) *
-    (imp.liftable ? 1 - 0.35 * (1 - tractor.implLift) : 1);
+    (imp.liftable ? 1 - 0.35 * (1 - tractor.implLift) : 1) *
+    weatherSpeedMult();
   let maxReverse = MAX_REVERSE;
 
   // Packed dirt roads are ~30% faster than driving across the meadows
@@ -4684,7 +4775,8 @@ function update(dt) {
   // Nothing grows under the snow: winter freezes the crops where they stand
   if (winterLeft === 0)
     updateCrops(
-      mode === "sandbox" ? dt * sandboxClockRate() * SANDBOX_GROW_FACTOR : dt
+      (mode === "sandbox" ? dt * sandboxClockRate() * SANDBOX_GROW_FACTOR : dt) *
+        weatherGrowthMult()
     );
 
   // Periodic autosave so even a crash or hard reload loses only moments
@@ -4876,6 +4968,7 @@ function draw() {
   drawLadybug(camX, camY);
   drawBirds(camX, camY);
   drawSnow(camX, camY);
+  drawWeather(camX, camY);
 
   screenCtx.drawImage(view, 0, 0, screenCanvas.width, screenCanvas.height);
 
@@ -4966,6 +5059,8 @@ function draw() {
   topSeg(`${mode.toUpperCase()}  `, "#ffd94f");
   topSeg(`MAP ${MAP_INDEX}   `);
   topSeg(`[P] PAUSE  [F1] MENU`, "#d8c49a");
+  if (weatherType === "rain") topSeg(`   RAIN`, "#9fd0ff");
+  else if (weatherType === "drought") topSeg(`   DROUGHT`, "#d9b871");
 
   // Season calendar instead of a clock: the year and date count from spring
   // toward Oct 31 along a wooden trough; in survival the tax bill waits at
