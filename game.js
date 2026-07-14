@@ -4253,6 +4253,74 @@ function tryDateJump() {
 }
 
 // ---------------------------------------------------------------------------
+// Delivery contracts: the van's dispatcher occasionally posts a short-term
+// job — sell some sacks by a calendar deadline for a cash bonus on top of
+// the normal sale price. One active contract at a time, since this is meant
+// as an extra goal inside the long grind, not a second economy. Missing the
+// deadline just lets it lapse with no penalty.
+// ---------------------------------------------------------------------------
+
+const CONTRACT_MIN_SACKS = 15;
+const CONTRACT_MAX_SACKS = 30;
+const CONTRACT_MIN_DAYS = 15; // deadline window, in calendar days from posting
+const CONTRACT_MAX_DAYS = 30;
+const CONTRACT_BONUS_PER_SACK = 5; // € on top of the normal SACK_PRICE
+const CONTRACT_COOLDOWN_MIN = 10; // calendar days before the next offer
+const CONTRACT_COOLDOWN_MAX = 20;
+const CONTRACT_LAST_DAY = SEASON_DAYS + 1 + WINTER_DAYS; // mirrors Mar 31 = 364
+
+let contract = null; // { amount, startSold, deadlineDay, year, reward }
+let nextContractDay = currentCalendarDay();
+let nextContractYear = year;
+let contractMsg = ""; // brief static result banner: done or expired
+let contractMsgColor = "#8fe08f";
+let contractMsgTime = 0;
+
+function scheduleNextContract() {
+  nextContractYear = year;
+  nextContractDay =
+    currentCalendarDay() +
+    CONTRACT_COOLDOWN_MIN +
+    rand() * (CONTRACT_COOLDOWN_MAX - CONTRACT_COOLDOWN_MIN);
+}
+
+function offerContract() {
+  const amount =
+    CONTRACT_MIN_SACKS + ((rand() * (CONTRACT_MAX_SACKS - CONTRACT_MIN_SACKS + 1)) | 0);
+  const days = CONTRACT_MIN_DAYS + ((rand() * (CONTRACT_MAX_DAYS - CONTRACT_MIN_DAYS + 1)) | 0);
+  contract = {
+    amount,
+    startSold: sold,
+    deadlineDay: Math.min(CONTRACT_LAST_DAY, currentCalendarDay() + days),
+    year,
+    reward: amount * CONTRACT_BONUS_PER_SACK,
+  };
+}
+
+// Expiry only (completion is checked at the point of sale, so a delivery
+// on the deadline's own day still counts before this can lapse it). Also
+// covers the new-year rollover, when the calendar day number resets to 0
+// and would otherwise never again exceed an old deadline.
+function updateContracts() {
+  if (contract) {
+    if (year !== contract.year || currentCalendarDay() > contract.deadlineDay) {
+      contract = null;
+      contractMsg = "CONTRACT EXPIRED";
+      contractMsgColor = "#b0a080";
+      contractMsgTime = 4;
+      scheduleNextContract();
+    }
+    return;
+  }
+  if (
+    year > nextContractYear ||
+    (year === nextContractYear && currentCalendarDay() >= nextContractDay)
+  ) {
+    offerContract();
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Save games: the whole mutable state autosaves to localStorage, so a reload
 // (or updating the game) resumes the run. Terrain, roads, water and scenery
 // all regenerate deterministically from the seed and aren't saved; only the
@@ -4282,6 +4350,9 @@ function saveGame() {
     propertyTax,
     timeLeft: Math.round(timeLeft * 10) / 10,
     winterLeft: Math.round(winterLeft * 10) / 10,
+    contract,
+    nextContractDay,
+    nextContractYear,
     tractor: {
       x: tractor.x,
       y: tractor.y,
@@ -4465,6 +4536,7 @@ function update(dt) {
     }
   }
   taxFlash = Math.max(0, taxFlash - dt);
+  contractMsgTime = Math.max(0, contractMsgTime - dt);
 
   const imp = IMPLEMENTS[tractor.implement];
 
@@ -4677,8 +4749,17 @@ function update(dt) {
       const pose = implementPose();
       spawnChaff(pose.x - 16 * Math.cos(pose.angle), pose.y - 16 * Math.sin(pose.angle));
       playSell();
+      if (contract && sold - contract.startSold >= contract.amount) {
+        cash += contract.reward;
+        contractMsg = `CONTRACT DONE +€${contract.reward}`;
+        contractMsgColor = "#8fe08f";
+        contractMsgTime = 4;
+        contract = null;
+        scheduleNextContract();
+      }
     }
   }
+  updateContracts();
 
   updateTracks(dt);
   // Nothing grows under the snow: winter freezes the crops where they stand
@@ -4938,6 +5019,17 @@ function draw() {
   const lucky = luckFlash > 0 && ((luckFlash * 8) | 0) % 2 === 0;
   seg(`CASH: €${cash}   `, lucky ? "#c9e6a8" : cash < SEED_PRICE ? RED : "#ffd94f");
   seg(`SOLD: ${sold}   `);
+  // A contract is shown while active; its result banner briefly replaces
+  // it once resolved, static rather than flashing either way
+  if (contract) {
+    const delivered = Math.min(contract.amount, sold - contract.startSold);
+    seg(
+      `CONTRACT: ${delivered}/${contract.amount} BY D${contract.deadlineDay} +€${contract.reward}   `,
+      "#7fd8ff"
+    );
+  } else if (contractMsgTime > 0) {
+    seg(`${contractMsg}   `, contractMsgColor);
+  }
   // The implement list at the farm, with the attached one lit up
   seg(`@FARM `, "#d8c49a");
   const IMPLEMENT_HINTS = { plow: "PLOW", seeder: "SEED", harvester: "HARVEST", trailer: "TRAILER" };
@@ -5293,6 +5385,9 @@ if (menuOpen) menuSaveInfo = loadSave();
     propertyTax = s.propertyTax;
     timeLeft = s.timeLeft;
     winterLeft = s.winterLeft || 0; // saves from before winter existed: spring–autumn
+    contract = s.contract || null; // saves from before contracts existed: none active
+    if (s.nextContractDay !== undefined) nextContractDay = s.nextContractDay;
+    if (s.nextContractYear !== undefined) nextContractYear = s.nextContractYear;
     Object.assign(tractor, s.tractor);
     cam.x = projX(tractor.x, tractor.y) - VIEW_W / 2;
     cam.y =
