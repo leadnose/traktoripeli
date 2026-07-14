@@ -402,6 +402,26 @@ function playTax() {
   });
 }
 
+// Bright four-note ascending chime when an equipment upgrade is bought
+function playUpgrade() {
+  if (!audio) return;
+  const t = audio.ac.currentTime;
+  [523, 659, 784, 1047].forEach((freq, i) => {
+    const o = audio.ac.createOscillator();
+    o.type = "triangle";
+    const g = audio.ac.createGain();
+    o.connect(g);
+    g.connect(audio.master);
+    const at = t + i * 0.07;
+    o.frequency.setValueAtTime(freq, at);
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.linearRampToValueAtTime(0.15, at + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + 0.22);
+    o.start(at);
+    o.stop(at + 0.23);
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Input
 // ---------------------------------------------------------------------------
@@ -586,6 +606,10 @@ window.addEventListener("keydown", (e) => {
     } else {
       tractor.implFlash = 0.9;
     }
+  }
+  if ((e.key === "u" || e.key === "U") && !e.repeat) {
+    // Upgrades are bought at the farm for whichever implement is mounted
+    tryBuyUpgrade();
   }
 });
 
@@ -3179,7 +3203,7 @@ const BALE_COLORS = ["#d8ab52", "#c89a44"]; // alternating straw tones so bales 
 
 function trailerBoxes() {
   if (cargo === 0) return TRAILER_BOXES;
-  const full = cargo === TRAILER_CAP;
+  const full = cargo === trailerCap();
   const bales = [];
   for (let i = 0; i < cargo; i++) {
     const layer = Math.floor(i / BALE_POS.length);
@@ -4052,9 +4076,60 @@ function drawSmoke(camX, camY) {
 // ---------------------------------------------------------------------------
 
 const SEED_CAP = 64; // seeder hopper size, refilled at the farm
-const TRAILER_CAP = 12; // sacks the trailer can carry
+const TRAILER_CAP_BASE = 12; // sacks the trailer can carry before any upgrade
+const TRAILER_CAP_STEP = 6; // extra sacks per trailer-capacity upgrade level
 const SEED_PRICE = 2; // € per seed, bought automatically at the farm
 const SACK_PRICE = 10; // € earned per sack of grain sold
+
+// Equipment upgrades: bought one level at a time at the farm with [U] while
+// the matching implement is mounted (trailer/harvester/seeder — the seeder
+// carries the fertilizer upgrade since that's what it feeds the ground).
+// Three levels each, prices rising steeply enough to give sandbox cash
+// somewhere to go and survival mode a real mid-game goal to save toward.
+const UPGRADES = {
+  trailer: { label: "TRAILER", prices: [300, 700, 1400] },
+  harvester: { label: "HARVESTER", prices: [350, 800, 1600] },
+  fertilizer: { label: "FERTILIZER", prices: [300, 650, 1300] },
+};
+const UPGRADE_FOR_IMPLEMENT = { trailer: "trailer", harvester: "harvester", seeder: "fertilizer" };
+
+function trailerCap() {
+  return TRAILER_CAP_BASE + TRAILER_CAP_STEP * upgrades.trailer;
+}
+
+// Drag while the ground implement is down (see maxForward in update()): the
+// harvester upgrade cuts its share of that penalty so a fully upgraded
+// harvester barely slows down while cutting a ripe field
+const HARVESTER_DRAG_BASE = 0.35;
+const HARVESTER_DRAG_STEP = 0.1;
+function implementDrag() {
+  return tractor.implement === "harvester"
+    ? HARVESTER_DRAG_BASE - HARVESTER_DRAG_STEP * upgrades.harvester
+    : HARVESTER_DRAG_BASE;
+}
+
+// Fertilizer speeds up crop growth in both modes: it scales the dt fed to
+// updateCrops, so it shortens the sprout/young/mature stages proportionally
+// without touching CROP_STAGES or the sandbox calendar math
+const FERTILIZER_GROWTH_STEP = 0.35;
+function growthMultiplier() {
+  return 1 + FERTILIZER_GROWTH_STEP * upgrades.fertilizer;
+}
+
+// Buys the next level of whatever upgrade matches the mounted implement, if
+// near the farm, not already maxed, and cash covers the price
+function tryBuyUpgrade() {
+  const name = UPGRADE_FOR_IMPLEMENT[tractor.implement];
+  if (!name || !nearFarm()) return;
+  const u = UPGRADES[name];
+  const level = upgrades[name];
+  if (level >= u.prices.length) return;
+  const price = u.prices[level];
+  if (cash < price) return;
+  cash -= price;
+  upgrades[name] = level + 1;
+  playUpgrade();
+}
 
 const ROUND_TIME = 300; // seconds — one Apr 1 – Oct 31 season in either mode
 let timeLeft = ROUND_TIME;
@@ -4181,12 +4256,12 @@ function advanceTime(sec) {
       const floor = sandboxPhaseFloor();
       const span = timeLeft - floor; // calendar seconds left in this phase
       if (sec * rate >= span) {
-        updateCrops(span * SANDBOX_GROW_FACTOR);
+        updateCrops(span * SANDBOX_GROW_FACTOR * growthMultiplier());
         sec -= span / rate;
         timeLeft = floor;
         if (floor === 0) winterLeft = WINTER_TIME;
       } else {
-        updateCrops(sec * rate * SANDBOX_GROW_FACTOR);
+        updateCrops(sec * rate * SANDBOX_GROW_FACTOR * growthMultiplier());
         timeLeft -= sec * rate;
         sec = 0;
       }
@@ -4194,11 +4269,11 @@ function advanceTime(sec) {
     }
     // Survival runs on the wall clock
     if (timeLeft > sec) {
-      updateCrops(sec);
+      updateCrops(sec * growthMultiplier());
       timeLeft -= sec;
       sec = 0;
     } else {
-      updateCrops(timeLeft);
+      updateCrops(timeLeft * growthMultiplier());
       sec -= timeLeft;
       timeLeft = 0;
       if (!collectTax()) return;
@@ -4278,6 +4353,7 @@ function saveGame() {
     seeds,
     cargo,
     sold,
+    upgrades,
     year,
     propertyTax,
     timeLeft: Math.round(timeLeft * 10) / 10,
@@ -4357,6 +4433,8 @@ let seeds = 0; // start empty: buy seeds at the farm
 let cargo = 0; // sacks on the trailer
 let sold = 0; // total sacks delivered to the farm
 const sacks = []; // grain sacks lying on the fields
+// Equipment upgrade levels, 0-3 each: see UPGRADES above for prices/effects
+let upgrades = { trailer: 0, harvester: 0, fertilizer: 0 };
 
 const tractor = {
   x: FARM.x + 34,
@@ -4495,9 +4573,10 @@ function update(dt) {
   }
 
   // Top speed from the gear, further reduced by drag when working the ground
+  // (the harvester upgrade shrinks its share of this drag, see implementDrag)
   let maxForward =
     (tractor.fastGear ? GEAR_FAST : GEAR_SLOW) *
-    (imp.liftable ? 1 - 0.35 * (1 - tractor.implLift) : 1);
+    (imp.liftable ? 1 - implementDrag() * (1 - tractor.implLift) : 1);
   let maxReverse = MAX_REVERSE;
 
   // Packed dirt roads are ~30% faster than driving across the meadows
@@ -4649,7 +4728,7 @@ function update(dt) {
     const pose = implementPose();
     const bx = pose.x - 16 * Math.cos(pose.angle);
     const by = pose.y - 16 * Math.sin(pose.angle);
-    for (let i = sacks.length - 1; i >= 0 && cargo < TRAILER_CAP; i--) {
+    for (let i = sacks.length - 1; i >= 0 && cargo < trailerCap(); i--) {
       if (Math.hypot(sacks[i].wx - bx, sacks[i].wy - by) < 9) {
         sacks.splice(i, 1);
         cargo++;
@@ -4684,7 +4763,8 @@ function update(dt) {
   // Nothing grows under the snow: winter freezes the crops where they stand
   if (winterLeft === 0)
     updateCrops(
-      mode === "sandbox" ? dt * sandboxClockRate() * SANDBOX_GROW_FACTOR : dt
+      (mode === "sandbox" ? dt * sandboxClockRate() * SANDBOX_GROW_FACTOR : dt) *
+        growthMultiplier()
     );
 
   // Periodic autosave so even a crash or hard reload loses only moments
@@ -4899,6 +4979,20 @@ function draw() {
     hudX += screenCtx.measureText(text).width;
   };
   const RED = "#ff5040";
+  // Static (non-blinking) hint for the upgrade tied to the mounted implement,
+  // shown only at the farm — gold when affordable, dim tan when saving up,
+  // dim brown once maxed
+  const upgradeHint = (name) => {
+    const u = UPGRADES[name];
+    const level = upgrades[name];
+    const maxed = level >= u.prices.length;
+    if (maxed) return { text: `[U] ${u.label} MAX   `, color: "#8a7a5a" };
+    const price = u.prices[level];
+    return {
+      text: `[U] ${u.label} Lv${level} €${price}   `,
+      color: cash >= price ? "#ffd94f" : "#d8c49a",
+    };
+  };
   const flashImpl = tractor.implFlash > 0 && ((tractor.implFlash * 8) | 0) % 2 === 0;
   // Gear and implement move as one: road mode is fast with the implement
   // raised, work mode slow with it lowered — the lift state is still shown,
@@ -4928,12 +5022,13 @@ function draw() {
   if (tractor.implement === "trailer") {
     // Flash when the trailer is full while rolling over a field — passing
     // by grain sacks it has no room to pick up
+    const cap = trailerCap();
     const fullRun =
-      cargo === TRAILER_CAP &&
+      cargo === cap &&
       Math.abs(tractor.speed) > 2 &&
       implementOverField();
     const cargoColor = fullRun && ((worldTime * 6) | 0) % 2 === 0 ? RED : null;
-    seg(`CARGO: ${cargo}/${TRAILER_CAP}   `, cargoColor);
+    seg(`CARGO: ${cargo}/${cap}   `, cargoColor);
   }
   const lucky = luckFlash > 0 && ((luckFlash * 8) | 0) % 2 === 0;
   seg(`CASH: €${cash}   `, lucky ? "#c9e6a8" : cash < SEED_PRICE ? RED : "#ffd94f");
@@ -5007,6 +5102,14 @@ function draw() {
         ? `TAX €${propertyTax}`
         : "OCT 31";
   label(endLabel, bx + barW + 8, topY, taxJustPaid ? "#ff5040" : "#d8c49a");
+  // The upgrade on offer for the mounted implement, in the open stretch of
+  // the top bar between the calendar and the mute icons — the bottom bar is
+  // already packed edge to edge, so it has no room left for this
+  const upgradeName = UPGRADE_FOR_IMPLEMENT[tractor.implement];
+  if (upgradeName && nearFarm()) {
+    const h = upgradeHint(upgradeName);
+    label(h.text.trim(), bx + barW + 90, topY, h.color);
+  }
   // The season grows along a wooden trough
   screenCtx.fillStyle = "#4a2f1a";
   screenCtx.fillRect(bx - 2, by - 2, barW + 4, barH + 4);
@@ -5289,6 +5392,8 @@ if (menuOpen) menuSaveInfo = loadSave();
     seeds = s.seeds;
     cargo = s.cargo;
     sold = s.sold;
+    // Older saves predate upgrades: fall back to all-zero levels
+    if (s.upgrades) upgrades = { ...upgrades, ...s.upgrades };
     year = s.year;
     propertyTax = s.propertyTax;
     timeLeft = s.timeLeft;
