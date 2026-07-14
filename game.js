@@ -290,7 +290,8 @@ function updateAudio() {
   const set = (param, v, tc) => param.setTargetAtTime(v, t, tc);
 
   // Engine pitch and volume track speed, with a bump while throttling
-  const throttle = !gameOver && !paused && (keys.ArrowUp || keys.ArrowDown) ? 1 : 0;
+  const throttle =
+    !gameOver && !paused && (keys.ArrowUp || keys.ArrowDown || autoThrottling()) ? 1 : 0;
   const rpm = gameOver
     ? 0
     : 0.25 + 0.55 * Math.min(1, Math.abs(tractor.speed) / GEAR_FAST) + 0.2 * throttle;
@@ -426,6 +427,9 @@ let menuOpen = !gameStarted;
 // P holds the whole world still — clock, crops, critters — until P again.
 // Unlike the F1 menu, which leaves the calendar running, pause means pause.
 let paused = false;
+// A toggles work mode's auto-throttle off and back on, for anyone who'd
+// rather hold the accelerator themselves. On by default.
+let autoThrottleOn = true;
 // D opens a little date field: type MMDD and Enter fast-forwards the
 // calendar to that date — through winter into next year in the cyclical
 // modes — growing crops and collecting taxes on the way, exactly like the
@@ -536,6 +540,9 @@ window.addEventListener("keydown", (e) => {
   if ((e.key === "p" || e.key === "P") && !e.repeat && gameStarted && !gameOver)
     paused = !paused;
   if (paused) return; // the frozen world ignores gear and implement keys
+  if ((e.key === "a" || e.key === "A") && !e.repeat && gameStarted && !gameOver) {
+    autoThrottleOn = !autoThrottleOn;
+  }
   if ((e.key === "d" || e.key === "D") && !e.repeat && gameStarted && !gameOver) {
     dateJump = "";
     dateJumpError = false;
@@ -715,6 +722,7 @@ window.addEventListener("keyup", (e) => {
   // HUD's own "MODE: ROAD/WORK") instead of showing a static glyph, and
   // flashes the same way the HUD text does when a lower is refused.
   const spaceBtn = document.getElementById("td-space");
+  const autoBtn = document.getElementById("td-auto");
   function syncVisibility() {
     const menuish = !gameStarted || menuOpen || dateJump !== null;
     document.body.classList.toggle("menu-mode", menuish);
@@ -726,6 +734,7 @@ window.addEventListener("keyup", (e) => {
         "aria-label",
         tractor.fastGear ? "Lower implement, work mode" : "Raise implement, road mode"
       );
+      autoBtn.classList.toggle("tbtn-off", !autoThrottleOn);
     }
     requestAnimationFrame(syncVisibility);
   }
@@ -3958,10 +3967,11 @@ const smoke = [];
 let smokeTimer = 0;
 
 function updateSmoke(dt) {
-  if (!gameOver && (keys.ArrowUp || Math.abs(tractor.speed) > 5)) {
+  const onGas = keys.ArrowUp || autoThrottling();
+  if (!gameOver && (onGas || Math.abs(tractor.speed) > 5)) {
     smokeTimer -= dt;
     if (smokeTimer <= 0) {
-      smokeTimer = keys.ArrowUp ? 0.07 : 0.18;
+      smokeTimer = onGas ? 0.07 : 0.18;
       const cos = Math.cos(tractor.angle);
       const sin = Math.sin(tractor.angle);
       const wx = tractor.x + 2 * cos;
@@ -4390,6 +4400,16 @@ function implementOverField() {
   return false;
 }
 
+// Work mode drives itself at a steady crawl so both hands (or the one
+// thumb steering on touch) are free to just steer the implement straight,
+// instead of also holding the accelerator down the whole pass. The brake
+// still overrides it. Road mode stays fully manual. Shared by the physics,
+// engine sound and exhaust smoke so they all agree on when the tractor is
+// "on the gas".
+function autoThrottling() {
+  return autoThrottleOn && !tractor.fastGear && !keys.ArrowDown;
+}
+
 function update(dt) {
   if (paused) return;
   // Ambient life keeps moving even after the round ends
@@ -4426,7 +4446,8 @@ function update(dt) {
   const imp = IMPLEMENTS[tractor.implement];
 
   // Throttle / brake
-  if (keys.ArrowUp) {
+  const throttling = keys.ArrowUp || autoThrottling();
+  if (throttling) {
     tractor.speed += ACCEL * dt;
   } else if (keys.ArrowDown) {
     tractor.speed -= BRAKE * dt;
@@ -4446,7 +4467,7 @@ function update(dt) {
 
   // At a crawl with no throttle the tractor simply stops — otherwise slope
   // gravity keeps it creeping forever and the camera never settles
-  if (!keys.ArrowUp && !keys.ArrowDown && Math.abs(tractor.speed) < 1.5) {
+  if (!throttling && !keys.ArrowDown && Math.abs(tractor.speed) < 1.5) {
     tractor.speed = 0;
   }
 
@@ -4856,8 +4877,10 @@ function draw() {
   // raised, work mode slow with it lowered — the lift state is still shown,
   // for the bounce when there's no field dirt to drop into. The attached
   // implement is named by the highlight in the farm list.
-  const state = imp.liftable ? (tractor.implDown ? ", IMPLEMENT DOWN" : ", IMPLEMENT UP") : "";
-  seg(`MODE: ${tractor.fastGear ? "ROAD" : "WORK"}${state} [Space]   `, flashImpl ? RED : null);
+  const state =
+    (imp.liftable ? (tractor.implDown ? ", IMPLEMENT DOWN" : ", IMPLEMENT UP") : "") +
+    (autoThrottleOn ? "" : ", AUTO OFF");
+  seg(`MODE: ${tractor.fastGear ? "ROAD" : "WORK"}${state} [Space][A]   `, flashImpl ? RED : null);
   if (tractor.implement === "seeder") {
     // Solid red when the hopper is empty; flashing when it's empty AND the
     // seeder is down working a field — driving along planting nothing
@@ -4899,22 +4922,23 @@ function draw() {
   }
 
   // The top HUD is a single-line plank bar matching the bottom one, trim
-  // mirrored: mode and seed on the left, the season calendar in the middle
-  // with the year folded into its date label, and the menu key, mute icons
-  // and FPS on the right
+  // mirrored: mode, map and the pause/menu hint on the left, the season
+  // calendar in the middle with the year folded into its date label, and
+  // the mute icons and FPS on the right
   screenCtx.drawImage(hudTopCanvas, 0, 0);
 
   screenCtx.font = "11px monospace";
   const topY = 18; // shared text baseline in the bar
 
-  // Left: mode and map
+  // Left: mode, map, and the pause/menu hint
   let topX = 12;
   const topSeg = (text, color) => {
     label(text, topX, topY, color || "#f5e9c8");
     topX += screenCtx.measureText(text).width;
   };
   topSeg(`${mode.toUpperCase()}  `, "#ffd94f");
-  topSeg(`MAP ${MAP_INDEX}`);
+  topSeg(`MAP ${MAP_INDEX}   `);
+  topSeg(`[P] PAUSE  [F1] MENU`, "#d8c49a");
 
   // Season calendar instead of a clock: the year and date count from spring
   // toward Oct 31 along a wooden trough; in survival the tax bill waits at
@@ -4964,15 +4988,11 @@ function draw() {
   screenCtx.fillStyle = flash ? "#ff5040" : seasonHex(SEASON_BAR_COLORS);
   screenCtx.fillRect(bx, by, Math.round(barW * progress), barH);
 
-  // Right: menu key and the music & sound icons
+  // Right: the music & sound icons
   let rx = screenCanvas.width - 12;
   drawSpeakerIcon(rx - 13, 8, !soundMuted);
   rx -= 13 + 10;
   drawNoteIcon(rx - 12, 8, !musicMuted);
-  rx -= 12 + 10;
-  screenCtx.textAlign = "right";
-  label("[P] PAUSE  [F1] MENU", rx, topY, "#d8c49a");
-  screenCtx.textAlign = "left";
 
   // Game over: final score and the all-time best list
   if (gameOver) {

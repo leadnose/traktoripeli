@@ -171,6 +171,11 @@ html, body {
     font-size: 0.9rem;
   }
 
+  /* Dimmed while a toggle (e.g. work-mode auto-throttle) is switched off */
+  .tbtn-off {
+    opacity: 0.4;
+  }
+
   #td-enter {
     position: absolute;
     left: 50%;
