@@ -2533,6 +2533,20 @@ const ANIMAL_BOXES = {
 
 const animals = [];
 
+// Calm chickens, ducks and goats occasionally lay/give something sellable;
+// pigs and the farm cat/dog stay pure scenery (a pet isn't livestock, and a
+// pig has nothing passive to collect)
+const PRODUCE_SPECIES = {
+  chicken: { kind: "egg", price: 2 },
+  duck: { kind: "egg", price: 2 },
+  goat: { kind: "milk", price: 5 },
+};
+const PRODUCE_INTERVAL = [30, 65]; // seconds between one animal's offerings
+const MAX_PRODUCE = 8; // outstanding items before animals just wait to lay/give more
+
+// Eggs and milk pails left near their animal, waiting to be driven over
+const produce = [];
+
 // Every spawned group is registered as a herd, so routines can send its
 // members somewhere together (see updateHerds) by moving their home anchor
 const herds = [];
@@ -2569,6 +2583,8 @@ function spawnHerd(species, hx, hy, count) {
       // consistent order instead of interleaving their parts
       tie: animals.length * 0.004,
     };
+    // Spread first offerings out so a whole flock doesn't lay/give at once
+    if (PRODUCE_SPECIES[species]) a.produceTimer = rand() * PRODUCE_INTERVAL[1];
     animals.push(a);
     members.push(a);
   }
@@ -2751,6 +2767,19 @@ else addSign("MAATILA", FARM.x + 24, FARM.y + 24);
   }
 }
 
+// Drop an egg or milk pail right by the animal that gave it, just off its
+// feet like a dropped grain sack
+function spawnProduce(a) {
+  const info = PRODUCE_SPECIES[a.species];
+  let wx = a.wx + (rand() - 0.5) * 3;
+  let wy = a.wy + (rand() - 0.5) * 3;
+  if (tileTypeAt(wx, wy) === 4) {
+    wx = a.wx; // don't let the offset drop it in the water at a duck pond
+    wy = a.wy;
+  }
+  produce.push({ kind: info.kind, price: info.price, wx, wy });
+}
+
 function updateAnimals(dt) {
   for (const a of animals) {
     const spec = ANIMAL_SPECS[a.species];
@@ -2817,6 +2846,15 @@ function updateAnimals(dt) {
         a.angle += 3 * dt; // cornered against water or a field: sidle along
       }
       continue; // fleeing overrides grazing and homing
+    }
+    // Calm-only: a spooked animal's timer just holds until it settles again
+    if (a.produceTimer !== undefined) {
+      a.produceTimer -= dt;
+      if (a.produceTimer <= 0) {
+        a.produceTimer =
+          PRODUCE_INTERVAL[0] + rand() * (PRODUCE_INTERVAL[1] - PRODUCE_INTERVAL[0]);
+        if (produce.length < MAX_PRODUCE) spawnProduce(a);
+      }
     }
     if (a.pause > 0) {
       a.pause -= dt;
@@ -3223,6 +3261,15 @@ const SACK_SHAPES = [
   { blob: true, x: 0, y: 0, z: 3.1, r: 0.7, color: "#d9b446", bias: 0.05 },
 ];
 
+// Produce left by calm animals: a small pale egg, or a squat milk pail
+const PRODUCE_SHAPES = {
+  egg: [{ blob: true, x: 0, y: 0, z: 0.6, r: 0.55, color: "#f5ecd7" }],
+  milk: [
+    { blob: true, x: 0, y: 0, z: 1.1, r: 1.1, color: "#e4e6e8" },
+    { blob: true, x: 0, y: 0, z: 2.1, r: 0.55, color: "#c3c7cb", bias: 0.05 },
+  ],
+};
+
 // Faces of a unit box; corner index = xi*4 + yi*2 + zi. Windings are chosen
 // so a face's projected signed area is positive exactly when it faces the
 // camera, which doubles as backface culling.
@@ -3511,6 +3558,10 @@ function drawScene(camX, camY) {
   for (const s of sacks) {
     if (!onScreen(s.wx, s.wy, camX, camY)) continue;
     makeRoundItems(items, SACK_SHAPES, s.wx, s.wy, 0, 0, camX, camY);
+  }
+  for (const p of produce) {
+    if (!onScreen(p.wx, p.wy, camX, camY)) continue;
+    makeRoundItems(items, PRODUCE_SHAPES[p.kind], p.wx, p.wy, 0, 0, camX, camY);
   }
   for (const s of signs) {
     if (!onScreen(s.wx, s.wy, camX, camY)) continue;
@@ -3982,6 +4033,21 @@ function drawLadybug(camX, camY) {
   }
 }
 
+// Roll over an egg or milk pail to sell it on the spot, the same small
+// luck-flash bonus as the ladybug
+function updateProduce(dt) {
+  if (!gameStarted || gameOver) return;
+  for (let i = produce.length - 1; i >= 0; i--) {
+    const p = produce[i];
+    if (Math.hypot(tractor.x - p.wx, tractor.y - p.wy) < 7) {
+      cash += p.price;
+      luckFlash = 1.2;
+      playPickup();
+      produce.splice(i, 1);
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Exhaust smoke & chaff particles
 // ---------------------------------------------------------------------------
@@ -4444,6 +4510,7 @@ function update(dt) {
   updateVan(dt);
   updateBirds(dt);
   updateLadybug(dt);
+  updateProduce(dt);
   updateSeason();
   if (!gameStarted || gameOver) return;
 
