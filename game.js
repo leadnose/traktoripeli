@@ -3165,13 +3165,36 @@ for (const wx of [-15.2, -18.6]) {
   );
 }
 
+// Floor slots for hay bales: one row against the front wall, one against the
+// back, ordered so loading starts in the near corner and fills outward along
+// that wall before starting the far row.
+const BALE_POS = [];
+for (const y of [-1.7, 1.7])
+  for (const x of [-18.95, -16.25, -13.55]) BALE_POS.push({ x, y });
+const BALE_XH = 1.15;
+const BALE_YH = 1.5;
+const BALE_H = 1.3;
+const BALE_LAYER_GAP = 0.15;
+const BALE_COLORS = ["#d8ab52", "#c89a44"]; // alternating straw tones so bales read as distinct blocks
+
 function trailerBoxes() {
   if (cargo === 0) return TRAILER_BOXES;
-  // Grain heap grows with the load
-  const h = 0.8 + 2.4 * (cargo / TRAILER_CAP);
-  return TRAILER_BOXES.concat([
-    { x0: -20.5, x1: -12.0, y0: -3.6, y1: 3.6, z0: 7.0, z1: 7.0 + h, color: "#f0cf5e" },
-  ]);
+  const full = cargo === TRAILER_CAP;
+  const bales = [];
+  for (let i = 0; i < cargo; i++) {
+    const layer = Math.floor(i / BALE_POS.length);
+    const p = BALE_POS[i % BALE_POS.length];
+    const z0 = 7.0 + layer * (BALE_H + BALE_LAYER_GAP);
+    // Full load sits a shade brighter so it reads as "done" without flashing
+    const color = full ? "#f2c46a" : BALE_COLORS[i % BALE_COLORS.length];
+    bales.push({
+      x0: p.x - BALE_XH, x1: p.x + BALE_XH,
+      y0: p.y - BALE_YH, y1: p.y + BALE_YH,
+      z0, z1: z0 + BALE_H,
+      color,
+    });
+  }
+  return TRAILER_BOXES.concat(bales);
 }
 
 // Mounted implements (3-point hitch) turn rigidly with the tractor; towed
