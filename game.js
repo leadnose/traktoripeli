@@ -2092,41 +2092,78 @@ function makeMap() {
   }
 
   // Road network: main roads from the farm out to the map edges, then a spur
-  // from the nearest existing road to each field. Roads run octilinearly —
-  // one 45-degree diagonal leg and one axis-aligned leg, in either order —
-  // like grid-country farm roads.
+  // from the nearest existing road to each field. Each road is a fractal
+  // midpoint-displacement curve from its start to its end: the straight line
+  // is bent at its midpoint by a random sideways nudge, then both halves are
+  // bent again with a smaller nudge, recursively — the same self-similar
+  // construction used for generating natural coastlines and rivers — so
+  // roads wander like real ones instead of running dead straight.
   const net = [{ x: FARM.x, y: FARM.y }];
 
   const traceRoad = (from, tx, ty, r) => {
-    const dx = tx - from.x;
-    const dy = ty - from.y;
-    const diag = Math.min(Math.abs(dx), Math.abs(dy));
-    const legs = [
-      {
-        ux: Math.sign(dx) * Math.SQRT1_2,
-        uy: Math.sign(dy) * Math.SQRT1_2,
-        len: diag * Math.SQRT2,
-      },
-      Math.abs(dx) > Math.abs(dy)
-        ? { ux: Math.sign(dx), uy: 0, len: Math.abs(dx) - diag }
-        : { ux: 0, uy: Math.sign(dy), len: Math.abs(dy) - diag },
-    ];
-    if (rand() < 0.5) legs.reverse(); // bend early or bend late
-    const pts = [];
-    let x = from.x;
-    let y = from.y;
-    outer: for (const leg of legs) {
-      if (leg.len < 1) continue;
-      const dir = Math.atan2(leg.uy, leg.ux);
-      for (let done = 0; done < leg.len; ) {
-        const step = Math.min(3, leg.len - done);
-        done += step;
-        x += leg.ux * step;
-        y += leg.uy * step;
-        // Roads may run a little past the map edge; painting clips them there
-        if (x < -24 || x > MAP_SIZE + 24 || y < -24 || y > MAP_SIZE + 24) break outer;
-        pts.push({ x, y, dir });
+    const dist = Math.hypot(tx - from.x, ty - from.y);
+    if (dist < 1) return;
+    // Thicker roads are the trunk network and stay closer to direct; thin
+    // spurs are country tracks that can wander more.
+    let rough = r >= 3 ? 0.16 : 0.32;
+    const PERSISTENCE = 0.6;
+    const MIN_SEG = 10; // stop bending once a segment is this short
+    let poly = [{ x: from.x, y: from.y }, { x: tx, y: ty }];
+    for (let pass = 0; pass < 8; pass++) {
+      let bent = false;
+      const next = [poly[0]];
+      for (let i = 0; i < poly.length - 1; i++) {
+        const a = poly[i];
+        const b = poly[i + 1];
+        const segLen = Math.hypot(b.x - a.x, b.y - a.y);
+        if (segLen > MIN_SEG) {
+          bent = true;
+          const mx = (a.x + b.x) / 2;
+          const my = (a.y + b.y) / 2;
+          const px = -(b.y - a.y) / segLen;
+          const py = (b.x - a.x) / segLen;
+          const offset = (rand() - 0.5) * 2 * rough * segLen;
+          next.push({ x: mx + px * offset, y: my + py * offset });
+        }
+        next.push(b);
       }
+      poly = next;
+      rough *= PERSISTENCE;
+      if (!bent) break;
+    }
+    // Resample the bent polyline at an even 3-unit arc-length spacing, so
+    // stamping, the van's drive loop and vegetation clearance all still see
+    // a steady stream of points regardless of how much the curve wanders.
+    const pts = [];
+    let cum = 0;
+    let nextSample = 3;
+    let lastDir = 0;
+    let clipped = false;
+    outer: for (let i = 0; i < poly.length - 1; i++) {
+      const a = poly[i];
+      const b = poly[i + 1];
+      const segLen = Math.hypot(b.x - a.x, b.y - a.y);
+      if (segLen < 1e-6) continue;
+      lastDir = Math.atan2(b.y - a.y, b.x - a.x);
+      while (nextSample <= cum + segLen) {
+        const t = (nextSample - cum) / segLen;
+        const x = a.x + (b.x - a.x) * t;
+        const y = a.y + (b.y - a.y) * t;
+        // Roads may run a little past the map edge; painting clips them there
+        if (x < -24 || x > MAP_SIZE + 24 || y < -24 || y > MAP_SIZE + 24) {
+          clipped = true;
+          break outer;
+        }
+        pts.push({ x, y, dir: lastDir });
+        nextSample += 3;
+      }
+      cum += segLen;
+    }
+    // The 3-unit sampling grid rarely lands exactly on the target, so tack
+    // the true endpoint on (unless the road was clipped short at the map
+    // edge) — junctions and field spurs still meet precisely.
+    if (!clipped && pts.length && Math.hypot(tx - pts[pts.length - 1].x, ty - pts[pts.length - 1].y) > 1.5) {
+      pts.push({ x: tx, y: ty, dir: lastDir });
     }
     if (pts.length) {
       roads.push({ pts, r });
