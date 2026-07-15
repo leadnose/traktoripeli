@@ -35,17 +35,147 @@ const ctx = view.getContext("2d");
 // hilliness is a multiplier on the hill generator's stock count/height.
 // ---------------------------------------------------------------------------
 
+// Each profile also carries a palette: the map's own take on ground, water,
+// sky and canopy color, so e.g. Highlands reads as cool heather moorland
+// while Patchwork Farm reads as bright cultivated lowland. grass/dirt/skyTop/
+// skyBottom/canopy are [spring, summer, autumn, winter] quadruples fed
+// through the same seasonHex() wheel as before; water/road/conifer are
+// single tones (conifers don't turn with the seasons, and water/roads read
+// as one steady color year-round). Everything else — dot speckles, furrows,
+// bridges, ditches, minimap tones, tree canopy tiers — is derived from these
+// few tones at load time via tint(), so a new theme only needs these fields.
 const MAP_PROFILES = [
-  { name: "Homestead Plains", seed: 1137, water: [0.03, 0.10], field: [0.45, 0.65], forest: [0.10, 0.25], hilliness: [0.4, 0.6] },
-  { name: "River Valley", seed: 1274, water: [0.35, 0.50], field: [0.20, 0.35], forest: [0.15, 0.30], hilliness: [0.8, 1.2] },
-  { name: "Highlands", seed: 1411, water: [0.10, 0.20], field: [0.15, 0.30], forest: [0.30, 0.50], hilliness: [1.7, 2.2] },
-  { name: "Deep Woods", seed: 1548, water: [0.20, 0.35], field: [0.05, 0.15], forest: [0.85, 1.00], hilliness: [0.8, 1.2] },
-  { name: "Patchwork Farm", seed: 1685, water: [0.03, 0.10], field: [0.55, 0.72], forest: [0.00, 0.08], hilliness: [0.4, 0.6] },
-  { name: "Lake District", seed: 1822, water: [0.45, 0.60], field: [0.10, 0.20], forest: [0.10, 0.25], hilliness: [0.4, 0.6] },
-  { name: "Rolling Hills", seed: 1959, water: [0.10, 0.20], field: [0.30, 0.45], forest: [0.30, 0.50], hilliness: [1.3, 1.7] },
-  { name: "Wetlands", seed: 2096, water: [0.35, 0.50], field: [0.05, 0.15], forest: [0.60, 0.80], hilliness: [0.4, 0.6] },
-  { name: "Frontier", seed: 2233, water: [0.03, 0.10], field: [0.05, 0.15], forest: [0.00, 0.08], hilliness: [0.8, 1.2] },
-  { name: "Wilderness", seed: 2370, water: [0.10, 0.20], field: [0.05, 0.15], forest: [0.85, 1.00], hilliness: [1.7, 2.2] },
+  {
+    name: "Homestead Plains", seed: 1137, water: [0.03, 0.10], field: [0.45, 0.65], forest: [0.10, 0.25], hilliness: [0.4, 0.6],
+    palette: {
+      grass: ["#72ca55", "#55b043", "#bda355", "#e9f1f5"],
+      dirt: ["#a87e50", "#a87e50", "#a87e50", "#e2eaee"],
+      water: "#3d7dc4",
+      skyTop: ["#7ac9ef", "#6fc3e8", "#8fb8d8", "#9db9cf"],
+      skyBottom: ["#c8ecf8", "#c2e8f2", "#ecdcc0", "#e9eef2"],
+      road: "#c09a66",
+      canopy: ["#57b754", "#4fae4a", "#c67b2e", "#dde9ee"],
+      conifer: "#2c6330",
+    },
+  },
+  {
+    name: "River Valley", seed: 1274, water: [0.35, 0.50], field: [0.20, 0.35], forest: [0.15, 0.30], hilliness: [0.8, 1.2],
+    palette: {
+      grass: ["#6bc750", "#4fa83e", "#b89a4a", "#e7eef2"],
+      dirt: ["#9c7248", "#9c7248", "#9c7248", "#dde6ec"],
+      water: "#3d86c9",
+      skyTop: ["#7fc8ef", "#72c0e6", "#8ab6d6", "#9ab7cf"],
+      skyBottom: ["#cdeaf5", "#c6e6ef", "#e6d8bc", "#e6ecf0"],
+      road: "#b8905e",
+      canopy: ["#54b451", "#49a648", "#c1782c", "#d9e6ec"],
+      conifer: "#2c6330",
+    },
+  },
+  {
+    name: "Highlands", seed: 1411, water: [0.10, 0.20], field: [0.15, 0.30], forest: [0.30, 0.50], hilliness: [1.7, 2.2],
+    palette: {
+      grass: ["#8a9a5c", "#7d8f4e", "#a68a52", "#c9d1d6"],
+      dirt: ["#8a7a63", "#8a7a63", "#8a7a63", "#d4dadd"],
+      water: "#5a7d8c",
+      skyTop: ["#8fa8b8", "#84a0b2", "#8598a8", "#94a4ae"],
+      skyBottom: ["#c9d8dc", "#c3d2d8", "#d6cdbf", "#dde3e2"],
+      road: "#9c8a6e",
+      canopy: ["#6f8f52", "#628049", "#a8763a", "#c7d2cf"],
+      conifer: "#3a5240",
+      flowers: ["#b48fd1", "#ffffff", "#e0d156"], // heather and gorse, not the usual meadow mix
+    },
+  },
+  {
+    name: "Deep Woods", seed: 1548, water: [0.20, 0.35], field: [0.05, 0.15], forest: [0.85, 1.00], hilliness: [0.8, 1.2],
+    palette: {
+      grass: ["#5fa84a", "#4a9440", "#a68f48", "#dce6e0"],
+      dirt: ["#7a6244", "#7a6244", "#7a6244", "#d6ded8"],
+      water: "#356a95",
+      skyTop: ["#6fb3d9", "#66add2", "#7fa4c4", "#8ea6b8"],
+      skyBottom: ["#bfe0e8", "#badfe0", "#ded0b8", "#dee6e6"],
+      road: "#a4835a",
+      canopy: ["#3f8a48", "#357a3e", "#a3712c", "#ccdcd6"],
+      conifer: "#274a34",
+    },
+  },
+  {
+    name: "Patchwork Farm", seed: 1685, water: [0.03, 0.10], field: [0.55, 0.72], forest: [0.00, 0.08], hilliness: [0.4, 0.6],
+    palette: {
+      grass: ["#7ed35c", "#5cb849", "#c2a862", "#eaf1f4"],
+      dirt: ["#b0824f", "#b0824f", "#b0824f", "#e6ecf0"],
+      water: "#4a8ccb",
+      skyTop: ["#82cdf2", "#78c8ec", "#94bedd", "#a3bfd2"],
+      skyBottom: ["#cdeffa", "#c8ecf5", "#f0e2c4", "#ecf1f4"],
+      road: "#c6a06d",
+      canopy: ["#5fbb5a", "#57b04e", "#d18a34", "#e2edf0"],
+      conifer: "#2c6330",
+    },
+  },
+  {
+    name: "Lake District", seed: 1822, water: [0.45, 0.60], field: [0.10, 0.20], forest: [0.10, 0.25], hilliness: [0.4, 0.6],
+    palette: {
+      grass: ["#6bcf58", "#50b845", "#b8a052", "#e6f0f5"],
+      dirt: ["#9c7c52", "#9c7c52", "#9c7c52", "#e2eaf0"],
+      water: "#3d93d6",
+      skyTop: ["#7ed4f5", "#72cdf0", "#8fc2e0", "#9fc3d6"],
+      skyBottom: ["#c0f0fa", "#baecf7", "#e8dcc0", "#e4eef2"],
+      road: "#b89361",
+      canopy: ["#5abd54", "#4fae49", "#c2812e", "#dde9ee"],
+      conifer: "#2e6b38",
+    },
+  },
+  {
+    name: "Rolling Hills", seed: 1959, water: [0.10, 0.20], field: [0.30, 0.45], forest: [0.30, 0.50], hilliness: [1.3, 1.7],
+    palette: {
+      grass: ["#78c956", "#5bb246", "#c0a158", "#e6edf0"],
+      dirt: ["#a67e51", "#a67e51", "#a67e51", "#e0e8ea"],
+      water: "#4886c0",
+      skyTop: ["#7ecdf0", "#74c6e8", "#93bcd4", "#a2bccb"],
+      skyBottom: ["#cbeaf5", "#c5e6ef", "#eddcc0", "#e8edf0"],
+      road: "#bd9765",
+      canopy: ["#59b855", "#4fac4b", "#c67f30", "#dde8ec"],
+      conifer: "#316f39",
+    },
+  },
+  {
+    name: "Wetlands", seed: 2096, water: [0.35, 0.50], field: [0.05, 0.15], forest: [0.60, 0.80], hilliness: [0.4, 0.6],
+    palette: {
+      grass: ["#7aa85c", "#6b9a4e", "#9c9256", "#d8e2dc"],
+      dirt: ["#6e6248", "#6e6248", "#6e6248", "#d2dcd6"],
+      water: "#4a7562",
+      skyTop: ["#8fc0c8", "#85b9c2", "#9bb0ac", "#a3b4ae"],
+      skyBottom: ["#d0e6e2", "#cae2e0", "#ddd6bc", "#dfe6e0"],
+      road: "#8a7a5a",
+      canopy: ["#5a9a52", "#4f8c48", "#a68840", "#cfdcd2"],
+      conifer: "#33553e",
+    },
+  },
+  {
+    name: "Frontier", seed: 2233, water: [0.03, 0.10], field: [0.05, 0.15], forest: [0.00, 0.08], hilliness: [0.8, 1.2],
+    palette: {
+      grass: ["#9cb85e", "#8ca84e", "#c2a252", "#e2e6dc"],
+      dirt: ["#b08858", "#b08858", "#b08858", "#e6e8e2"],
+      water: "#5590c2",
+      skyTop: ["#a8d4ef", "#9fcce8", "#a8c0d0", "#aec2ca"],
+      skyBottom: ["#e0f2f8", "#dbeef4", "#ecdec0", "#e8ecec"],
+      road: "#c2a06e",
+      canopy: ["#7cbb5c", "#6cac4e", "#c68d38", "#dbe6dc"],
+      conifer: "#3a6b3e",
+    },
+  },
+  {
+    name: "Wilderness", seed: 2370, water: [0.10, 0.20], field: [0.05, 0.15], forest: [0.85, 1.00], hilliness: [1.7, 2.2],
+    palette: {
+      grass: ["#679c52", "#568c46", "#96813f", "#d4dfd6"],
+      dirt: ["#7c6448", "#7c6448", "#7c6448", "#d0d8d2"],
+      water: "#3f7292",
+      skyTop: ["#77b8da", "#6bb0d2", "#7fa0b4", "#8ea2ac"],
+      skyBottom: ["#c2e2e8", "#bcdde4", "#dccfb6", "#dde4e2"],
+      road: "#9c8058",
+      canopy: ["#4a9a4e", "#3f8c44", "#9c7434", "#c9d8d0"],
+      conifer: "#264a34",
+    },
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -932,6 +1062,35 @@ function shade(color, k) {
   return (shadeCache[key] = `rgb(${ch(0)},${ch(1)},${ch(2)})`);
 }
 
+const mixCache = {};
+function mixHex(a, b, t) {
+  const key = a + b + ((t * 64) | 0);
+  if (mixCache[key]) return mixCache[key];
+  const va = parseInt(a.slice(1), 16);
+  const vb = parseInt(b.slice(1), 16);
+  let out = "#";
+  for (const shift of [16, 8, 0]) {
+    const v = Math.round(((va >> shift) & 255) * (1 - t) + ((vb >> shift) & 255) * t);
+    out += v.toString(16).padStart(2, "0");
+  }
+  return (mixCache[key] = out);
+}
+
+// Lighten (amt > 0) or darken (amt < 0) a hex color toward white/black. Used
+// to derive dot speckles, tiers, furrows and the like from a palette's few
+// base tones instead of hand-authoring every shade per map.
+function tint(hex, amt) {
+  return amt >= 0 ? mixHex(hex, "#ffffff", amt) : mixHex(hex, "#000000", -amt);
+}
+
+function grassDotShades(base) {
+  return [tint(base, -0.16), tint(base, 0.2), tint(base, 0.32), tint(base, -0.3)];
+}
+
+function dirtDotShades(base) {
+  return [tint(base, -0.16), tint(base, 0.16)];
+}
+
 // ---------------------------------------------------------------------------
 // Ordered dithering: posterize colors to coarse levels and dither between
 // them with a Bayer matrix, the classic pixel-art way to draw gradients.
@@ -1008,12 +1167,12 @@ function tileTypeAt(wx, wy) {
   return tiles[ty][tx];
 }
 
-// Ground colors are seasonal: these are the spring values, and
-// updateSeason() rewrites them as the round progresses
-let GRASS = "#72ca55";
-const GRASS_DOTS = ["#5fb944", "#8adf70", "#97e87e", "#52a63f"];
-let DIRT = "#a87e50";
-const DIRT_DOTS = ["#8f6940", "#bb9264"];
+// Ground colors are seasonal: these are the spring values (from this map's
+// own palette), and updateSeason() rewrites them as the round progresses
+let GRASS = PROFILE.palette.grass[0];
+const GRASS_DOTS = grassDotShades(GRASS);
+let DIRT = PROFILE.palette.dirt[0];
+const DIRT_DOTS = dirtDotShades(DIRT);
 
 // The season color wheel, declared here because the initial map paint
 // already reads it (through winterDepth): 0 = spring, 0.5 = summer,
@@ -1021,7 +1180,19 @@ const DIRT_DOTS = ["#8f6940", "#bb9264"];
 // mixHex quantizes the blends, so colors still move in tiny ticks.
 let seasonQ = 0;
 let seasonStep = -1; // sky repaint trigger, on a fine grid of seasonQ
-const FLOWER_COLORS = ["#ff9ed2", "#ffffff", "#c9a6ff", "#ffb27d"];
+const FLOWER_COLORS = PROFILE.palette.flowers || ["#ff9ed2", "#ffffff", "#c9a6ff", "#ffb27d"];
+
+// The map's own water tone, and the drainage-ditch and ripple shades derived
+// from it
+const WATER_COLOR = PROFILE.palette.water;
+const WATER_RIPPLE = tint(WATER_COLOR, 0.25);
+const DITCH_COLOR = tint(WATER_COLOR, -0.12); // water-filled drainage ditches
+
+// The farmyard's trodden dirt never turns with the seasons (unlike field
+// dirt), so it's pinned to the map's base dirt tone rather than the mutable
+// DIRT variable
+const YARD_DIRT = PROFILE.palette.dirt[0];
+const YARD_DIRT_DARK = tint(YARD_DIRT, -0.16);
 
 const mp = (wx, wy) => ({
   x: projX(wx, wy) + MAP_OFFSET_X,
@@ -1355,13 +1526,13 @@ function drawTile(tx, ty) {
   // overpainting neighbors is a no-op, and clipping to the tile would leave
   // antialiasing seams across the yard.
   if (nearYard) {
-    mapCtx.fillStyle = shade("#a87e50", 1);
+    mapCtx.fillStyle = shade(YARD_DIRT, 1);
     farmYardPath(fc);
     mapCtx.fill();
     mapCtx.strokeStyle = MAP_INK;
     mapCtx.lineWidth = 1;
     mapCtx.stroke();
-    mapCtx.fillStyle = shade("#8f6940", 1);
+    mapCtx.fillStyle = shade(YARD_DIRT_DARK, 1);
     for (const p of yardPixels) mapCtx.fillRect(p.x, p.y, 1, 1);
   }
 
@@ -1482,7 +1653,7 @@ function paintTile(tx, ty) {
         const ay = cur.y + (prev.y - cur.y) * CORNER_T;
         const bx = cur.x + (next.x - cur.x) * CORNER_T;
         const by = cur.y + (next.y - cur.y) * CORNER_T;
-        mapCtx.fillStyle = shade("#3d7dc4", 1); // matches the water fill
+        mapCtx.fillStyle = shade(WATER_COLOR, 1); // matches the water fill
         mapCtx.beginPath();
         mapCtx.moveTo(ax, ay);
         mapCtx.quadraticCurveTo(cur.x, cur.y, bx, by);
@@ -1505,7 +1676,7 @@ function paintTile(tx, ty) {
     const w1 = mp((tx + 1) * TILE, ty * TILE);
     const w2 = mp((tx + 1) * TILE, (ty + 1) * TILE);
     const w3 = mp(tx * TILE, (ty + 1) * TILE);
-    mapCtx.fillStyle = shade("#3d7dc4", 1);
+    mapCtx.fillStyle = shade(WATER_COLOR, 1);
     mapCtx.beginPath();
     mapCtx.moveTo(w0.x, w0.y);
     mapCtx.lineTo(w1.x, w1.y);
@@ -1517,7 +1688,7 @@ function paintTile(tx, ty) {
     mapCtx.lineWidth = 1;
     mapCtx.stroke();
 
-    mapCtx.fillStyle = shade("#6fa9dd", 1); // ripples
+    mapCtx.fillStyle = shade(WATER_RIPPLE, 1); // ripples
     for (let i = 0; i < 5; i++) {
       const p = mp((tx + 0.15 + tr() * 0.7) * TILE, (ty + 0.15 + tr() * 0.7) * TILE);
       mapCtx.fillRect(Math.round(p.x), Math.round(p.y), 2, 1);
@@ -1591,7 +1762,7 @@ function paintTile(tx, ty) {
   if (type >= 2) {
     // Furrow lines parallel to the direction the tile was plowed in
     const alongX = dirs[ty][tx] === 1;
-    mapCtx.strokeStyle = shade("#8a6540", kc);
+    mapCtx.strokeStyle = shade(tint(DIRT, -0.22), kc);
     mapCtx.lineWidth = 1;
     for (const s of [0.25, 0.5, 0.75]) {
       const a = alongX
@@ -1699,9 +1870,9 @@ const roadTiles = new Set();
 const patches = [];
 const forestTiles = new Set(); // tile indexes under forest stands
 const tileKey = (wx, wy) => ((wy / TILE) | 0) * MAP_TILES + ((wx / TILE) | 0);
-const ROAD_COLOR = "#c09a66";
-const BRIDGE_COLOR = "#9a7442"; // road surface where it crosses water
-const DITCH_COLOR = "#3a6ea8"; // water-filled drainage ditches
+const ROAD_COLOR = PROFILE.palette.road;
+const BRIDGE_COLOR = tint(ROAD_COLOR, -0.2); // road surface where it crosses water
+const ROAD_SPECKLE = tint(ROAD_COLOR, -0.15); // wheel-worn speckles along the middle
 // Stamps by tile index: roads and ditches are painted over the tiles, so
 // whenever a tile repaints (field work, seasons) they must be restored
 const roadStamps = new Map();
@@ -2101,8 +2272,8 @@ function makeMap() {
   const south = mp(MAP_SIZE, MAP_SIZE);
   const west = mp(0, MAP_SIZE);
   for (const [a, b, color] of [
-    [east, south, "#8a6540"],
-    [south, west, "#6f4d2c"],
+    [east, south, tint(YARD_DIRT, -0.22)],
+    [south, west, tint(YARD_DIRT, -0.36)],
   ]) {
     mapCtx.fillStyle = shade(color, 1);
     mapCtx.beginPath();
@@ -2171,7 +2342,7 @@ function makeMap() {
       mapCtx.fill();
     }
     // Wheel-worn speckles along the middle
-    mapCtx.fillStyle = shade("#a37e4e", 1);
+    mapCtx.fillStyle = shade(ROAD_SPECKLE, 1);
     for (let i = 0; i < road.pts.length; i += 3) {
       const p = road.pts[i];
       const c = mp(
@@ -2185,13 +2356,13 @@ function makeMap() {
 
   // Trodden dirt yard around the farm buildings
   const fc = mp(FARM.x, FARM.y);
-  mapCtx.fillStyle = shade("#a87e50", 1);
+  mapCtx.fillStyle = shade(YARD_DIRT, 1);
   farmYardPath(fc);
   mapCtx.fill();
   mapCtx.strokeStyle = MAP_INK;
   mapCtx.lineWidth = 1;
   mapCtx.stroke();
-  mapCtx.fillStyle = shade("#8f6940", 1);
+  mapCtx.fillStyle = shade(YARD_DIRT_DARK, 1);
   for (let i = 0; i < 40; i++) {
     const a = rand() * Math.PI * 2;
     const r = Math.sqrt(rand()) * yardScaleAt(a) * 0.94; // stay shy of the rim
@@ -2215,10 +2386,19 @@ minimapCanvas.width = MAP_TILES * 2;
 minimapCanvas.height = MAP_TILES;
 const minimapCtx = minimapCanvas.getContext("2d");
 
-// grass, field, plowed, seeded, water; ripe crops turn gold. Plowed is a
-// clearly darker brown than stubble so the two read apart at a glance,
-// both here and in the field ledger's legend swatches.
-const MINIMAP_COLORS = ["#4fa83e", "#a87e50", "#6b4526", "#90c83c", "#3d7dc4"];
+// grass, field, plowed, seeded, water; ripe crops turn gold (kept a universal
+// wheat tone below, unlike the rest of this array — grain looks the same
+// color regardless of biome). Plowed is a clearly darker brown than stubble
+// so the two read apart at a glance, both here and in the field ledger's
+// legend swatches. Derived from the map's palette rather than hand-picked so
+// every theme gets a matching minimap.
+const MINIMAP_COLORS = [
+  tint(PROFILE.palette.grass[1], -0.22),
+  PROFILE.palette.dirt[0],
+  tint(PROFILE.palette.dirt[0], -0.45),
+  tint(PROFILE.palette.grass[1], 0.32),
+  WATER_COLOR,
+];
 
 // The farm marker's footprint in minimap diamond space (matches the fillRect
 // below it's drawn with). minimapTile steers clear of these pixels so
@@ -2234,7 +2414,7 @@ FARM_MARKER.y1 = FARM_MARKER.y0 + 2;
 function minimapTile(tx, ty) {
   const type = tiles[ty][tx];
   let color = MINIMAP_COLORS[type];
-  if (type === 0 && forestTiles.has(ty * MAP_TILES + tx)) color = "#2f7a2c";
+  if (type === 0 && forestTiles.has(ty * MAP_TILES + tx)) color = PROFILE.palette.conifer;
   if (type === 3 && cropStage(growth[ty][tx]) >= 3) color = "#e3c355";
   minimapCtx.fillStyle = shade(color, 1);
   const px = tx - ty + MAP_TILES - 1;
@@ -2276,32 +2456,36 @@ const TREE_BOXES = [
 ];
 
 // Cloud-shaped canopy: one big blob with two smaller ones tucked against it.
-// Spring colors; updateSeason() recolors them through summer into autumn,
-// and in the cyclical modes on under a cap of winter snow.
+// Spring colors (this map's palette); updateSeason() recolors them through
+// summer into autumn, and in the cyclical modes on under a cap of winter
+// snow.
 const TREE_BLOBS = [
-  { blob: true, x: 0, y: 0, z: 7.2, r: 4.2, color: "#57b754" },
-  { blob: true, x: 1.5, y: -1.5, z: 9.6, r: 2.7, color: "#68c765", bias: 0.05 },
-  { blob: true, x: -1.3, y: 1.3, z: 10.2, r: 2.1, color: "#7cd678", bias: 0.1 },
+  { blob: true, x: 0, y: 0, z: 7.2, r: 4.2, color: PROFILE.palette.canopy[0] },
+  { blob: true, x: 1.5, y: -1.5, z: 9.6, r: 2.7, color: tint(PROFILE.palette.canopy[0], 0.1), bias: 0.05 },
+  { blob: true, x: -1.3, y: 1.3, z: 10.2, r: 2.1, color: tint(PROFILE.palette.canopy[0], 0.22), bias: 0.1 },
 ];
 
-// Conifers are evergreen: their colors stay put through the seasons.
-// Spruce: a tall narrow cone of tapering tiers.
+// Conifers are evergreen: their colors stay put through the seasons, so
+// they're set once from this map's palette rather than going through
+// updateSeason(). Spruce: a tall narrow cone of tapering tiers.
 const CONIFER_BOXES = [
   { x0: -0.7, x1: 0.7, y0: -0.7, y1: 0.7, z0: 0.0, z1: 2.4, color: "#7a4f30" }, // trunk
 ];
+const SPRUCE_BASE = PROFILE.palette.conifer;
 const SPRUCE_BLOBS = [
-  { blob: true, x: 0, y: 0, z: 3.0, r: 2.6, color: "#2c6330" },
-  { blob: true, x: 0, y: 0, z: 5.6, r: 2.0, color: "#316936", bias: 0.05 },
-  { blob: true, x: 0, y: 0, z: 7.9, r: 1.5, color: "#376f3a", bias: 0.1 },
-  { blob: true, x: 0, y: 0, z: 9.9, r: 1.0, color: "#3d753e", bias: 0.15 },
-  { blob: true, x: 0, y: 0, z: 11.4, r: 0.55, color: "#427a42", bias: 0.2 },
+  { blob: true, x: 0, y: 0, z: 3.0, r: 2.6, color: SPRUCE_BASE },
+  { blob: true, x: 0, y: 0, z: 5.6, r: 2.0, color: tint(SPRUCE_BASE, 0.05), bias: 0.05 },
+  { blob: true, x: 0, y: 0, z: 7.9, r: 1.5, color: tint(SPRUCE_BASE, 0.1), bias: 0.1 },
+  { blob: true, x: 0, y: 0, z: 9.9, r: 1.0, color: tint(SPRUCE_BASE, 0.15), bias: 0.15 },
+  { blob: true, x: 0, y: 0, z: 11.4, r: 0.55, color: tint(SPRUCE_BASE, 0.2), bias: 0.2 },
 ];
 // Fir: broader and softer, with a blue-green cast
+const FIR_BASE = tint(SPRUCE_BASE, 0.12);
 const FIR_BLOBS = [
-  { blob: true, x: 0, y: 0, z: 3.0, r: 3.2, color: "#35714b" },
-  { blob: true, x: 0, y: 0, z: 5.8, r: 2.5, color: "#3a7850", bias: 0.05 },
-  { blob: true, x: 0, y: 0, z: 8.3, r: 1.8, color: "#407e54", bias: 0.1 },
-  { blob: true, x: 0, y: 0, z: 10.3, r: 1.0, color: "#468457", bias: 0.15 },
+  { blob: true, x: 0, y: 0, z: 3.0, r: 3.2, color: FIR_BASE },
+  { blob: true, x: 0, y: 0, z: 5.8, r: 2.5, color: tint(FIR_BASE, 0.05), bias: 0.05 },
+  { blob: true, x: 0, y: 0, z: 8.3, r: 1.8, color: tint(FIR_BASE, 0.1), bias: 0.1 },
+  { blob: true, x: 0, y: 0, z: 10.3, r: 1.0, color: tint(FIR_BASE, 0.15), bias: 0.15 },
 ];
 
 const TREE_KINDS = [
@@ -3759,26 +3943,19 @@ function restampTracks(tx, ty) {
 // the new colors gradually as a few random tiles repaint every frame.
 // ---------------------------------------------------------------------------
 
-const GRASS_SEASONS = ["#72ca55", "#55b043", "#bda355", "#e9f1f5"];
-const GRASS_DOT_SEASONS = [
-  ["#5fb944", "#47a136", "#a89043", "#d8e5ec"],
-  ["#8adf70", "#6cc957", "#cdb45e", "#f6fafc"],
-  ["#97e87e", "#78d364", "#d9c06a", "#ffffff"],
-  ["#52a63f", "#3f8f31", "#96813c", "#cfdfe8"],
-];
-// Bare fields stay brown until the snow settles on them
-const DIRT_SEASONS = ["#a87e50", "#a87e50", "#a87e50", "#e2eaee"];
-const DIRT_DOT_SEASONS = [
-  ["#8f6940", "#8f6940", "#8f6940", "#c9d8e0"],
-  ["#bb9264", "#bb9264", "#bb9264", "#f2f7fa"],
-];
+// The map's own palette (see MAP_PROFILES) supplies the four season
+// keyframes for grass/dirt/sky/canopy; dot speckles and canopy tiers are
+// derived from those via tint() rather than hand-authored per map, so a new
+// theme only needs to specify its handful of base tones.
+const GRASS_SEASONS = PROFILE.palette.grass;
+const DIRT_SEASONS = PROFILE.palette.dirt;
 const TREE_BLOB_SEASONS = [
-  ["#57b754", "#4fae4a", "#c67b2e", "#dde9ee"],
-  ["#68c765", "#5fc257", "#d99a33", "#eaf2f5"],
-  ["#7cd678", "#72d367", "#e8b84a", "#f6fafc"],
+  PROFILE.palette.canopy,
+  PROFILE.palette.canopy.map((c) => tint(c, 0.1)),
+  PROFILE.palette.canopy.map((c) => tint(c, 0.22)),
 ];
-const SKY_TOP_SEASONS = ["#7ac9ef", "#6fc3e8", "#8fb8d8", "#9db9cf"];
-const SKY_BOTTOM_SEASONS = ["#c8ecf8", "#c2e8f2", "#ecdcc0", "#e9eef2"];
+const SKY_TOP_SEASONS = PROFILE.palette.skyTop;
+const SKY_BOTTOM_SEASONS = PROFILE.palette.skyBottom;
 
 // The round is presented as a calendar: April 1st through October 31st,
 // and in the cyclical modes the winter break carries it on to March 31st
@@ -3786,20 +3963,6 @@ const MONTH_NAMES = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SE
 const SEASON_DAYS = 213; // days from Apr 1 to Oct 31
 const WINTER_DAYS = 150; // days from Nov 1 to Mar 31
 const SEASON_BAR_COLORS = ["#6fce58", "#4fae4a", "#d99a33", "#eef4f7"];
-
-const mixCache = {};
-function mixHex(a, b, t) {
-  const key = a + b + ((t * 64) | 0);
-  if (mixCache[key]) return mixCache[key];
-  const va = parseInt(a.slice(1), 16);
-  const vb = parseInt(b.slice(1), 16);
-  let out = "#";
-  for (const shift of [16, 8, 0]) {
-    const v = Math.round(((va >> shift) & 255) * (1 - t) + ((vb >> shift) & 255) * t);
-    out += v.toString(16).padStart(2, "0");
-  }
-  return (mixCache[key] = out);
-}
 
 function seasonHex(colors) {
   const seg = Math.min(3, (seasonQ * 2) | 0);
@@ -3822,10 +3985,10 @@ function updateSeason() {
       : Math.min(1, Math.max(0, 1 - timeLeft / ROUND_TIME));
   GRASS = seasonHex(GRASS_SEASONS);
   DIRT = seasonHex(DIRT_SEASONS);
-  for (let i = 0; i < GRASS_DOTS.length; i++)
-    GRASS_DOTS[i] = seasonHex(GRASS_DOT_SEASONS[i]);
-  for (let i = 0; i < DIRT_DOTS.length; i++)
-    DIRT_DOTS[i] = seasonHex(DIRT_DOT_SEASONS[i]);
+  const gDots = grassDotShades(GRASS);
+  for (let i = 0; i < GRASS_DOTS.length; i++) GRASS_DOTS[i] = gDots[i];
+  const dDots = dirtDotShades(DIRT);
+  for (let i = 0; i < DIRT_DOTS.length; i++) DIRT_DOTS[i] = dDots[i];
   for (let i = 0; i < TREE_BLOBS.length; i++)
     TREE_BLOBS[i].color = seasonHex(TREE_BLOB_SEASONS[i]);
   // The sky is a full-canvas dithered repaint, so it only redraws on a
