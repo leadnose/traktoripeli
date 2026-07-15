@@ -2220,13 +2220,31 @@ const minimapCtx = minimapCanvas.getContext("2d");
 // both here and in the field ledger's legend swatches.
 const MINIMAP_COLORS = ["#4fa83e", "#a87e50", "#6b4526", "#90c83c", "#3d7dc4"];
 
+// The farm marker's footprint in minimap diamond space (matches the fillRect
+// below it's drawn with). minimapTile steers clear of these pixels so
+// season and field repaints, which restamp random tiles over time, can
+// never paint over the marker.
+const FARM_MARKER = {
+  x0: Math.round((FARM.x - FARM.y) / TILE) + MAP_TILES - 1,
+  y0: Math.round((FARM.x + FARM.y) / (2 * TILE)) - 1,
+};
+FARM_MARKER.x1 = FARM_MARKER.x0 + 2;
+FARM_MARKER.y1 = FARM_MARKER.y0 + 2;
+
 function minimapTile(tx, ty) {
   const type = tiles[ty][tx];
   let color = MINIMAP_COLORS[type];
   if (type === 0 && forestTiles.has(ty * MAP_TILES + tx)) color = "#2f7a2c";
   if (type === 3 && cropStage(growth[ty][tx]) >= 3) color = "#e3c355";
   minimapCtx.fillStyle = shade(color, 1);
-  minimapCtx.fillRect(tx - ty + MAP_TILES - 1, (tx + ty) >> 1, 2, 1);
+  const px = tx - ty + MAP_TILES - 1;
+  const py = (tx + ty) >> 1;
+  for (let dx = 0; dx < 2; dx++) {
+    const x = px + dx;
+    if (x >= FARM_MARKER.x0 && x <= FARM_MARKER.x1 && py >= FARM_MARKER.y0 && py <= FARM_MARKER.y1)
+      continue;
+    minimapCtx.fillRect(x, py, 1, 1);
+  }
 }
 
 makeMap();
@@ -2244,14 +2262,10 @@ for (const p of roadSamples)
     1
   );
 
-// Farm marker
+// Farm marker, at the yard's center (kept clear of tile repaints by
+// minimapTile's FARM_MARKER check above)
 minimapCtx.fillStyle = "#e04030";
-minimapCtx.fillRect(
-  Math.round((FARM.x - FARM.y) / TILE) + MAP_TILES - 1,
-  Math.round((FARM.x + FARM.y) / (2 * TILE)) - 1,
-  3,
-  3
-);
+minimapCtx.fillRect(FARM_MARKER.x0, FARM_MARKER.y0, 3, 3);
 
 // ---------------------------------------------------------------------------
 // Lollipop trees scattered over the meadows
@@ -5076,8 +5090,8 @@ function draw() {
     label(text, topX, topY, color || "#f5e9c8");
     topX += screenCtx.measureText(text).width;
   };
-  topSeg(`${mode.toUpperCase()}  `, "#ffd94f");
-  topSeg(`MAP ${MAP_INDEX}   `);
+  topSeg(`#${MAP_INDEX} ${PROFILE.name.toUpperCase()}  `);
+  topSeg(`${mode.toUpperCase()}   `, "#ffd94f");
   topSeg(`[P] PAUSE  [F1] MENU`, "#d8c49a");
 
   // Season calendar instead of a clock: the year and date count from spring
