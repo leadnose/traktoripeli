@@ -5307,7 +5307,6 @@ function draw() {
   };
   topSeg(`#${MAP_INDEX} ${PROFILE.name.toUpperCase()}  `);
   topSeg(`${mode.toUpperCase()}   `, "#ffd94f");
-  topSeg(`[P] PAUSE  [F1] MENU`, "#d8c49a");
 
   // Season calendar instead of a clock: the year and date count from spring
   // toward Oct 31 along a wooden trough; in survival the tax bill waits at
@@ -5357,11 +5356,15 @@ function draw() {
   screenCtx.fillStyle = flash ? "#ff5040" : seasonHex(SEASON_BAR_COLORS);
   screenCtx.fillRect(bx, by, Math.round(barW * progress), barH);
 
-  // Right: the music & sound icons
+  // Right: the pause/menu hint, then the music & sound icons
   let rx = screenCanvas.width - 12;
   drawSpeakerIcon(rx - 13, 8, !soundMuted);
   rx -= 13 + 10;
   drawNoteIcon(rx - 12, 8, !musicMuted);
+  rx -= 12 + 14;
+  screenCtx.textAlign = "right";
+  label(`[P] PAUSE  [F1] MENU`, rx, topY, "#d8c49a");
+  screenCtx.textAlign = "left";
 
   // Game over: final score and the all-time best list
   if (gameOver) {
