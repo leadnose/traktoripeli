@@ -32,20 +32,22 @@ const ctx = view.getContext("2d");
 // and "free land" are a direct complementary pair: forest: [0,1] means
 // none of that leftover land is wooded (all free/open grass) up to all of
 // it (no free land at all), and every value in between is reachable.
+// meadow is, in turn, a share of whatever free grass forest didn't claim —
+// open ground given over to tall wildflower patches instead of plain grass.
 // hilliness is a multiplier on the hill generator's stock count/height.
 // ---------------------------------------------------------------------------
 
 const MAP_PROFILES = [
-  { name: "Homestead Plains", seed: 1137, water: [0.03, 0.10], field: [0.45, 0.65], forest: [0.10, 0.25], hilliness: [0.4, 0.6] },
-  { name: "River Valley", seed: 1274, water: [0.35, 0.50], field: [0.20, 0.35], forest: [0.15, 0.30], hilliness: [0.8, 1.2] },
-  { name: "Highlands", seed: 1411, water: [0.10, 0.20], field: [0.15, 0.30], forest: [0.30, 0.50], hilliness: [1.7, 2.2] },
-  { name: "Deep Woods", seed: 1548, water: [0.20, 0.35], field: [0.05, 0.15], forest: [0.85, 1.00], hilliness: [0.8, 1.2] },
-  { name: "Patchwork Farm", seed: 1685, water: [0.03, 0.10], field: [0.55, 0.72], forest: [0.00, 0.08], hilliness: [0.4, 0.6] },
-  { name: "Lake District", seed: 1822, water: [0.45, 0.60], field: [0.10, 0.20], forest: [0.10, 0.25], hilliness: [0.4, 0.6] },
-  { name: "Rolling Hills", seed: 1959, water: [0.10, 0.20], field: [0.30, 0.45], forest: [0.30, 0.50], hilliness: [1.3, 1.7] },
-  { name: "Wetlands", seed: 2096, water: [0.35, 0.50], field: [0.05, 0.15], forest: [0.60, 0.80], hilliness: [0.4, 0.6] },
-  { name: "Frontier", seed: 2233, water: [0.03, 0.10], field: [0.05, 0.15], forest: [0.00, 0.08], hilliness: [0.8, 1.2] },
-  { name: "Wilderness", seed: 2370, water: [0.10, 0.20], field: [0.05, 0.15], forest: [0.85, 1.00], hilliness: [1.7, 2.2] },
+  { name: "Homestead Plains", seed: 1137, water: [0.03, 0.10], field: [0.45, 0.65], forest: [0.10, 0.25], meadow: [0.20, 0.40], hilliness: [0.4, 0.6] },
+  { name: "River Valley", seed: 1274, water: [0.35, 0.50], field: [0.20, 0.35], forest: [0.15, 0.30], meadow: [0.15, 0.30], hilliness: [0.8, 1.2] },
+  { name: "Highlands", seed: 1411, water: [0.10, 0.20], field: [0.15, 0.30], forest: [0.30, 0.50], meadow: [0.25, 0.45], hilliness: [1.7, 2.2] },
+  { name: "Deep Woods", seed: 1548, water: [0.20, 0.35], field: [0.05, 0.15], forest: [0.85, 1.00], meadow: [0.00, 0.10], hilliness: [0.8, 1.2] },
+  { name: "Patchwork Farm", seed: 1685, water: [0.03, 0.10], field: [0.55, 0.72], forest: [0.00, 0.08], meadow: [0.35, 0.55], hilliness: [0.4, 0.6] },
+  { name: "Lake District", seed: 1822, water: [0.45, 0.60], field: [0.10, 0.20], forest: [0.10, 0.25], meadow: [0.20, 0.35], hilliness: [0.4, 0.6] },
+  { name: "Rolling Hills", seed: 1959, water: [0.10, 0.20], field: [0.30, 0.45], forest: [0.30, 0.50], meadow: [0.25, 0.45], hilliness: [1.3, 1.7] },
+  { name: "Wetlands", seed: 2096, water: [0.35, 0.50], field: [0.05, 0.15], forest: [0.60, 0.80], meadow: [0.05, 0.20], hilliness: [0.4, 0.6] },
+  { name: "Frontier", seed: 2233, water: [0.03, 0.10], field: [0.05, 0.15], forest: [0.00, 0.08], meadow: [0.45, 0.65], hilliness: [0.8, 1.2] },
+  { name: "Wilderness", seed: 2370, water: [0.10, 0.20], field: [0.05, 0.15], forest: [0.85, 1.00], meadow: [0.00, 0.10], hilliness: [1.7, 2.2] },
 ];
 
 // ---------------------------------------------------------------------------
@@ -1012,6 +1014,8 @@ function tileTypeAt(wx, wy) {
 // updateSeason() rewrites them as the round progresses
 let GRASS = "#72ca55";
 const GRASS_DOTS = ["#5fb944", "#8adf70", "#97e87e", "#52a63f"];
+let MEADOW = "#a4d94c"; // warmer, yellower than plain grass — a wildflower patch
+const MEADOW_DOTS = ["#8ccf3c", "#b8e85a", "#c8f070", "#7ec836"];
 let DIRT = "#a87e50";
 const DIRT_DOTS = ["#8f6940", "#bb9264"];
 
@@ -1439,31 +1443,37 @@ function paintTile(tx, ty) {
   };
 
   if (type === 0) {
-    subQuads(GRASS);
+    const meadow = meadowTiles.has(ty * MAP_TILES + tx);
+    subQuads(meadow ? MEADOW : GRASS);
 
-    // Speckles: grass tufts
-    for (let i = 0; i < 8; i++) {
+    // Speckles: grass tufts (meadow tufts run warmer and thicker)
+    const dots = meadow ? MEADOW_DOTS : GRASS_DOTS;
+    for (let i = 0; i < (meadow ? 11 : 8); i++) {
       const p = mp((tx + tr()) * TILE, (ty + tr()) * TILE);
-      mapCtx.fillStyle = shade(GRASS_DOTS[(tr() * GRASS_DOTS.length) | 0], kc);
+      mapCtx.fillStyle = shade(dots[(tr() * dots.length) | 0], kc);
       mapCtx.fillRect(Math.round(p.x), Math.round(p.y), 1, 1);
     }
 
-    // Little meadow flowers: four petals around a yellow heart; forests
-    // keep their floor bare, and deep winter buries the meadows' too
-    if (!forestTiles.has(ty * MAP_TILES + tx) && tr() < 0.5 && winterDepth() < 0.4) {
-      const p = mp(
-        (tx + 0.2 + tr() * 0.6) * TILE,
-        (ty + 0.2 + tr() * 0.6) * TILE
-      );
-      const x = Math.round(p.x);
-      const y = Math.round(p.y);
-      mapCtx.fillStyle = shade(FLOWER_COLORS[(tr() * FLOWER_COLORS.length) | 0], kc);
-      mapCtx.fillRect(x - 1, y, 1, 1);
-      mapCtx.fillRect(x + 1, y, 1, 1);
-      mapCtx.fillRect(x, y - 1, 1, 1);
-      mapCtx.fillRect(x, y + 1, 1, 1);
-      mapCtx.fillStyle = shade("#ffd94f", kc);
-      mapCtx.fillRect(x, y, 1, 1);
+    // Little flowers: four petals around a yellow heart; forests keep
+    // their floor bare, deep winter buries them, and meadows bloom with
+    // two or three where plain grass gets at most one
+    if (!forestTiles.has(ty * MAP_TILES + tx) && winterDepth() < 0.4) {
+      const spots = meadow ? 1 + ((tr() * 3) | 0) : tr() < 0.5 ? 1 : 0;
+      for (let f = 0; f < spots; f++) {
+        const p = mp(
+          (tx + 0.2 + tr() * 0.6) * TILE,
+          (ty + 0.2 + tr() * 0.6) * TILE
+        );
+        const x = Math.round(p.x);
+        const y = Math.round(p.y);
+        mapCtx.fillStyle = shade(FLOWER_COLORS[(tr() * FLOWER_COLORS.length) | 0], kc);
+        mapCtx.fillRect(x - 1, y, 1, 1);
+        mapCtx.fillRect(x + 1, y, 1, 1);
+        mapCtx.fillRect(x, y - 1, 1, 1);
+        mapCtx.fillRect(x, y + 1, 1, 1);
+        mapCtx.fillStyle = shade("#ffd94f", kc);
+        mapCtx.fillRect(x, y, 1, 1);
+      }
     }
 
     // Round every corner this grass tile turns against water: same crescent
@@ -1698,6 +1708,7 @@ const roadSamples = [];
 const roadTiles = new Set();
 const patches = [];
 const forestTiles = new Set(); // tile indexes under forest stands
+const meadowTiles = new Set(); // tile indexes under wildflower meadow patches
 const tileKey = (wx, wy) => ((wy / TILE) | 0) * MAP_TILES + ((wx / TILE) | 0);
 const ROAD_COLOR = "#c09a66";
 const BRIDGE_COLOR = "#9a7442"; // road surface where it crosses water
@@ -2086,6 +2097,28 @@ function makeMap() {
           forestTiles.add(ty * MAP_TILES + tx);
   }
 
+  // Meadow patches: grown the same way as forest stands, but over whatever
+  // free grass forest left behind — bright open wildflower ground instead
+  // of tree cover. Share is of that remaining free land, from the profile.
+  const meadowTarget = (openLand - forestTiles.size) * rollBand(PROFILE.meadow);
+  for (let tries = 0; meadowTiles.size < meadowTarget && tries < 600; tries++) {
+    const cx = 2 + ((rand() * (MAP_TILES - 4)) | 0);
+    const cy = 2 + ((rand() * (MAP_TILES - 4)) | 0);
+    if (tiles[cy][cx] !== 0 || forestTiles.has(cy * MAP_TILES + cx)) continue;
+    if (Math.hypot((cx + 0.5) * TILE - FARM.x, (cy + 0.5) * TILE - FARM.y) < FARM_RADIUS + 40)
+      continue;
+    const r = 2.5 + rand() * 4;
+    for (let ty = Math.max(0, Math.floor(cy - r)); ty <= Math.min(MAP_TILES - 1, Math.ceil(cy + r)); ty++)
+      for (let tx = Math.max(0, Math.floor(cx - r)); tx <= Math.min(MAP_TILES - 1, Math.ceil(cx + r)); tx++)
+        if (
+          tiles[ty][tx] === 0 &&
+          !forestTiles.has(ty * MAP_TILES + tx) &&
+          Math.hypot(tx - cx, ty - cy) < r * (0.7 + rand() * 0.6) &&
+          Math.hypot((tx + 0.5) * TILE - FARM.x, (ty + 0.5) * TILE - FARM.y) > FARM_RADIUS + 40
+        )
+          meadowTiles.add(ty * MAP_TILES + tx);
+  }
+
   // Back-to-front so nearer hills paint over the ones behind them. paintTile
   // skips the per-tile dithering: the whole canvas gets one pass at the end.
   for (let s = 0; s <= 2 * (MAP_TILES - 1); s++) {
@@ -2235,6 +2268,7 @@ function minimapTile(tx, ty) {
   const type = tiles[ty][tx];
   let color = MINIMAP_COLORS[type];
   if (type === 0 && forestTiles.has(ty * MAP_TILES + tx)) color = "#2f7a2c";
+  if (type === 0 && meadowTiles.has(ty * MAP_TILES + tx)) color = "#c8d94a";
   if (type === 3 && cropStage(growth[ty][tx]) >= 3) color = "#e3c355";
   minimapCtx.fillStyle = shade(color, 1);
   const px = tx - ty + MAP_TILES - 1;
@@ -2332,17 +2366,19 @@ for (const k of forestTiles) {
   }
 }
 
-// Lone trees scattered over the open meadows
+// Lone trees scattered over open grass, kept clear of the wildflower
+// meadows so those patches read as open ground rather than clearings
 const loneTarget = trees.length + 70;
 for (let attempts = 0; trees.length < loneTarget && attempts < 5000; attempts++) {
   const wx = 24 + rand() * (MAP_SIZE - 48);
   const wy = 24 + rand() * (MAP_SIZE - 48);
   if (tileTypeAt(wx, wy) !== 0) continue; // grass only, never on a field
   if (forestTiles.has(tileKey(wx, wy))) continue; // stands are planted above
+  if (meadowTiles.has(tileKey(wx, wy))) continue; // meadows stay open
   if (roadTiles.has(tileKey(wx, wy))) continue; // and never on a road
   if (Math.hypot(wx - FARM.x, wy - FARM.y) < FARM_RADIUS + 30) continue;
   if (trees.some((t) => Math.hypot(t.wx - wx, t.wy - wy) < 20)) continue;
-  // Open meadows favor lone deciduous trees, with the odd conifer
+  // Open grass favors lone deciduous trees, with the odd conifer
   const r = rand();
   trees.push({
     wx,
@@ -3766,6 +3802,15 @@ const GRASS_DOT_SEASONS = [
   ["#97e87e", "#78d364", "#d9c06a", "#ffffff"],
   ["#52a63f", "#3f8f31", "#96813c", "#cfdfe8"],
 ];
+// Meadows run warmer/yellower than plain grass and turn properly golden
+// (dried hay) in autumn rather than just tanning like the grass does
+const MEADOW_SEASONS = ["#a4d94c", "#8ecf3a", "#dbc04a", "#eef4f5"];
+const MEADOW_DOT_SEASONS = [
+  ["#8ccf3c", "#6fbf2e", "#c7ab3c", "#d8e5ec"],
+  ["#b8e85a", "#9edb42", "#e0c766", "#f6fafc"],
+  ["#c8f070", "#a8e050", "#e8d370", "#ffffff"],
+  ["#7ec836", "#63b028", "#b09a3a", "#cfdfe8"],
+];
 // Bare fields stay brown until the snow settles on them
 const DIRT_SEASONS = ["#a87e50", "#a87e50", "#a87e50", "#e2eaee"];
 const DIRT_DOT_SEASONS = [
@@ -3821,9 +3866,12 @@ function updateSeason() {
       ? 1 + Math.min(1, Math.max(0, 1 - winterLeft / WINTER_TIME))
       : Math.min(1, Math.max(0, 1 - timeLeft / ROUND_TIME));
   GRASS = seasonHex(GRASS_SEASONS);
+  MEADOW = seasonHex(MEADOW_SEASONS);
   DIRT = seasonHex(DIRT_SEASONS);
   for (let i = 0; i < GRASS_DOTS.length; i++)
     GRASS_DOTS[i] = seasonHex(GRASS_DOT_SEASONS[i]);
+  for (let i = 0; i < MEADOW_DOTS.length; i++)
+    MEADOW_DOTS[i] = seasonHex(MEADOW_DOT_SEASONS[i]);
   for (let i = 0; i < DIRT_DOTS.length; i++)
     DIRT_DOTS[i] = seasonHex(DIRT_DOT_SEASONS[i]);
   for (let i = 0; i < TREE_BLOBS.length; i++)
