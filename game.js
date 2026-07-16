@@ -599,6 +599,10 @@ window.addEventListener("keydown", (e) => {
     if (menuOpen) menuSaveInfo = loadSave();
     return;
   }
+  if (gameOver && !menuOpen && (e.key === "s" || e.key === "S") && !e.repeat) {
+    continueInSandbox();
+    return;
+  }
   if (menuOpen) {
     // The menu swallows all input: left/right pick the map, up/down pick
     // the mode, digits jump straight to a map, R rolls a random one, Enter
@@ -4689,6 +4693,17 @@ function endSurvival() {
   }
 }
 
+// Offered on the bankruptcy screen: rather than starting over, the same
+// farm — tractor, fields, calendar — carries on in sandbox mode, debt
+// forgiven and no tax ever falling due again.
+function continueInSandbox() {
+  mode = "sandbox";
+  cash = SANDBOX_START_CASH;
+  gameOver = false;
+  taxFlash = 0;
+  saveGame();
+}
+
 // Starting capital by mode: survival a buffer against the first tax bill,
 // sandbox plenty
 let cash = modeStartCash(mode);
@@ -5440,7 +5455,12 @@ function draw() {
         i === finalRank ? "#ffd94f" : "#e0d0a8"
       );
     });
-    label("[F1] MENU — NEW GAME, MAP OR MODE", cx, y + h - 18, "#c9e6a8");
+    label(
+      "[S] SWITCH TO SANDBOX, KEEP FARMING   [F1] MENU — NEW GAME",
+      cx,
+      y + h - 18,
+      "#c9e6a8"
+    );
     screenCtx.textAlign = "left";
   }
 
