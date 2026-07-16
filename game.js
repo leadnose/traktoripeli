@@ -2490,37 +2490,38 @@ const FARM_MARKER = {
 FARM_MARKER.x1 = FARM_MARKER.x0 + 2;
 FARM_MARKER.y1 = FARM_MARKER.y0 + 2;
 
+// Exact minimap pixels a road passes through, keyed "x,y". Built from
+// roadSamples once the road network exists, then consulted by minimapTile
+// so a road survives every future repaint of the tile underneath it instead
+// of only being stamped once at startup.
+const roadPixels = new Set();
+
 function minimapTile(tx, ty) {
   const type = tiles[ty][tx];
   let color = MINIMAP_COLORS[type];
   if (type === 0 && forestTiles.has(ty * MAP_TILES + tx)) color = PROFILE.palette.conifer;
   if (type === 0 && meadowTiles.has(ty * MAP_TILES + tx)) color = MINIMAP_MEADOW;
   if (type === 3 && cropStage(growth[ty][tx]) >= 3) color = "#e3c355";
-  minimapCtx.fillStyle = shade(color, 1);
   const px = tx - ty + MAP_TILES - 1;
   const py = (tx + ty) >> 1;
   for (let dx = 0; dx < 2; dx++) {
     const x = px + dx;
     if (x >= FARM_MARKER.x0 && x <= FARM_MARKER.x1 && py >= FARM_MARKER.y0 && py <= FARM_MARKER.y1)
       continue;
+    minimapCtx.fillStyle = shade(roadPixels.has(x + "," + py) ? ROAD_COLOR : color, 1);
     minimapCtx.fillRect(x, py, 1, 1);
   }
 }
 
 makeMap();
 
+for (const p of roadSamples)
+  roadPixels.add(
+    Math.round((p.x - p.y) / TILE) + MAP_TILES + "," + Math.round((p.x + p.y) / (2 * TILE))
+  );
+
 for (let ty = 0; ty < MAP_TILES; ty++)
   for (let tx = 0; tx < MAP_TILES; tx++) minimapTile(tx, ty);
-
-// Roads (never under field tiles, so tile updates can't erase them)
-minimapCtx.fillStyle = shade("#c09a66", 1);
-for (const p of roadSamples)
-  minimapCtx.fillRect(
-    Math.round((p.x - p.y) / TILE) + MAP_TILES,
-    Math.round((p.x + p.y) / (2 * TILE)),
-    1,
-    1
-  );
 
 // Farm marker, at the yard's center (kept clear of tile repaints by
 // minimapTile's FARM_MARKER check above)
