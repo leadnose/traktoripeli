@@ -900,25 +900,27 @@ function projY(wx, wy, wz) {
 // ---------------------------------------------------------------------------
 
 // The farmyard lands somewhere different on every map, kept well away from
-// the edges, and the buildings face a random way
+// the edges. The buildings are square-cornered boxes on an isometric grid,
+// so they only ever face one of the 4 cardinal ways — anything in between
+// reads as buildings sitting crooked, off the grid.
 const FARM = {
   x: MAP_SIZE * (0.2 + rand() * 0.6),
   y: MAP_SIZE * (0.2 + rand() * 0.6),
-  angle: rand() * Math.PI * 2,
+  angle: (Math.floor(rand() * 4) * Math.PI) / 2,
 };
-const FARM_RADIUS = 40; // within this distance farm services are available
+const FARM_RADIUS = 50; // within this distance farm services are available
 
 function nearFarm() {
   return Math.hypot(tractor.x - FARM.x, tractor.y - FARM.y) < FARM_RADIUS;
 }
 
 // The fuel tank sits out near the rim of the trampled yard (YARD_RADIUS
-// is ~51 units; this is ~90% of that, clear of the barn/silo cluster
+// is ~64 units; this is ~90% of that, clear of the barn/yard cluster
 // near the center) rather than anywhere within FARM_RADIUS, so refueling
 // (which costs cash) only happens when the player deliberately drives
 // out to it, instead of automatically every time they're at the farm
 // for seed or grain.
-const FUEL_TANK_LOCAL = { x: -8, y: 45 };
+const FUEL_TANK_LOCAL = { x: -8, y: 57 };
 const FUEL_TANK_RADIUS = 16;
 // Shape of the tank itself: a long horizontal cylinder up on legs,
 // see the FARM_BOXES/FARM_SHAPES entries built from these.
@@ -3665,49 +3667,90 @@ function addFenceRun(boxes, x0, y0, x1, y1, color) {
   }
 }
 
+// A pitched roof over a wall footprint, built from two stacked tiers — a
+// chunky eave course sized just like a plain flat roof, and a narrower
+// ridge course riding on top of it. Two tiers rather than a finer taper
+// (an earlier version used three, shrinking to a sliver at the top) reads
+// as a proper roof at this game's scale; more/thinner tiers just blur
+// into an odd lumpy silhouette instead of a crisp ridge line.
+// `ridgeAxis` is the axis the ridge runs along (stays at the wall's own
+// span, plus overhang); the other axis is the one that steps in for the
+// ridge course.
+function addGableRoof(boxes, x0, x1, y0, y1, z0, z1, ridgeAxis, color, overhang) {
+  const cx = (x0 + x1) / 2;
+  const cy = (y0 + y1) / 2;
+  const wallHalfX = (x1 - x0) / 2;
+  const wallHalfY = (y1 - y0) / 2;
+  const midZ = z0 + (z1 - z0) * 0.55;
+  const tiers = [
+    { f: 1.0, eave: overhang, tz0: z0, tz1: midZ }, // eave course, same footprint a flat roof would have
+    { f: 0.4, eave: 0, tz0: midZ, tz1: z1 }, // ridge course
+  ];
+  for (const { f, eave, tz0, tz1 } of tiers) {
+    if (ridgeAxis === "x") {
+      const crossHalf = wallHalfY * f + eave;
+      boxes.push({ x0: x0 - overhang, x1: x1 + overhang, y0: cy - crossHalf, y1: cy + crossHalf, z0: tz0, z1: tz1, color });
+    } else {
+      const crossHalf = wallHalfX * f + eave;
+      boxes.push({ x0: cx - crossHalf, x1: cx + crossHalf, y0: y0 - overhang, y1: y1 + overhang, z0: tz0, z1: tz1, color });
+    }
+  }
+}
+
 const FARM_BOXES = [
   { x0: -16.0, x1: 2.0, y0: -12.0, y1: 2.0, z0: 0.0, z1: 9.0, color: "#3d332a" }, // barn, tarred weatherboard
-  { x0: -17.5, x1: 3.5, y0: -13.5, y1: 3.5, z0: 9.0, z1: 12.0, color: "#5c4530" }, // barn roof
   { x0: -7.5, x1: -3.5, y0: 1.9, y1: 2.3, z0: 0.0, z1: 6.0, color: "#f7e8d8" }, // barn door, whitewashed
-  // Farmhouse: set well back from the barn (a 10-unit gap, not the huddle
-  // the first pass had), brick and clay tile rather than the barn's dark
-  // tarred timber, so the yard reads as a lived-in farmstead and not just
-  // a depot.
-  { x0: -16.0, x1: -2.0, y0: -36.0, y1: -22.0, z0: 0.0, z1: 7.0, color: "#9c6b52" }, // farmhouse walls, brick
-  { x0: -17.0, x1: -1.0, y0: -37.0, y1: -21.0, z0: 7.0, z1: 10.0, color: "#6b3a2e" }, // farmhouse roof, clay tile
-  { x0: -9.8, x1: -8.3, y0: -35.0, y1: -33.5, z0: 8.5, z1: 13.0, color: "#7a5040" }, // chimney stack
-  { x0: -10.0, x1: -8.0, y0: -22.1, y1: -21.7, z0: 0.0, z1: 4.5, color: "#4a3626" }, // farmhouse door
-  { x0: -15.0, x1: -13.5, y0: -22.1, y1: -21.7, z0: 2.5, z1: 4.5, color: "#a8c2c9" }, // window
-  { x0: -4.5, x1: -3.0, y0: -22.1, y1: -21.7, z0: 2.5, z1: 4.5, color: "#a8c2c9" }, // window
-  // Hen house: a small whitewashed coop south of the barn, a 10-unit clearing
-  // rather than crowding its wall, giving the chickens that already wander
-  // here a shelter to belong to.
-  { x0: -13.0, x1: -8.0, y0: 12.0, y1: 17.0, z0: 0.0, z1: 3.0, color: "#c9b28f" }, // hen house, whitewashed weatherboard
-  { x0: -13.6, x1: -7.4, y0: 11.4, y1: 17.6, z0: 3.0, z1: 4.2, color: "#5c4530" }, // hen house roof
-  { x0: -11.0, x1: -10.0, y0: 11.9, y1: 12.1, z0: 0.0, z1: 1.3, color: "#3d332a" }, // pop-hole
-  // Well: stone-lined shaft with a wooden crossbeam and winding roof, out
-  // in the open yard south of the barn, a short walk from the door.
-  { x0: 2.0, x1: 6.0, y0: 12.0, y1: 16.0, z0: 0.0, z1: 2.2, color: "#8a8578" }, // well shaft, stone
-  { x0: 2.4, x1: 3.0, y0: 12.2, y1: 12.8, z0: 2.2, z1: 6.0, color: "#6b5a42" }, // well post
-  { x0: 5.0, x1: 5.6, y0: 15.2, y1: 15.8, z0: 2.2, z1: 6.0, color: "#6b5a42" }, // well post
-  { x0: 1.6, x1: 6.4, y0: 11.6, y1: 16.4, z0: 6.0, z1: 7.0, color: "#5c4530" }, // well roof
-  { x0: 2.4, x1: 5.6, y0: 13.8, y1: 14.2, z0: 5.6, z1: 6.0, color: "#6b5a42" }, // well crossbeam
-  // Granary: moved off the barn's shoulder to a clean 12-unit gap.
-  { x0: 14.5, x1: 15.5, y0: -8.5, y1: -7.5, z0: 0.0, z1: 1.6, color: "#8a8578" }, // staddle leg
-  { x0: 21.5, x1: 22.5, y0: -8.5, y1: -7.5, z0: 0.0, z1: 1.6, color: "#8a8578" }, // staddle leg
-  { x0: 14.5, x1: 15.5, y0: -1.5, y1: -0.5, z0: 0.0, z1: 1.6, color: "#8a8578" }, // staddle leg
-  { x0: 21.5, x1: 22.5, y0: -1.5, y1: -0.5, z0: 0.0, z1: 1.6, color: "#8a8578" }, // staddle leg
-  { x0: 14.0, x1: 23.0, y0: -9.0, y1: 0.0, z0: 1.6, z1: 6.6, color: "#9c7a52" }, // granary body
-  { x0: 13.3, x1: 23.7, y0: -9.7, y1: 0.7, z0: 6.6, z1: 9.0, color: "#5c4530" }, // granary roof
+  // Farmhouse: pulled in close behind its own garden wall (below) rather
+  // than set off across open grass — the wall marks house-from-yard, not
+  // raw distance, so the whole place still reads as one farmstead.
+  { x0: -13.0, x1: 1.0, y0: -30.0, y1: -16.0, z0: 0.0, z1: 7.0, color: "#9c6b52" }, // farmhouse walls, brick
+  { x0: -6.8, x1: -5.3, y0: -29.0, y1: -27.5, z0: 8.5, z1: 13.0, color: "#7a5040" }, // chimney stack
+  { x0: -7.0, x1: -5.0, y0: -16.1, y1: -15.7, z0: 0.0, z1: 4.5, color: "#4a3626" }, // farmhouse door
+  { x0: -12.0, x1: -10.5, y0: -16.1, y1: -15.7, z0: 2.5, z1: 4.5, color: "#a8c2c9" }, // window
+  { x0: -1.5, x1: 0.0, y0: -16.1, y1: -15.7, z0: 2.5, z1: 4.5, color: "#a8c2c9" }, // window
+  // Well: stone-lined shaft with a wooden crossbeam and winding roof, in
+  // the farmhouse's own garden a few steps from the door — domestic
+  // water, kept apart from the stock down in the working yard.
+  { x0: -20.0, x1: -16.0, y0: -19.0, y1: -15.0, z0: 0.0, z1: 2.2, color: "#8a8578" }, // well shaft, stone
+  { x0: -19.6, x1: -19.0, y0: -18.8, y1: -18.2, z0: 2.2, z1: 6.0, color: "#6b5a42" }, // well post
+  { x0: -17.0, x1: -16.4, y0: -15.8, y1: -15.2, z0: 2.2, z1: 6.0, color: "#6b5a42" }, // well post
+  { x0: -20.4, x1: -15.6, y0: -19.4, y1: -14.6, z0: 6.0, z1: 7.0, color: "#5c4530" }, // well roof
+  { x0: -19.6, x1: -16.4, y0: -17.2, y1: -16.8, z0: 5.6, z1: 6.0, color: "#6b5a42" }, // well crossbeam
+  // Hen house: a small whitewashed coop tucked into the working yard's
+  // near corner, right by the barn, where the chickens already scratch.
+  { x0: -9.0, x1: -4.0, y0: 6.0, y1: 11.0, z0: 0.0, z1: 3.0, color: "#c9b28f" }, // hen house, whitewashed weatherboard
+  { x0: -7.0, x1: -6.0, y0: 5.9, y1: 6.1, z0: 0.0, z1: 1.3, color: "#3d332a" }, // pop-hole
+  // Granary: on staddle legs as before, closing the yard's north side.
+  // Clear of the barn's own roofline, with a cart-width gap on to the
+  // cartshed (below) that doubles as the yard's working gate.
+  { x0: 6.5, x1: 7.5, y0: -12.5, y1: -11.5, z0: 0.0, z1: 1.6, color: "#8a8578" }, // staddle leg
+  { x0: 13.5, x1: 14.5, y0: -12.5, y1: -11.5, z0: 0.0, z1: 1.6, color: "#8a8578" }, // staddle leg
+  { x0: 6.5, x1: 7.5, y0: -5.5, y1: -4.5, z0: 0.0, z1: 1.6, color: "#8a8578" }, // staddle leg
+  { x0: 13.5, x1: 14.5, y0: -5.5, y1: -4.5, z0: 0.0, z1: 1.6, color: "#8a8578" }, // staddle leg
+  { x0: 6.0, x1: 15.0, y0: -13.0, y1: -4.0, z0: 1.6, z1: 6.6, color: "#9c7a52" }, // granary body
+  // Cartshed: open-fronted, closing the yard's east side — an everyday
+  // pole shed for carts and tackle, its whole west face left open onto
+  // the yard instead of walled off. Set well out from the barn (below) so
+  // there's real room to swing a tractor and implement between the two.
+  { x0: 31.7, x1: 32.3, y0: -2.5, y1: -1.9, z0: 0.0, z1: 5.5, color: "#3a2e22" }, // open-front post
+  { x0: 31.7, x1: 32.3, y0: 8.1, y1: 8.7, z0: 0.0, z1: 5.5, color: "#3a2e22" }, // open-front post
+  { x0: 40.0, x1: 42.0, y0: -3.0, y1: 9.0, z0: 0.0, z1: 5.5, color: "#4a3a2c" }, // cartshed back wall
+  { x0: 32.0, x1: 42.0, y0: -3.0, y1: -1.0, z0: 0.0, z1: 5.5, color: "#4a3a2c" }, // cartshed side wall
+  { x0: 32.0, x1: 42.0, y0: 7.0, y1: 9.0, z0: 0.0, z1: 5.5, color: "#4a3a2c" }, // cartshed side wall
+  // Cowshed: closes the yard's south side, set well down the yard from the
+  // barn for the same reason — a plain byre for the house cow, nothing as
+  // grand as the barn.
+  { x0: -2.0, x1: 10.0, y0: 32.0, y1: 39.0, z0: 0.0, z1: 4.0, color: "#6b5a42" }, // cowshed walls, weatherboard
+  { x0: 3.0, x1: 5.0, y0: 31.9, y1: 32.3, z0: 0.0, z1: 3.0, color: "#3d332a" }, // cowshed door
   // Hay rick: a thatched straw stack on stone staddles (its round tapering
   // bulk is built from stacked blobs in FARM_SHAPES, same trick as a tree
-  // canopy), backed by a short rickyard fence on its two field-facing sides,
-  // and a clear 16-unit gap from the granary it now sits well clear of.
-  { x0: 18.4, x1: 19.2, y0: 16.4, y1: 17.2, z0: 0.0, z1: 1.4, color: "#8a8578" }, // staddle stone
-  { x0: 22.8, x1: 23.6, y0: 16.4, y1: 17.2, z0: 0.0, z1: 1.4, color: "#8a8578" }, // staddle stone
-  { x0: 18.4, x1: 19.2, y0: 20.8, y1: 21.6, z0: 0.0, z1: 1.4, color: "#8a8578" }, // staddle stone
-  { x0: 22.8, x1: 23.6, y0: 20.8, y1: 21.6, z0: 0.0, z1: 1.4, color: "#8a8578" }, // staddle stone
-  { x0: 18.0, x1: 24.0, y0: 16.0, y1: 22.0, z0: 1.4, z1: 2.0, color: "#c9a24a" }, // staging platform
+  // canopy), tucked past the cartshed in its own small rickyard, backed by
+  // a short fence on its two field-facing sides for fire safety.
+  { x0: 29.4, x1: 30.2, y0: 14.4, y1: 15.2, z0: 0.0, z1: 1.4, color: "#8a8578" }, // staddle stone
+  { x0: 33.8, x1: 34.6, y0: 14.4, y1: 15.2, z0: 0.0, z1: 1.4, color: "#8a8578" }, // staddle stone
+  { x0: 29.4, x1: 30.2, y0: 18.8, y1: 19.6, z0: 0.0, z1: 1.4, color: "#8a8578" }, // staddle stone
+  { x0: 33.8, x1: 34.6, y0: 18.8, y1: 19.6, z0: 0.0, z1: 1.4, color: "#8a8578" }, // staddle stone
+  { x0: 29.0, x1: 35.0, y0: 14.0, y1: 20.0, z0: 1.4, z1: 2.0, color: "#c9a24a" }, // staging platform
   // Fuel tank: a horizontal cylinder lying along the local y axis, built
   // the same way the tractor's own wheels are (an inscribed box for the
   // silhouette plus a full-radius disc at each end, see FARM_SHAPES) —
@@ -3735,23 +3778,41 @@ const FARM_BOXES = [
     color: "#3a3a3a",
   }, // valve hanging below the tank's midpoint
 ];
+// Garden wall: the farmhouse's one boundary fence, the line between the
+// house and the working yard below it.
+addFenceRun(FARM_BOXES, -13, -14, 2, -14, "#6b5a42");
 // Rickyard fence: backs the hay rick's two field-facing sides only (an
 // unbroken ring risks a rail sitting across a road on some maps, and this
 // is plenty to read as "fenced off from the stock")
-addFenceRun(FARM_BOXES, 16, 14, 27, 14, "#6b5a42");
-addFenceRun(FARM_BOXES, 16, 14, 16, 25, "#6b5a42");
+addFenceRun(FARM_BOXES, 27, 12, 38, 12, "#6b5a42");
+addFenceRun(FARM_BOXES, 27, 12, 27, 23, "#6b5a42");
+
+// Gabled roofs — pitched, tapering tiers rather than flat slabs, one call
+// per building (see addGableRoof above). Ridge axis runs the long way.
+// Roofing material varies by building the way a real farmstead's would:
+// the house gets the good clay tile, the barn got re-roofed in Welsh
+// slate once the railway made it affordable, the lesser outbuildings make
+// do with cheap corrugated iron or the barn's old plain tile.
+addGableRoof(FARM_BOXES, -16.0, 2.0, -12.0, 2.0, 9.0, 12.0, "x", "#4f5a5e", 1.5); // barn, slate
+addGableRoof(FARM_BOXES, -13.0, 1.0, -30.0, -16.0, 7.0, 10.0, "x", "#a8543a", 1.0); // farmhouse, terracotta clay tile
+addGableRoof(FARM_BOXES, -9.0, -4.0, 6.0, 11.0, 3.0, 4.4, "x", "#8a929a", 0.6); // hen house, corrugated iron
+addGableRoof(FARM_BOXES, 6.0, 15.0, -13.0, -4.0, 6.6, 9.2, "x", "#8a4a34", 0.7); // granary, aged clay tile
+addGableRoof(FARM_BOXES, 32.0, 42.0, -3.0, 9.0, 5.5, 7.7, "y", "#8a929a", 1.0); // cartshed, corrugated iron
+addGableRoof(FARM_BOXES, -2.0, 10.0, 32.0, 39.0, 4.0, 5.6, "x", "#5c4530", 0.6); // cowshed, plain tile
 
 // The two end-cap discs that round off the fuel tank's cylinder (same
 // box+disc trick as makeWheels: the disc facing the camera reads as the
 // tank's round end, the box gives its silhouette everywhere else), the
-// well's hanging bucket, and the hay rick's tapering thatched bulk (the
-// same stacked-blob trick a tree canopy uses, just wider and golden)
+// well's hanging bucket, the yard's muck midden, and the hay rick's
+// tapering thatched bulk (the same stacked-blob trick a tree canopy uses,
+// just wider and golden)
 const FARM_SHAPES = [
-  { blob: true, x: 4.0, y: 14.0, z: 4.0, r: 0.7, color: "#4a4238" }, // well bucket
-  { blob: true, x: 21.0, y: 19.0, z: 4.0, r: 4.2, color: "#d9b355" }, // rick, main bulk
-  { blob: true, x: 21.0, y: 19.0, z: 6.5, r: 3.0, color: "#cfa64a" }, // rick, tapering
-  { blob: true, x: 21.0, y: 19.0, z: 8.3, r: 1.8, color: "#c49a3f" }, // rick, tapering
-  { blob: true, x: 21.0, y: 19.0, z: 9.4, r: 0.8, color: "#b98f38" }, // rick, thatched cap
+  { blob: true, x: -18.0, y: -17.0, z: 4.0, r: 0.7, color: "#4a4238" }, // well bucket
+  { blob: true, x: 16.0, y: 17.0, z: 0.9, r: 2.0, color: "#3a2e22" }, // muck midden
+  { blob: true, x: 32.0, y: 17.0, z: 4.0, r: 4.2, color: "#d9b355" }, // rick, main bulk
+  { blob: true, x: 32.0, y: 17.0, z: 6.5, r: 3.0, color: "#cfa64a" }, // rick, tapering
+  { blob: true, x: 32.0, y: 17.0, z: 8.3, r: 1.8, color: "#c49a3f" }, // rick, tapering
+  { blob: true, x: 32.0, y: 17.0, z: 9.4, r: 0.8, color: "#b98f38" }, // rick, thatched cap
 ];
 for (const [ly, n] of [
   [FUEL_TANK_LOCAL.y - FUEL_TANK_LEN, -1],
@@ -3763,6 +3824,37 @@ for (const [ly, n] of [
     { disc: true, x: FUEL_TANK_LOCAL.x, y: ly, z, r: FUEL_TANK_R * 0.6, n, color: "#28352a", bias: 0.06 }
   );
 }
+
+// Buildings block the tractor the same way trees and animals do (see the
+// collision check in update()). Only the load-bearing walls/body of each
+// building — not roofs, doors, fences or small fixtures — so a door-sized
+// gap in a wall box doesn't itself read as solid, and the cartshed's open
+// west face (it has no wall box there) stays driveable. Local coordinates,
+// turned into world-space boxes once here — FARM.angle only ever lands on
+// a 90° step, so this stays a true axis-aligned box in world space too.
+const FARM_SOLID_LOCAL = [
+  [-16.0, 2.0, -12.0, 2.0], // barn
+  [-13.0, 1.0, -30.0, -16.0], // farmhouse
+  [-9.0, -4.0, 6.0, 11.0], // hen house
+  [6.0, 15.0, -13.0, -4.0], // granary body
+  [40.0, 42.0, -3.0, 9.0], // cartshed back wall
+  [32.0, 42.0, -3.0, -1.0], // cartshed side wall
+  [32.0, 42.0, 7.0, 9.0], // cartshed side wall
+  [-2.0, 10.0, 32.0, 39.0], // cowshed
+];
+const FARM_SOLID_WORLD = FARM_SOLID_LOCAL.map(([x0, x1, y0, y1]) => {
+  const cos = Math.cos(FARM.angle);
+  const sin = Math.sin(FARM.angle);
+  let wx0 = Infinity, wx1 = -Infinity, wy0 = Infinity, wy1 = -Infinity;
+  for (const lx of [x0, x1])
+    for (const ly of [y0, y1]) {
+      const wx = FARM.x + lx * cos - ly * sin;
+      const wy = FARM.y + lx * sin + ly * cos;
+      wx0 = Math.min(wx0, wx); wx1 = Math.max(wx1, wx);
+      wy0 = Math.min(wy0, wy); wy1 = Math.max(wy1, wy);
+    }
+  return { x0: wx0, x1: wx1, y0: wy0, y1: wy1 };
+});
 
 // City buildings, local to CITY: a small trading depot where the grain
 // actually gets sold. No need for FARM's elaborate trampled yard — the
@@ -5252,6 +5344,25 @@ function update(dt) {
         }
       }
     }
+
+  // Farm buildings are solid too: driving into a wall stops the tractor
+  // dead, same as a tree. FARM_SOLID_WORLD (see its definition) covers just
+  // the load-bearing walls, expanded by a small margin so the tractor can't
+  // clip in right up to the very wall line before stopping.
+  const BUILDING_COLLIDE_MARGIN = 2;
+  for (const b of FARM_SOLID_WORLD) {
+    if (
+      tractor.x > b.x0 - BUILDING_COLLIDE_MARGIN &&
+      tractor.x < b.x1 + BUILDING_COLLIDE_MARGIN &&
+      tractor.y > b.y0 - BUILDING_COLLIDE_MARGIN &&
+      tractor.y < b.y1 + BUILDING_COLLIDE_MARGIN
+    ) {
+      tractor.x = prevX;
+      tractor.y = prevY;
+      tractor.speed = 0;
+      break;
+    }
+  }
 
   // Cows, sheep and pigs are solid: drive into one and the tractor stops
   // until it has plodded aside (they walk clear of a nearby tractor on
