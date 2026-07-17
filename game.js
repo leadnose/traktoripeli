@@ -3643,18 +3643,71 @@ const IMPLEMENTS = {
 };
 
 // Farm buildings, local to FARM
+// A straight post-and-rail run from (x0,y0) to (x1,y1) — axis-aligned only
+// (either x0===x1 or y0===y1), which is all the farmyard's fence lines need.
+// Posts every ~3 units, two long rails the length of the whole run.
+function addFenceRun(boxes, x0, y0, x1, y1, color) {
+  const horizontal = y0 === y1;
+  const len = horizontal ? Math.abs(x1 - x0) : Math.abs(y1 - y0);
+  const n = Math.max(1, Math.round(len / 3));
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    const px = x0 + (x1 - x0) * t;
+    const py = y0 + (y1 - y0) * t;
+    boxes.push({ x0: px - 0.3, x1: px + 0.3, y0: py - 0.3, y1: py + 0.3, z0: 0, z1: 2.6, color });
+  }
+  for (const [rz0, rz1] of [[1.1, 1.4], [2.0, 2.3]]) {
+    boxes.push(
+      horizontal
+        ? { x0: Math.min(x0, x1), x1: Math.max(x0, x1), y0: y0 - 0.15, y1: y0 + 0.15, z0: rz0, z1: rz1, color }
+        : { x0: x0 - 0.15, x1: x0 + 0.15, y0: Math.min(y0, y1), y1: Math.max(y0, y1), z0: rz0, z1: rz1, color }
+    );
+  }
+}
+
 const FARM_BOXES = [
   { x0: -16.0, x1: 2.0, y0: -12.0, y1: 2.0, z0: 0.0, z1: 9.0, color: "#3d332a" }, // barn, tarred weatherboard
   { x0: -17.5, x1: 3.5, y0: -13.5, y1: 3.5, z0: 9.0, z1: 12.0, color: "#5c4530" }, // barn roof
   { x0: -7.5, x1: -3.5, y0: 1.9, y1: 2.3, z0: 0.0, z1: 6.0, color: "#f7e8d8" }, // barn door, whitewashed
-  // Granary: raised clear of the ground on stone staddle-legs to keep the
-  // rats out, same footprint the silo used to stand on.
-  { x0: 8.5, x1: 9.5, y0: -8.5, y1: -7.5, z0: 0.0, z1: 1.6, color: "#8a8578" }, // staddle leg
-  { x0: 15.5, x1: 16.5, y0: -8.5, y1: -7.5, z0: 0.0, z1: 1.6, color: "#8a8578" }, // staddle leg
-  { x0: 8.5, x1: 9.5, y0: -1.5, y1: -0.5, z0: 0.0, z1: 1.6, color: "#8a8578" }, // staddle leg
-  { x0: 15.5, x1: 16.5, y0: -1.5, y1: -0.5, z0: 0.0, z1: 1.6, color: "#8a8578" }, // staddle leg
-  { x0: 8.0, x1: 17.0, y0: -9.0, y1: 0.0, z0: 1.6, z1: 6.6, color: "#9c7a52" }, // granary body
-  { x0: 7.3, x1: 17.7, y0: -9.7, y1: 0.7, z0: 6.6, z1: 9.0, color: "#5c4530" }, // granary roof
+  // Farmhouse: set well back from the barn (a 10-unit gap, not the huddle
+  // the first pass had), brick and clay tile rather than the barn's dark
+  // tarred timber, so the yard reads as a lived-in farmstead and not just
+  // a depot.
+  { x0: -16.0, x1: -2.0, y0: -36.0, y1: -22.0, z0: 0.0, z1: 7.0, color: "#9c6b52" }, // farmhouse walls, brick
+  { x0: -17.0, x1: -1.0, y0: -37.0, y1: -21.0, z0: 7.0, z1: 10.0, color: "#6b3a2e" }, // farmhouse roof, clay tile
+  { x0: -9.8, x1: -8.3, y0: -35.0, y1: -33.5, z0: 8.5, z1: 13.0, color: "#7a5040" }, // chimney stack
+  { x0: -10.0, x1: -8.0, y0: -22.1, y1: -21.7, z0: 0.0, z1: 4.5, color: "#4a3626" }, // farmhouse door
+  { x0: -15.0, x1: -13.5, y0: -22.1, y1: -21.7, z0: 2.5, z1: 4.5, color: "#a8c2c9" }, // window
+  { x0: -4.5, x1: -3.0, y0: -22.1, y1: -21.7, z0: 2.5, z1: 4.5, color: "#a8c2c9" }, // window
+  // Hen house: a small whitewashed coop south of the barn, a 10-unit clearing
+  // rather than crowding its wall, giving the chickens that already wander
+  // here a shelter to belong to.
+  { x0: -13.0, x1: -8.0, y0: 12.0, y1: 17.0, z0: 0.0, z1: 3.0, color: "#c9b28f" }, // hen house, whitewashed weatherboard
+  { x0: -13.6, x1: -7.4, y0: 11.4, y1: 17.6, z0: 3.0, z1: 4.2, color: "#5c4530" }, // hen house roof
+  { x0: -11.0, x1: -10.0, y0: 11.9, y1: 12.1, z0: 0.0, z1: 1.3, color: "#3d332a" }, // pop-hole
+  // Well: stone-lined shaft with a wooden crossbeam and winding roof, out
+  // in the open yard south of the barn, a short walk from the door.
+  { x0: 2.0, x1: 6.0, y0: 12.0, y1: 16.0, z0: 0.0, z1: 2.2, color: "#8a8578" }, // well shaft, stone
+  { x0: 2.4, x1: 3.0, y0: 12.2, y1: 12.8, z0: 2.2, z1: 6.0, color: "#6b5a42" }, // well post
+  { x0: 5.0, x1: 5.6, y0: 15.2, y1: 15.8, z0: 2.2, z1: 6.0, color: "#6b5a42" }, // well post
+  { x0: 1.6, x1: 6.4, y0: 11.6, y1: 16.4, z0: 6.0, z1: 7.0, color: "#5c4530" }, // well roof
+  { x0: 2.4, x1: 5.6, y0: 13.8, y1: 14.2, z0: 5.6, z1: 6.0, color: "#6b5a42" }, // well crossbeam
+  // Granary: moved off the barn's shoulder to a clean 12-unit gap.
+  { x0: 14.5, x1: 15.5, y0: -8.5, y1: -7.5, z0: 0.0, z1: 1.6, color: "#8a8578" }, // staddle leg
+  { x0: 21.5, x1: 22.5, y0: -8.5, y1: -7.5, z0: 0.0, z1: 1.6, color: "#8a8578" }, // staddle leg
+  { x0: 14.5, x1: 15.5, y0: -1.5, y1: -0.5, z0: 0.0, z1: 1.6, color: "#8a8578" }, // staddle leg
+  { x0: 21.5, x1: 22.5, y0: -1.5, y1: -0.5, z0: 0.0, z1: 1.6, color: "#8a8578" }, // staddle leg
+  { x0: 14.0, x1: 23.0, y0: -9.0, y1: 0.0, z0: 1.6, z1: 6.6, color: "#9c7a52" }, // granary body
+  { x0: 13.3, x1: 23.7, y0: -9.7, y1: 0.7, z0: 6.6, z1: 9.0, color: "#5c4530" }, // granary roof
+  // Hay rick: a thatched straw stack on stone staddles (its round tapering
+  // bulk is built from stacked blobs in FARM_SHAPES, same trick as a tree
+  // canopy), backed by a short rickyard fence on its two field-facing sides,
+  // and a clear 16-unit gap from the granary it now sits well clear of.
+  { x0: 18.4, x1: 19.2, y0: 16.4, y1: 17.2, z0: 0.0, z1: 1.4, color: "#8a8578" }, // staddle stone
+  { x0: 22.8, x1: 23.6, y0: 16.4, y1: 17.2, z0: 0.0, z1: 1.4, color: "#8a8578" }, // staddle stone
+  { x0: 18.4, x1: 19.2, y0: 20.8, y1: 21.6, z0: 0.0, z1: 1.4, color: "#8a8578" }, // staddle stone
+  { x0: 22.8, x1: 23.6, y0: 20.8, y1: 21.6, z0: 0.0, z1: 1.4, color: "#8a8578" }, // staddle stone
+  { x0: 18.0, x1: 24.0, y0: 16.0, y1: 22.0, z0: 1.4, z1: 2.0, color: "#c9a24a" }, // staging platform
   // Fuel tank: a horizontal cylinder lying along the local y axis, built
   // the same way the tractor's own wheels are (an inscribed box for the
   // silhouette plus a full-radius disc at each end, see FARM_SHAPES) —
@@ -3682,10 +3735,24 @@ const FARM_BOXES = [
     color: "#3a3a3a",
   }, // valve hanging below the tank's midpoint
 ];
+// Rickyard fence: backs the hay rick's two field-facing sides only (an
+// unbroken ring risks a rail sitting across a road on some maps, and this
+// is plenty to read as "fenced off from the stock")
+addFenceRun(FARM_BOXES, 16, 14, 27, 14, "#6b5a42");
+addFenceRun(FARM_BOXES, 16, 14, 16, 25, "#6b5a42");
+
 // The two end-cap discs that round off the fuel tank's cylinder (same
 // box+disc trick as makeWheels: the disc facing the camera reads as the
-// tank's round end, the box gives its silhouette everywhere else)
-const FARM_SHAPES = [];
+// tank's round end, the box gives its silhouette everywhere else), the
+// well's hanging bucket, and the hay rick's tapering thatched bulk (the
+// same stacked-blob trick a tree canopy uses, just wider and golden)
+const FARM_SHAPES = [
+  { blob: true, x: 4.0, y: 14.0, z: 4.0, r: 0.7, color: "#4a4238" }, // well bucket
+  { blob: true, x: 21.0, y: 19.0, z: 4.0, r: 4.2, color: "#d9b355" }, // rick, main bulk
+  { blob: true, x: 21.0, y: 19.0, z: 6.5, r: 3.0, color: "#cfa64a" }, // rick, tapering
+  { blob: true, x: 21.0, y: 19.0, z: 8.3, r: 1.8, color: "#c49a3f" }, // rick, tapering
+  { blob: true, x: 21.0, y: 19.0, z: 9.4, r: 0.8, color: "#b98f38" }, // rick, thatched cap
+];
 for (const [ly, n] of [
   [FUEL_TANK_LOCAL.y - FUEL_TANK_LEN, -1],
   [FUEL_TANK_LOCAL.y + FUEL_TANK_LEN, 1],
