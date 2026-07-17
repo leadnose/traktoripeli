@@ -48,134 +48,134 @@ const ctx = view.getContext("2d");
 // few tones at load time via tint(), so a new theme only needs these fields.
 const MAP_PROFILES = [
   {
-    name: "Homestead Plains", seed: 1137, water: [0.03, 0.10], field: [0.45, 0.65], forest: [0.10, 0.25], meadow: [0.20, 0.40], hilliness: [0.4, 0.6],
+    name: "Homestead Plains", seed: 1137, water: [0.03, 0.10], field: [0.45, 0.65], forest: [0.10, 0.25], meadow: [0.20, 0.40], hilliness: [0.4, 0.6], broadleaf: 0.8,
     palette: {
-      grass: ["#72ca55", "#55b043", "#bda355", "#e9f1f5"],
-      dirt: ["#a87e50", "#a87e50", "#a87e50", "#e2eaee"],
-      water: "#3d7dc4",
-      skyTop: ["#7ac9ef", "#6fc3e8", "#8fb8d8", "#9db9cf"],
-      skyBottom: ["#c8ecf8", "#c2e8f2", "#ecdcc0", "#e9eef2"],
-      road: "#c09a66",
-      canopy: ["#57b754", "#4fae4a", "#c67b2e", "#dde9ee"],
-      conifer: "#2c6330",
+      grass: ["#78b064", "#609554", "#a69e62", "#e5eeef"],
+      dirt: ["#9c8771", "#9c8771", "#9c8771", "#f1f3f4"],
+      water: "#4e7eb3",
+      skyTop: ["#93b8cc", "#8ab0c3", "#9db1c0", "#a5b2bd"],
+      skyBottom: ["#d4e5ec", "#cee0e6", "#e0e1cb", "#ebeef0"],
+      road: "#b2a38e",
+      canopy: ["#659f61", "#5f945a", "#a18049", "#dae5e7"],
+      conifer: "#365938",
     },
   },
   {
-    name: "River Valley", seed: 1274, water: [0.35, 0.50], field: [0.20, 0.35], forest: [0.15, 0.30], meadow: [0.15, 0.30], hilliness: [0.8, 1.2],
+    name: "River Valley", seed: 1274, water: [0.35, 0.50], field: [0.20, 0.35], forest: [0.15, 0.30], meadow: [0.15, 0.30], hilliness: [0.8, 1.2], broadleaf: 0.6,
     palette: {
-      grass: ["#6bc750", "#4fa83e", "#b89a4a", "#e7eef2"],
-      dirt: ["#9c7248", "#9c7248", "#9c7248", "#dde6ec"],
-      water: "#3d86c9",
-      skyTop: ["#7fc8ef", "#72c0e6", "#8ab6d6", "#9ab7cf"],
-      skyBottom: ["#cdeaf5", "#c6e6ef", "#e6d8bc", "#e6ecf0"],
-      road: "#b8905e",
-      canopy: ["#54b451", "#49a648", "#c1782c", "#d9e6ec"],
-      conifer: "#2c6330",
+      grass: ["#73ad60", "#5a8d4e", "#9d955a", "#e3ebec"],
+      dirt: ["#937c65", "#937c65", "#937c65", "#eceff1"],
+      water: "#4e85b7",
+      skyTop: ["#97b9cd", "#8bafc3", "#99aebd", "#a3b1bc"],
+      skyBottom: ["#d7e5eb", "#d0e0e5", "#dadbc6", "#e8ebee"],
+      road: "#aa9a86",
+      canopy: ["#639b5f", "#598d57", "#9c7c47", "#d7e2e4"],
+      conifer: "#365938",
     },
   },
   {
-    name: "Highlands", seed: 1411, water: [0.10, 0.20], field: [0.15, 0.30], forest: [0.30, 0.50], meadow: [0.25, 0.45], hilliness: [1.7, 2.2],
+    name: "Highlands", seed: 1411, water: [0.10, 0.20], field: [0.15, 0.30], forest: [0.30, 0.50], meadow: [0.25, 0.45], hilliness: [1.7, 2.2], broadleaf: 0.1,
     palette: {
-      grass: ["#8a9a5c", "#7d8f4e", "#a68a52", "#c9d1d6"],
-      dirt: ["#8a7a63", "#8a7a63", "#8a7a63", "#d4dadd"],
-      water: "#5a7d8c",
-      skyTop: ["#8fa8b8", "#84a0b2", "#8598a8", "#94a4ae"],
-      skyBottom: ["#c9d8dc", "#c3d2d8", "#d6cdbf", "#dde3e2"],
-      road: "#9c8a6e",
-      canopy: ["#6f8f52", "#628049", "#a8763a", "#c7d2cf"],
-      conifer: "#3a5240",
+      grass: ["#7d8863", "#707d56", "#90875e", "#c6cecf"],
+      dirt: ["#8b8376", "#8b8376", "#8b8376", "#e1e3e4"],
+      water: "#607a86",
+      skyTop: ["#95a0a8", "#8b98a1", "#89929a", "#969da2"],
+      skyBottom: ["#ced5d7", "#c8d0d3", "#d0d0c5", "#dee2e1"],
+      road: "#9b9488",
+      canopy: ["#6a7d5a", "#5e6f50", "#8b764c", "#c4cbc8"],
+      conifer: "#3e4e42",
       flowers: ["#b48fd1", "#ffffff", "#e0d156"], // heather and gorse, not the usual meadow mix
     },
   },
   {
-    name: "Deep Woods", seed: 1548, water: [0.20, 0.35], field: [0.05, 0.15], forest: [0.85, 1.00], meadow: [0.00, 0.10], hilliness: [0.8, 1.2],
+    name: "Deep Woods", seed: 1548, water: [0.20, 0.35], field: [0.05, 0.15], forest: [0.85, 1.00], meadow: [0.00, 0.10], hilliness: [0.8, 1.2], broadleaf: 0.25,
     palette: {
-      grass: ["#5fa84a", "#4a9440", "#a68f48", "#dce6e0"],
-      dirt: ["#7a6244", "#7a6244", "#7a6244", "#d6ded8"],
-      water: "#356a95",
-      skyTop: ["#6fb3d9", "#66add2", "#7fa4c4", "#8ea6b8"],
-      skyBottom: ["#bfe0e8", "#badfe0", "#ded0b8", "#dee6e6"],
-      road: "#a4835a",
-      canopy: ["#3f8a48", "#357a3e", "#a3712c", "#ccdcd6"],
-      conifer: "#274a34",
+      grass: ["#659058", "#547e4c", "#8e8856", "#d8e0da"],
+      dirt: ["#786b5a", "#786b5a", "#786b5a", "#e3e6e3"],
+      water: "#416989",
+      skyTop: ["#86a5b8", "#7d9eb0", "#8c9ead", "#949fa8"],
+      skyBottom: ["#c9d9de", "#c4d5d6", "#d4d4c2", "#e0e4e4"],
+      road: "#9b8d7d",
+      canopy: ["#4a754d", "#3f6642", "#846f40", "#cad4cf"],
+      conifer: "#2d4436",
     },
   },
   {
-    name: "Patchwork Farm", seed: 1685, water: [0.03, 0.10], field: [0.55, 0.72], forest: [0.00, 0.08], meadow: [0.35, 0.55], hilliness: [0.4, 0.6],
+    name: "Patchwork Farm", seed: 1685, water: [0.03, 0.10], field: [0.55, 0.72], forest: [0.00, 0.08], meadow: [0.35, 0.55], hilliness: [0.4, 0.6], broadleaf: 0.85,
     palette: {
-      grass: ["#7ed35c", "#5cb849", "#c2a862", "#eaf1f4"],
-      dirt: ["#b0824f", "#b0824f", "#b0824f", "#e6ecf0"],
-      water: "#4a8ccb",
-      skyTop: ["#82cdf2", "#78c8ec", "#94bedd", "#a3bfd2"],
-      skyBottom: ["#cdeffa", "#c8ecf5", "#f0e2c4", "#ecf1f4"],
-      road: "#c6a06d",
-      canopy: ["#5fbb5a", "#57b04e", "#d18a34", "#e2edf0"],
-      conifer: "#2c6330",
+      grass: ["#82b96c", "#679d5a", "#aca46e", "#e6eeee"],
+      dirt: ["#a08b73", "#a08b73", "#a08b73", "#f4f5f6"],
+      water: "#5a8cbb",
+      skyTop: ["#9abdd0", "#91b6c9", "#a2b6c5", "#aab8c1"],
+      skyBottom: ["#d8e9ef", "#d3e5ea", "#e3e5cf", "#eef0f2"],
+      road: "#b8a995",
+      canopy: ["#6ca467", "#64965e", "#ad8d4e", "#dfe8e9"],
+      conifer: "#365938",
     },
   },
   {
-    name: "Lake District", seed: 1822, water: [0.45, 0.60], field: [0.10, 0.20], forest: [0.10, 0.25], meadow: [0.20, 0.35], hilliness: [0.4, 0.6],
+    name: "Lake District", seed: 1822, water: [0.45, 0.60], field: [0.10, 0.20], forest: [0.10, 0.25], meadow: [0.20, 0.35], hilliness: [0.4, 0.6], broadleaf: 0.45,
     palette: {
-      grass: ["#6bcf58", "#50b845", "#b8a052", "#e6f0f5"],
-      dirt: ["#9c7c52", "#9c7c52", "#9c7c52", "#e2eaf0"],
-      water: "#3d93d6",
-      skyTop: ["#7ed4f5", "#72cdf0", "#8fc2e0", "#9fc3d6"],
-      skyBottom: ["#c0f0fa", "#baecf7", "#e8dcc0", "#e4eef2"],
-      road: "#b89361",
-      canopy: ["#5abd54", "#4fae49", "#c2812e", "#dde9ee"],
-      conifer: "#2e6b38",
+      grass: ["#76b568", "#609c57", "#a19a5f", "#e2edee"],
+      dirt: ["#95846e", "#95846e", "#95846e", "#f1f3f5"],
+      water: "#5091c3",
+      skyTop: ["#98bfd1", "#8eb7ca", "#9fb7c6", "#a8b9c3"],
+      skyBottom: ["#cee5ec", "#c9e1e8", "#dcdeca", "#e8ecef"],
+      road: "#ab9c88",
+      canopy: ["#68a463", "#5e9359", "#9d8148", "#dae5e7"],
+      conifer: "#39603f",
     },
   },
   {
-    name: "Rolling Hills", seed: 1959, water: [0.10, 0.20], field: [0.30, 0.45], forest: [0.30, 0.50], meadow: [0.25, 0.45], hilliness: [1.3, 1.7],
+    name: "Rolling Hills", seed: 1959, water: [0.10, 0.20], field: [0.30, 0.45], forest: [0.30, 0.50], meadow: [0.25, 0.45], hilliness: [1.3, 1.7], broadleaf: 0.65,
     palette: {
-      grass: ["#78c956", "#5bb246", "#c0a158", "#e6edf0"],
-      dirt: ["#a67e51", "#a67e51", "#a67e51", "#e0e8ea"],
-      water: "#4886c0",
-      skyTop: ["#7ecdf0", "#74c6e8", "#93bcd4", "#a2bccb"],
-      skyBottom: ["#cbeaf5", "#c5e6ef", "#eddcc0", "#e8edf0"],
-      road: "#bd9765",
-      canopy: ["#59b855", "#4fac4b", "#c67f30", "#dde8ec"],
-      conifer: "#316f39",
+      grass: ["#7cb065", "#659757", "#a99e65", "#e2e9ea"],
+      dirt: ["#9b8771", "#9b8771", "#9b8771", "#eef0f1"],
+      water: "#5785b1",
+      skyTop: ["#96bbcd", "#8db3c5", "#9fb2be", "#a8b4bb"],
+      skyBottom: ["#d5e5eb", "#d0dfe4", "#e1e2cb", "#eaecee"],
+      road: "#afa08c",
+      canopy: ["#67a062", "#5e925b", "#a1824b", "#dae4e5"],
+      conifer: "#3c6441",
     },
   },
   {
-    name: "Wetlands", seed: 2096, water: [0.35, 0.50], field: [0.05, 0.15], forest: [0.60, 0.80], meadow: [0.05, 0.20], hilliness: [0.4, 0.6],
+    name: "Wetlands", seed: 2096, water: [0.35, 0.50], field: [0.05, 0.15], forest: [0.60, 0.80], meadow: [0.05, 0.20], hilliness: [0.4, 0.6], broadleaf: 0.7,
     palette: {
-      grass: ["#7aa85c", "#6b9a4e", "#9c9256", "#d8e2dc"],
-      dirt: ["#6e6248", "#6e6248", "#6e6248", "#d2dcd6"],
-      water: "#4a7562",
-      skyTop: ["#8fc0c8", "#85b9c2", "#9bb0ac", "#a3b4ae"],
-      skyBottom: ["#d0e6e2", "#cae2e0", "#ddd6bc", "#dfe6e0"],
-      road: "#8a7a5a",
-      canopy: ["#5a9a52", "#4f8c48", "#a68840", "#cfdcd2"],
-      conifer: "#33553e",
+      grass: ["#789465", "#698558", "#89885f", "#d4dbd6"],
+      dirt: ["#70695b", "#70695b", "#70695b", "#dfe3e1"],
+      water: "#4f7061",
+      skyTop: ["#99aeb4", "#90a7ad", "#9ba5a5", "#a2aaa9"],
+      skyBottom: ["#d6e0df", "#d0dcdc", "#d2d5c4", "#e1e4e2"],
+      road: "#8b8373",
+      canopy: ["#62865c", "#567851", "#8b8051", "#ccd5ce"],
+      conifer: "#394f40",
     },
   },
   {
-    name: "Frontier", seed: 2233, water: [0.03, 0.10], field: [0.05, 0.15], forest: [0.00, 0.08], meadow: [0.45, 0.65], hilliness: [0.8, 1.2],
+    name: "The Common", seed: 2233, water: [0.03, 0.10], field: [0.05, 0.15], forest: [0.00, 0.08], meadow: [0.45, 0.65], hilliness: [0.8, 1.2], broadleaf: 0.6,
     palette: {
-      grass: ["#9cb85e", "#8ca84e", "#c2a252", "#e2e6dc"],
-      dirt: ["#b08858", "#b08858", "#b08858", "#e6e8e2"],
-      water: "#5590c2",
-      skyTop: ["#a8d4ef", "#9fcce8", "#a8c0d0", "#aec2ca"],
-      skyBottom: ["#e0f2f8", "#dbeef4", "#ecdec0", "#e8ecec"],
-      road: "#c2a06e",
-      canopy: ["#7cbb5c", "#6cac4e", "#c68d38", "#dbe6dc"],
-      conifer: "#3a6b3e",
+      grass: ["#8ea369", "#7d915b", "#a99f61", "#dce0d8"],
+      dirt: ["#a2907a", "#a2907a", "#a2907a", "#f0f0ee"],
+      water: "#638fb4",
+      skyTop: ["#b5cad8", "#adc2d0", "#adb9c1", "#b0b9be"],
+      skyBottom: ["#e6eff2", "#e1eaee", "#dfe1cb", "#e9ebeb"],
+      road: "#b5a894",
+      canopy: ["#7da469", "#6e935d", "#a38b51", "#d8dfd8"],
+      conifer: "#436245",
     },
   },
   {
-    name: "Wilderness", seed: 2370, water: [0.10, 0.20], field: [0.05, 0.15], forest: [0.85, 1.00], meadow: [0.00, 0.10], hilliness: [1.7, 2.2],
+    name: "The Weald", seed: 2370, water: [0.10, 0.20], field: [0.05, 0.15], forest: [0.85, 1.00], meadow: [0.00, 0.10], hilliness: [1.7, 2.2], broadleaf: 0.75,
     palette: {
-      grass: ["#679c52", "#568c46", "#96813f", "#d4dfd6"],
-      dirt: ["#7c6448", "#7c6448", "#7c6448", "#d0d8d2"],
-      water: "#3f7292",
-      skyTop: ["#77b8da", "#6bb0d2", "#7fa0b4", "#8ea2ac"],
-      skyBottom: ["#c2e2e8", "#bcdde4", "#dccfb6", "#dde4e2"],
-      road: "#9c8058",
-      canopy: ["#4a9a4e", "#3f8c44", "#9c7434", "#c9d8d0"],
-      conifer: "#264a34",
+      grass: ["#69885c", "#59794f", "#7f7a4c", "#d1d8d1"],
+      dirt: ["#7b6d5e", "#7b6d5e", "#7b6d5e", "#dde0dd"],
+      water: "#497088",
+      skyTop: ["#8caabb", "#81a1b2", "#8897a1", "#919a9f"],
+      skyBottom: ["#cbdbde", "#c6d6da", "#d1d3c0", "#dfe2e2"],
+      road: "#968978",
+      canopy: ["#568457", "#4a764c", "#817045", "#c6d0ca"],
+      conifer: "#2c4435",
     },
   },
 ];
@@ -1156,6 +1156,14 @@ function meadowTint(hex) {
   return mixHex(hex, "#ffe066", 0.35);
 }
 
+// Dries a dirt tone toward pale straw-gold, for stubble left standing after
+// harvest but not yet plowed under — distinct from the darker turned-soil
+// tone of a plowed or seeded tile, derived from the map's own dirt rather
+// than a separate authored color
+function stubbleTint(hex) {
+  return mixHex(hex, "#e6c85a", 0.5);
+}
+
 // ---------------------------------------------------------------------------
 // Ordered dithering: posterize colors to coarse levels and dither between
 // them with a Bayer matrix, the classic pixel-art way to draw gradients.
@@ -1242,6 +1250,10 @@ let MEADOW = meadowTint(GRASS);
 const MEADOW_DOTS = grassDotShades(MEADOW);
 let DIRT = PROFILE.palette.dirt[0];
 const DIRT_DOTS = dirtDotShades(DIRT);
+// Stubble — a harvested field before it's plowed — reads as dried pale
+// straw rather than bare soil
+let STUBBLE = stubbleTint(DIRT);
+const STUBBLE_DOTS = dirtDotShades(STUBBLE);
 
 // The season color wheel, declared here because the initial map paint
 // already reads it (through winterDepth): 0 = spring, 0.5 = summer,
@@ -1798,8 +1810,10 @@ function paintTile(tx, ty) {
   }
 
   // Field tile: dirt across the whole tile, seamless against neighboring
-  // dirt tiles thanks to the sub-quads' own outline overdraw
-  subQuads(DIRT);
+  // dirt tiles thanks to the sub-quads' own outline overdraw. Unplowed
+  // (type 1) is dried stubble, not turned soil, so it reads in a distinct
+  // pale straw tone rather than the same brown as plowed/seeded ground.
+  subQuads(type === 1 ? STUBBLE : DIRT);
 
   // Round the patch's outer corners by painting the cut crescents back to
   // grass; their outer edges only ever border grass tiles, so the overdraw
@@ -1855,10 +1869,10 @@ function paintTile(tx, ty) {
     // Seeds / crops in rows along the furrows
     if (type === 3) drawCropsOn(tx, ty, kc);
   } else {
-    // Speckles: dirt clods
+    // Speckles: dried stubble stalks
     for (let i = 0; i < 8; i++) {
       const p = mp((tx + tr()) * TILE, (ty + tr()) * TILE);
-      mapCtx.fillStyle = shade(DIRT_DOTS[(tr() * DIRT_DOTS.length) | 0], kc);
+      mapCtx.fillStyle = shade(STUBBLE_DOTS[(tr() * STUBBLE_DOTS.length) | 0], kc);
       mapCtx.fillRect(Math.round(p.x), Math.round(p.y), 1, 1);
     }
   }
@@ -1936,7 +1950,7 @@ function countFieldTiles() {
 
 // Roads are generated inside makeMap; the samples and covered tiles are kept
 // so field patches, trees and bushes can stay off them, and the roads
-// themselves (point sequences) so the delivery van can drive the network.
+// themselves (point sequences) so the delivery cart can drive the network.
 // The field patch rectangles are kept for the hedgerows planted along their
 // edges.
 const roads = [];
@@ -2192,7 +2206,7 @@ function makeMap() {
       if (!bent) break;
     }
     // Resample the bent polyline at an even 3-unit arc-length spacing, so
-    // stamping, the van's drive loop and vegetation clearance all still see
+    // stamping, the cart's drive loop and vegetation clearance all still see
     // a steady stream of points regardless of how much the curve wanders.
     const pts = [];
     let cum = 0;
@@ -2543,7 +2557,7 @@ const minimapCtx = minimapCanvas.getContext("2d");
 // every theme gets a matching minimap.
 const MINIMAP_COLORS = [
   tint(PROFILE.palette.grass[1], -0.22),
-  PROFILE.palette.dirt[0],
+  stubbleTint(PROFILE.palette.dirt[0]),
   tint(PROFILE.palette.dirt[0], -0.45),
   tint(PROFILE.palette.grass[1], 0.32),
   WATER_COLOR,
@@ -2664,6 +2678,16 @@ const TREE_KINDS = [
 
 const trees = [];
 
+// A map's broadleaf share sets how English-lowland (hedgerow country,
+// deciduous-heavy) vs. Scottish-highland/plantation (conifer-heavy) its
+// tree cover reads, on top of the fixed spruce:fir split within whatever's
+// left over. Lone trees on open grass always skew a bit more deciduous
+// than dense forest stands do, same relationship the old fixed odds had.
+const DECID_SHARE = Math.min(0.95, Math.max(0.05, 0.25 + PROFILE.broadleaf * 0.6));
+const DECID_SPRUCE_T = DECID_SHARE + (1 - DECID_SHARE) * 0.538;
+const LONE_DECID_SHARE = Math.min(0.97, DECID_SHARE + 0.25);
+const LONE_SPRUCE_T = LONE_DECID_SHARE + (1 - LONE_DECID_SHARE) * 0.625;
+
 // Dense stands on the forest tiles; roads passing through keep clearings
 for (const k of forestTiles) {
   const ftx = k % MAP_TILES;
@@ -2673,13 +2697,12 @@ for (const k of forestTiles) {
     const wx = (ftx + 0.05 + rand() * 0.9) * TILE;
     const wy = (fty + 0.05 + rand() * 0.9) * TILE;
     if (roadTiles.has(tileKey(wx, wy))) continue;
-    // Forests are conifer-heavy: birches among the spruce and fir
     const r = rand();
     trees.push({
       wx,
       wy,
       angle: rand() * Math.PI * 2,
-      kind: r < 0.35 ? 0 : r < 0.7 ? 1 : 2,
+      kind: r < DECID_SHARE ? 0 : r < DECID_SPRUCE_T ? 1 : 2,
     });
   }
 }
@@ -2697,13 +2720,12 @@ for (let attempts = 0; trees.length < loneTarget && attempts < 5000; attempts++)
   if (Math.hypot(wx - FARM.x, wy - FARM.y) < FARM_RADIUS + 30) continue;
   if (Math.hypot(wx - CITY.x, wy - CITY.y) < CITY_RADIUS + 30) continue;
   if (trees.some((t) => Math.hypot(t.wx - wx, t.wy - wy) < 20)) continue;
-  // Open grass favors lone deciduous trees, with the odd conifer
   const r = rand();
   trees.push({
     wx,
     wy,
     angle: rand() * Math.PI * 2,
-    kind: r < 0.6 ? 0 : r < 0.85 ? 1 : 2,
+    kind: r < LONE_DECID_SHARE ? 0 : r < LONE_SPRUCE_T ? 1 : 2,
   });
 }
 
@@ -2725,9 +2747,9 @@ for (const t of trees) {
 
 // Each variant is [spring, summer, autumn, winter]
 const BUSH_COLORS = [
-  ["#4db554", "#3f9e3e", "#b07a35", "#dfe9ee"],
-  ["#5cc25f", "#4fae4a", "#c08d3a", "#e7eff3"],
-  ["#45a94b", "#379139", "#9c6a2e", "#d6e2e9"],
+  ["#5d9b5e", "#51844d", "#917d4a", "#dce6e7"],
+  ["#6caa6a", "#5f945a", "#9e8d51", "#e3eced"],
+  ["#558f55", "#477945", "#7f6d41", "#d4e0e1"],
 ];
 const bushes = [];
 for (let attempts = 0; bushes.length < 110 && attempts < 6000; attempts++) {
@@ -2754,9 +2776,9 @@ for (let attempts = 0; bushes.length < 110 && attempts < 6000; attempts++) {
 // wherever a road or driveway passes.
 // Each variant is [spring, summer, autumn, winter]
 const HEDGE_COLORS = [
-  ["#3f9440", "#357f36", "#96612d", "#cfdde5"],
-  ["#489e45", "#3d8f3c", "#a5722f", "#d7e3ea"],
-  ["#3a8a3c", "#2f7531", "#8a5c2a", "#c7d6df"],
+  ["#4e7d4c", "#426a40", "#7a673f", "#cddbdc"],
+  ["#578653", "#4c7849", "#877543", "#d5e1e2"],
+  ["#477446", "#3a6139", "#705f3a", "#c6d4d6"],
 ];
 for (const p of patches) {
   const x0 = p.px * TILE;
@@ -3064,10 +3086,18 @@ for (let placed = 0, tries = 0; placed < 2 && tries < 60 && shoreSpots.length; t
 // Tiny 5-row lettering, one string per row, stamped as ink pixels
 const SIGN_FONT = {
   A: [".#.", "#.#", "###", "#.#", "#.#"],
+  B: ["##.", "#.#", "##.", "#.#", "##."],
+  D: ["##.", "#.#", "#.#", "#.#", "##."],
+  E: ["###", "#..", "##.", "#..", "###"],
+  F: ["###", "#..", "##.", "#..", "#.."],
+  G: [".##", "#..", "#.#", "#.#", ".##"],
   I: ["###", ".#.", ".#.", ".#.", "###"],
   L: ["#..", "#..", "#..", "#..", "###"],
   M: ["#...#", "##.##", "#.#.#", "#...#", "#...#"],
+  N: ["#..#", "##.#", "#.##", "#..#", "#..#"],
+  O: [".#.", "#.#", "#.#", "#.#", ".#."],
   P: ["##.", "#.#", "##.", "#..", "#.."],
+  R: ["##.", "#.#", "##.", "#.#", "#.#"],
   S: ["###", "#..", "###", "..#", "###"],
   T: ["###", ".#.", ".#.", ".#.", ".#."],
 };
@@ -3116,11 +3146,11 @@ function placeSignBeside(text, p) {
   return false;
 }
 
-// MAATILA where the farm's own road leaves the yard
-if (roads.length && roads[0].pts.length > 6) placeSignBeside("MAATILA", roads[0].pts[5]);
-else addSign("MAATILA", FARM.x + 24, FARM.y + 24);
+// FARM where the farm's own road leaves the yard
+if (roads.length && roads[0].pts.length > 6) placeSignBeside("FARM", roads[0].pts[5]);
+else addSign("FARM", FARM.x + 24, FARM.y + 24);
 
-// SILTA on the approach to a bridge, for up to two crossings
+// A BRIDGE sign on the approach, for up to two crossings
 {
   let posted = 0;
   for (const r of roads) {
@@ -3129,13 +3159,13 @@ else addSign("MAATILA", FARM.x + 24, FARM.y + 24);
     for (let i = 4; i < r.pts.length; i++) {
       if (tileTypeAt(r.pts[i].x, r.pts[i].y) !== 4) continue;
       if (tileTypeAt(r.pts[i - 2].x, r.pts[i - 2].y) === 4) continue; // mid-crossing
-      if (placeSignBeside("SILTA", r.pts[i - 4])) posted++;
+      if (placeSignBeside("BRIDGE", r.pts[i - 4])) posted++;
       break; // one sign per road
     }
   }
 }
 
-// LAMPI at the waterside nearest the farm — where the herds go to drink
+// POND at the waterside nearest the farm — where the herds go to drink
 {
   const near = nearestShoreSpot(FARM.x, FARM.y);
   if (near && near.dist < 260) {
@@ -3143,8 +3173,8 @@ else addSign("MAATILA", FARM.x + 24, FARM.y + 24);
     // A step inland, so it stands clear of the bank where the herds crowd
     const nx = spot.x + ((FARM.x - spot.x) / dist) * 8;
     const ny = spot.y + ((FARM.y - spot.y) / dist) * 8;
-    if (tileTypeAt(nx, ny) === 0) addSign("LAMPI", nx, ny);
-    else addSign("LAMPI", spot.x, spot.y);
+    if (tileTypeAt(nx, ny) === 0) addSign("POND", nx, ny);
+    else addSign("POND", spot.x, spot.y);
   }
 }
 
@@ -3177,17 +3207,17 @@ function updateAnimals(dt) {
         a.wx += rand() - 0.5; // unstick exact overlaps
       }
     }
-    // The delivery van spooks animals just like the tractor does: flee
+    // The delivery cart spooks animals just like the tractor does: flee
     // whichever machine is nearer
     let spook = tractor;
     let spookDist = tractorDist;
     let spookSpeed = Math.abs(tractor.speed);
-    if (van.on) {
-      const vd = Math.hypot(a.wx - van.x, a.wy - van.y);
+    if (cart.on) {
+      const vd = Math.hypot(a.wx - cart.x, a.wy - cart.y);
       if (vd < spookDist) {
-        spook = van;
+        spook = cart;
         spookDist = vd;
-        spookSpeed = van.moving;
+        spookSpeed = cart.moving;
       }
     }
     // Spooked animals get clear of the machine — sideways off its path,
@@ -3289,73 +3319,81 @@ function updateHerds(dt) {
 }
 
 // ---------------------------------------------------------------------------
-// The delivery van: putters around the road network all day, pauses at dead
-// ends to drop something off, and waits politely for the tractor to pass.
-// Road points are 3 world units apart, so pts index maps to distance.
+// The delivery cart: a horse pulling a flat-bed wagon, putters around the
+// road network all day, pauses at dead ends to drop something off, and
+// waits politely for the tractor to pass. Road points are 3 world units
+// apart, so pts index maps to distance.
 // ---------------------------------------------------------------------------
 
-const VAN_SPEED = 13;
+const CART_SPEED = 8;
 
-const VAN_BOXES = [
-  { x0: -3.6, x1: 0.6, y0: -2.0, y1: 2.0, z0: 1.3, z1: 5.6, color: "#e8a92e" }, // cargo box
-  { x0: 0.6, x1: 3.4, y0: -1.8, y1: 1.8, z0: 1.3, z1: 3.4, color: "#e8a92e" }, // hood
-  { x0: 0.6, x1: 2.4, y0: -1.6, y1: 1.6, z0: 3.4, z1: 4.9, color: "#bfeaf5" }, // cab glass
-  { x0: 0.4, x1: 2.6, y0: -1.8, y1: 1.8, z0: 4.9, z1: 5.5, color: "#f2e6cc" }, // cab roof
+// One rigid body: the horse's silhouette (reusing HORSE_BOXES' proportions,
+// shifted forward) harnessed by a shaft to a wooden cart bed behind it —
+// legs stand at z0 0, same ground contact as the cart's own wheels.
+const CART_BOXES = [
+  { x0: -6.0, x1: -0.8, y0: -2.0, y1: 2.0, z0: 1.8, z1: 3.4, color: "#9a7442" }, // wooden cart bed
+  { x0: -1.2, x1: -0.8, y0: -2.0, y1: 2.0, z0: 1.8, z1: 4.4, color: "#8a6238" }, // front board / seat back
+  { x0: -0.8, x1: 1.6, y0: -0.15, y1: 0.15, z0: 2.2, z1: 2.6, color: "#6b6b6b" }, // shaft, horse to cart
+  { x0: 1.6, x1: 2.4, y0: -0.9, y1: 0.9, z0: 0.0, z1: 1.8, color: "#5a4636" }, // horse hind legs
+  { x0: 4.5, x1: 5.3, y0: -0.9, y1: 0.9, z0: 0.0, z1: 1.8, color: "#5a4636" }, // horse front legs
+  { x0: 1.2, x1: 5.5, y0: -1.0, y1: 1.0, z0: 1.8, z1: 3.9, color: "#8a5c3a" }, // horse body
+  { x0: 0.6, x1: 1.2, y0: -0.3, y1: 0.3, z0: 2.2, z1: 3.7, color: "#4a3626" }, // horse tail
+  { x0: 5.1, x1: 6.0, y0: -0.55, y1: 0.55, z0: 3.4, z1: 5.6, color: "#8a5c3a" }, // horse neck
+  { x0: 5.7, x1: 6.9, y0: -0.5, y1: 0.5, z0: 4.6, z1: 5.7, color: "#8a5c3a" }, // horse head
+  { x0: 5.0, x1: 5.6, y0: -0.15, y1: 0.15, z0: 4.2, z1: 6.0, color: "#4a3626" }, // horse mane
 ];
 
-const VAN_WHEELS = [
-  { x: -2.3, y0: 2.0, y1: 2.8, z: 1.0, r: 1.0 },
-  { x: -2.3, y0: -2.8, y1: -2.0, z: 1.0, r: 1.0 },
-  { x: 2.3, y0: 1.8, y1: 2.6, z: 1.0, r: 1.0 },
-  { x: 2.3, y0: -2.6, y1: -1.8, z: 1.0, r: 1.0 },
+const CART_WHEELS = [
+  { x: -3.4, y0: 1.9, y1: 2.7, z: 1.8, r: 1.8 },
+  { x: -3.4, y0: -2.7, y1: -1.9, z: 1.8, r: 1.8 },
 ];
 
-// The van's driver sits at the cab glass box's local depth center (x 1.5)
-// with small biases, so the painter's sort always puts him just in front
-// of the glass (depth 4.15) and behind the roof (5.2) at every heading
-const VAN_DRIVER = [
-  { blob: true, x: 1.5, y: 0, z: 3.9, r: 0.7, color: "#f2c091", bias: 0.5 }, // head
-  { blob: true, x: 1.5, y: 0, z: 4.5, r: 0.55, color: "#4a6fa5", bias: 0.55 }, // cap
+// The carter sits on the front board, just behind the horse — same seated
+// three-blob figure convention as the tractor's own driver
+const CART_DRIVER = [
+  { blob: true, x: -1.0, y: 0, z: 5.0, r: 0.75, color: "#4a6fa5", bias: 0.5 }, // coat
+  { blob: true, x: -1.0, y: 0, z: 6.0, r: 0.55, color: "#f2c091", bias: 0.55 }, // head
+  { blob: true, x: -1.0, y: 0, z: 6.55, r: 0.5, color: "#4a4238", bias: 0.6 }, // flat cap
 ];
 
-const van = { on: false, x: 0, y: 0, angle: 0, road: null, seg: 0, dir: 1, pause: 0, moving: 0 };
+const cart = { on: false, x: 0, y: 0, angle: 0, road: null, seg: 0, dir: 1, pause: 0, moving: 0 };
 
 // Start somewhere along the network
 {
   const usable = roads.filter((r) => r.pts.length > 4);
   if (usable.length) {
-    van.road = usable[(rand() * usable.length) | 0];
-    van.seg = 1 + ((rand() * (van.road.pts.length - 2)) | 0);
-    van.dir = rand() < 0.5 ? 1 : -1;
-    const p = van.road.pts[van.seg];
-    van.x = p.x;
-    van.y = p.y;
-    van.angle = p.dir + (van.dir < 0 ? Math.PI : 0);
-    van.on = true;
+    cart.road = usable[(rand() * usable.length) | 0];
+    cart.seg = 1 + ((rand() * (cart.road.pts.length - 2)) | 0);
+    cart.dir = rand() < 0.5 ? 1 : -1;
+    const p = cart.road.pts[cart.seg];
+    cart.x = p.x;
+    cart.y = p.y;
+    cart.angle = p.dir + (cart.dir < 0 ? Math.PI : 0);
+    cart.on = true;
   }
 }
 
-function updateVan(dt) {
-  if (!van.on) return;
-  if (van.pause > 0) {
-    van.pause -= dt;
-    van.moving = 0;
+function updateCart(dt) {
+  if (!cart.on) return;
+  if (cart.pause > 0) {
+    cart.pause -= dt;
+    cart.moving = 0;
     return;
   }
   // Wait for the tractor to pass rather than drive through it
-  if (Math.hypot(tractor.x - van.x, tractor.y - van.y) < 10) {
-    van.moving = 0;
+  if (Math.hypot(tractor.x - cart.x, tractor.y - cart.y) < 10) {
+    cart.moving = 0;
     return;
   }
-  van.moving = VAN_SPEED;
-  van.seg += (van.dir * VAN_SPEED * dt) / 3;
-  const pts = van.road.pts;
-  if (van.seg <= 0 || van.seg >= pts.length - 1) {
+  cart.moving = CART_SPEED;
+  cart.seg += (cart.dir * CART_SPEED * dt) / 3;
+  const pts = cart.road.pts;
+  if (cart.seg <= 0 || cart.seg >= pts.length - 1) {
     // Reached an end of this road: make the delivery, then take any road
     // passing the spot — one of them is usually the road back
-    van.seg = Math.max(0, Math.min(pts.length - 1, van.seg));
-    const end = pts[Math.round(van.seg)];
-    van.pause = 2.5 + rand() * 3;
+    cart.seg = Math.max(0, Math.min(pts.length - 1, cart.seg));
+    const end = pts[Math.round(cart.seg)];
+    cart.pause = 2.5 + rand() * 3;
     const options = [];
     for (const r of roads) {
       if (r.pts.length < 5) continue;
@@ -3376,22 +3414,22 @@ function updateVan(dt) {
     }
     const pick = options.length
       ? options[(rand() * options.length) | 0]
-      : { road: van.road, seg: Math.round(van.seg), dir: -van.dir };
-    van.road = pick.road;
-    van.seg = pick.seg;
-    van.dir = pick.dir;
+      : { road: cart.road, seg: Math.round(cart.seg), dir: -cart.dir };
+    cart.road = pick.road;
+    cart.seg = pick.seg;
+    cart.dir = pick.dir;
     return;
   }
-  const i = Math.floor(van.seg);
-  const f = van.seg - i;
+  const i = Math.floor(cart.seg);
+  const f = cart.seg - i;
   const a = pts[i];
   const b = pts[i + 1];
-  van.x = a.x + (b.x - a.x) * f;
-  van.y = a.y + (b.y - a.y) * f;
+  cart.x = a.x + (b.x - a.x) * f;
+  cart.y = a.y + (b.y - a.y) * f;
   // Ease the heading toward the direction of travel (never snap)
-  const want = Math.atan2((b.y - a.y) * van.dir, (b.x - a.x) * van.dir);
-  const d = Math.atan2(Math.sin(want - van.angle), Math.cos(want - van.angle));
-  van.angle += Math.max(-4 * dt, Math.min(4 * dt, d));
+  const want = Math.atan2((b.y - a.y) * cart.dir, (b.x - a.x) * cart.dir);
+  const d = Math.atan2(Math.sin(want - cart.angle), Math.cos(want - cart.angle));
+  cart.angle += Math.max(-4 * dt, Math.min(4 * dt, d));
 }
 
 const birds = [];
@@ -3447,30 +3485,31 @@ function drawBirds(camX, camY) {
 // ---------------------------------------------------------------------------
 
 const TIRE = "#33363d";
-const HUB = "#f7e8b8";
+const HUB = "#a3874f";
 
-// Styled after the old workhorse of Nordic farmyards: deep red bodywork
-// riding on flint-gray running gear, a hood tapering into the grille, a
-// bare pan seat between flat fenders, and a muffler halfway up the stack
-const TRACTOR_RED = "#d64535";
+// Styled after the old workhorse of the farmyard: dull grey-green
+// bodywork riding on flint-gray running gear, a hood tapering into the
+// grille, a bare pan seat between flat fenders, and a muffler halfway up
+// the stack
+const TRACTOR_BODY = "#5c6b4f";
 
 const BOXES = [
   { x0: -7.0, x1: -3.4, y0: -1.6, y1: 1.6, z0: 2.5, z1: 4.2, color: "#6e6e6e" }, // frame rail, rear run
   { x0: -3.4, x1: -0.6, y0: -1.6, y1: 1.6, z0: 2.5, z1: 5.2, color: "#6e6e6e" }, // gearbox hump amidships, one higher
   { x0: -0.6, x1: 3.0, y0: -1.6, y1: 1.6, z0: 2.5, z1: 4.2, color: "#6e6e6e" }, // frame rail, front run
-  { x0: -7.0, x1: -3.4, y0: -3.0, y1: 3.0, z0: 4.2, z1: 6.0, color: TRACTOR_RED }, // body platform, rear
-  { x0: -3.4, x1: -0.6, y0: -3.0, y1: 3.0, z0: 5.2, z1: 6.0, color: TRACTOR_RED }, // body platform, thinner over the hump
-  { x0: -0.6, x1: 3.0, y0: -3.0, y1: 3.0, z0: 4.2, z1: 6.0, color: TRACTOR_RED }, // body platform, front
+  { x0: -7.0, x1: -3.4, y0: -3.0, y1: 3.0, z0: 4.2, z1: 6.0, color: TRACTOR_BODY }, // body platform, rear
+  { x0: -3.4, x1: -0.6, y0: -3.0, y1: 3.0, z0: 5.2, z1: 6.0, color: TRACTOR_BODY }, // body platform, thinner over the hump
+  { x0: -0.6, x1: 3.0, y0: -3.0, y1: 3.0, z0: 4.2, z1: 6.0, color: TRACTOR_BODY }, // body platform, front
   { x0: -5.0, x1: -4.0, y0: -2.9, y1: 2.9, z0: 2.6, z1: 3.4, color: "#6e6e6e" }, // rear axle out to the big wheels
   { x0: 4.6, x1: 5.4, y0: -2.2, y1: 2.2, z0: 1.4, z1: 2.5, color: "#6e6e6e" }, // front axle under the engine
   { x0: 3.0, x1: 6.2, y0: -1.6, y1: 1.6, z0: 2.5, z1: 4.2, color: "#6e6e6e" }, // engine block, exposed at the sides
-  { x0: 3.0, x1: 4.8, y0: -2.2, y1: 2.2, z0: 4.2, z1: 5.3, color: TRACTOR_RED }, // hood lid, rear half
-  { x0: 4.8, x1: 6.2, y0: -1.9, y1: 1.9, z0: 4.2, z1: 5.1, color: TRACTOR_RED }, // hood lid tapering toward the front
-  { x0: 6.2, x1: 7.0, y0: -1.5, y1: 1.5, z0: 2.5, z1: 4.3, color: "#c03a2c" }, // nose, stepped down for a snub front
-  { x0: 7.0, x1: 7.4, y0: -1.3, y1: 1.3, z0: 2.6, z1: 4.1, color: "#5a5148" }, // radiator grille
+  { x0: 3.0, x1: 4.8, y0: -2.2, y1: 2.2, z0: 4.2, z1: 5.3, color: TRACTOR_BODY }, // hood lid, rear half
+  { x0: 4.8, x1: 6.2, y0: -1.9, y1: 1.9, z0: 4.2, z1: 5.1, color: TRACTOR_BODY }, // hood lid tapering toward the front
+  { x0: 6.2, x1: 7.0, y0: -1.5, y1: 1.5, z0: 2.5, z1: 4.3, color: "#454a3c" }, // nose, stepped down for a snub front
+  { x0: 7.0, x1: 7.4, y0: -1.3, y1: 1.3, z0: 2.6, z1: 4.1, color: "#4a4238" }, // radiator grille
   { x0: -7.9, x1: -7.0, y0: -0.8, y1: 0.8, z0: 2.8, z1: 3.9, color: "#6b6b6b" }, // hitch block; implement drawbars butt against it
-  { x0: -6.2, x1: -2.8, y0: 3.0, y1: 5.4, z0: 6.0, z1: 6.7, color: TRACTOR_RED }, // rear fender L
-  { x0: -6.2, x1: -2.8, y0: -5.4, y1: -3.0, z0: 6.0, z1: 6.7, color: TRACTOR_RED }, // rear fender R
+  { x0: -6.2, x1: -2.8, y0: 3.0, y1: 5.4, z0: 6.0, z1: 6.7, color: TRACTOR_BODY }, // rear fender L
+  { x0: -6.2, x1: -2.8, y0: -5.4, y1: -3.0, z0: 6.0, z1: 6.7, color: TRACTOR_BODY }, // rear fender R
   { x0: -4.5, x1: -3.1, y0: -1.1, y1: 1.1, z0: 6.1, z1: 6.7, color: "#6e6e6e" }, // bare pan seat between the fenders
   { x0: -2.45, x1: -2.05, y0: -0.25, y1: 0.25, z0: 5.2, z1: 7.3, color: "#4c443c" }, // steering column off the gearbox hump
   { x0: 1.5, x1: 2.5, y0: -0.5, y1: 0.5, z0: 5.3, z1: 6.4, color: "#7a7a7a" }, // exhaust riser
@@ -3514,7 +3553,7 @@ const IMPLEMENT_LIFT_HEIGHT = 3.5;
 
 const PLOW_BOXES = [
   { x0: -8.6, x1: -7.2, y0: -0.9, y1: 0.9, z0: 3.2, z1: 4.2, color: "#6b6b6b" }, // drawbar
-  { x0: -10.2, x1: -8.8, y0: -4.6, y1: 4.6, z0: 3.4, z1: 4.6, color: "#d94a2e" }, // beam
+  { x0: -10.2, x1: -8.8, y0: -4.6, y1: 4.6, z0: 3.4, z1: 4.6, color: "#7a3226" }, // beam
 ];
 for (const yc of [-3.4, -1.1, 1.2, 3.5]) {
   PLOW_BOXES.push({
@@ -3525,10 +3564,10 @@ for (const yc of [-3.4, -1.1, 1.2, 3.5]) {
 
 const SEEDER_BOXES = [
   { x0: -8.6, x1: -7.2, y0: -0.9, y1: 0.9, z0: 3.2, z1: 4.2, color: "#6b6b6b" }, // drawbar
-  { x0: -10.4, x1: -8.6, y0: -4.6, y1: 4.6, z0: 3.2, z1: 4.4, color: "#f0b322" }, // frame
-  { x0: -10.2, x1: -8.8, y0: -3.9, y1: -1.7, z0: 4.4, z1: 6.4, color: "#ffd04a" }, // hopper
-  { x0: -10.2, x1: -8.8, y0: -1.1, y1: 1.1, z0: 4.4, z1: 6.4, color: "#ffd04a" }, // hopper
-  { x0: -10.2, x1: -8.8, y0: 1.7, y1: 3.9, z0: 4.4, z1: 6.4, color: "#ffd04a" }, // hopper
+  { x0: -10.4, x1: -8.6, y0: -4.6, y1: 4.6, z0: 3.2, z1: 4.4, color: "#8a6a3a" }, // frame
+  { x0: -10.2, x1: -8.8, y0: -3.9, y1: -1.7, z0: 4.4, z1: 6.4, color: "#c9a24a" }, // hopper
+  { x0: -10.2, x1: -8.8, y0: -1.1, y1: 1.1, z0: 4.4, z1: 6.4, color: "#c9a24a" }, // hopper
+  { x0: -10.2, x1: -8.8, y0: 1.7, y1: 3.9, z0: 4.4, z1: 6.4, color: "#c9a24a" }, // hopper
 ];
 for (const yc of [-3.4, -1.1, 1.2, 3.5]) {
   SEEDER_BOXES.push({
@@ -3539,9 +3578,9 @@ for (const yc of [-3.4, -1.1, 1.2, 3.5]) {
 
 const HARVESTER_BOXES = [
   { x0: -8.6, x1: -7.2, y0: -0.9, y1: 0.9, z0: 3.2, z1: 4.2, color: "#6b6b6b" }, // drawbar
-  { x0: -13.0, x1: -8.6, y0: -4.8, y1: 4.8, z0: 2.2, z1: 8.0, color: "#4cae4f" }, // body
-  { x0: -12.4, x1: -11.2, y0: -4.2, y1: 4.2, z0: 8.0, z1: 9.4, color: "#3c8c40" }, // grain tank
-  { x0: -8.6, x1: -7.4, y0: -4.8, y1: 4.8, z0: 0.4, z1: 2.6, color: "#d94a2e" }, // header reel
+  { x0: -13.0, x1: -8.6, y0: -4.8, y1: 4.8, z0: 2.2, z1: 8.0, color: "#5a7a4a" }, // body
+  { x0: -12.4, x1: -11.2, y0: -4.2, y1: 4.2, z0: 8.0, z1: 9.4, color: "#3f5a38" }, // grain tank
+  { x0: -8.6, x1: -7.4, y0: -4.8, y1: 4.8, z0: 0.4, z1: 2.6, color: "#7a3226" }, // header reel
 ];
 
 const HARVESTER_WHEELS = [
@@ -3605,10 +3644,17 @@ const IMPLEMENTS = {
 
 // Farm buildings, local to FARM
 const FARM_BOXES = [
-  { x0: -16.0, x1: 2.0, y0: -12.0, y1: 2.0, z0: 0.0, z1: 9.0, color: "#d15845" }, // barn
-  { x0: -17.5, x1: 3.5, y0: -13.5, y1: 3.5, z0: 9.0, z1: 12.0, color: "#7a4a32" }, // barn roof
-  { x0: -7.5, x1: -3.5, y0: 1.9, y1: 2.3, z0: 0.0, z1: 6.0, color: "#f7e8d8" }, // barn door
-  { x0: 8.0, x1: 17.0, y0: -9.0, y1: 0.0, z0: 0.0, z1: 20.0, color: "#c6ced6" }, // silo
+  { x0: -16.0, x1: 2.0, y0: -12.0, y1: 2.0, z0: 0.0, z1: 9.0, color: "#3d332a" }, // barn, tarred weatherboard
+  { x0: -17.5, x1: 3.5, y0: -13.5, y1: 3.5, z0: 9.0, z1: 12.0, color: "#5c4530" }, // barn roof
+  { x0: -7.5, x1: -3.5, y0: 1.9, y1: 2.3, z0: 0.0, z1: 6.0, color: "#f7e8d8" }, // barn door, whitewashed
+  // Granary: raised clear of the ground on stone staddle-legs to keep the
+  // rats out, same footprint the silo used to stand on.
+  { x0: 8.5, x1: 9.5, y0: -8.5, y1: -7.5, z0: 0.0, z1: 1.6, color: "#8a8578" }, // staddle leg
+  { x0: 15.5, x1: 16.5, y0: -8.5, y1: -7.5, z0: 0.0, z1: 1.6, color: "#8a8578" }, // staddle leg
+  { x0: 8.5, x1: 9.5, y0: -1.5, y1: -0.5, z0: 0.0, z1: 1.6, color: "#8a8578" }, // staddle leg
+  { x0: 15.5, x1: 16.5, y0: -1.5, y1: -0.5, z0: 0.0, z1: 1.6, color: "#8a8578" }, // staddle leg
+  { x0: 8.0, x1: 17.0, y0: -9.0, y1: 0.0, z0: 1.6, z1: 6.6, color: "#9c7a52" }, // granary body
+  { x0: 7.3, x1: 17.7, y0: -9.7, y1: 0.7, z0: 6.6, z1: 9.0, color: "#5c4530" }, // granary roof
   // Fuel tank: a horizontal cylinder lying along the local y axis, built
   // the same way the tractor's own wheels are (an inscribed box for the
   // silhouette plus a full-radius disc at each end, see FARM_SHAPES) —
@@ -3627,8 +3673,8 @@ const FARM_BOXES = [
     x0: FUEL_TANK_LOCAL.x - FUEL_TANK_R * 0.72, x1: FUEL_TANK_LOCAL.x + FUEL_TANK_R * 0.72,
     y0: FUEL_TANK_LOCAL.y - FUEL_TANK_LEN, y1: FUEL_TANK_LOCAL.y + FUEL_TANK_LEN,
     z0: FUEL_TANK_STAND_H, z1: FUEL_TANK_STAND_H + FUEL_TANK_R * 1.44,
-    color: "#c0392b",
-  }, // tank body
+    color: "#3a4a3a",
+  }, // tank body, riveted iron green
   {
     x0: FUEL_TANK_LOCAL.x - 0.3, x1: FUEL_TANK_LOCAL.x + 0.3,
     y0: FUEL_TANK_LOCAL.y - 0.3, y1: FUEL_TANK_LOCAL.y + 0.3,
@@ -3636,21 +3682,18 @@ const FARM_BOXES = [
     color: "#3a3a3a",
   }, // valve hanging below the tank's midpoint
 ];
-// Round red dome on the silo, plus the two end-cap discs that round off
-// the fuel tank's cylinder (same box+disc trick as makeWheels: the disc
-// facing the camera reads as the tank's round end, the box gives its
-// silhouette everywhere else)
-const FARM_SHAPES = [
-  { blob: true, x: 12.5, y: -4.5, z: 20.0, r: 4.0, color: "#d94a2e" },
-];
+// The two end-cap discs that round off the fuel tank's cylinder (same
+// box+disc trick as makeWheels: the disc facing the camera reads as the
+// tank's round end, the box gives its silhouette everywhere else)
+const FARM_SHAPES = [];
 for (const [ly, n] of [
   [FUEL_TANK_LOCAL.y - FUEL_TANK_LEN, -1],
   [FUEL_TANK_LOCAL.y + FUEL_TANK_LEN, 1],
 ]) {
   const z = FUEL_TANK_STAND_H + FUEL_TANK_R * 0.72;
   FARM_SHAPES.push(
-    { disc: true, x: FUEL_TANK_LOCAL.x, y: ly, z, r: FUEL_TANK_R, n, color: "#c0392b" },
-    { disc: true, x: FUEL_TANK_LOCAL.x, y: ly, z, r: FUEL_TANK_R * 0.6, n, color: "#8e2b20", bias: 0.06 }
+    { disc: true, x: FUEL_TANK_LOCAL.x, y: ly, z, r: FUEL_TANK_R, n, color: "#3a4a3a" },
+    { disc: true, x: FUEL_TANK_LOCAL.x, y: ly, z, r: FUEL_TANK_R * 0.6, n, color: "#28352a", bias: 0.06 }
   );
 }
 
@@ -3665,7 +3708,7 @@ const CITY_BOXES = [
   { x0: 9.0, x1: 21.0, y0: -7.0, y1: 5.0, z0: 12.0, z1: 14.0, color: "#6b5a44" }, // office roof
 ];
 const CITY_SHAPES = [
-  { blob: true, x: 15.0, y: -1.0, z: 15.5, r: 2.4, color: "#d94a2e" }, // roof accent
+  { blob: true, x: 15.0, y: -1.0, z: 15.5, r: 2.4, color: "#8a4438" }, // roof accent
 ];
 
 // Grain sacks dropped by the harvester: plump blobs with a tied-off top
@@ -3863,8 +3906,8 @@ function drawScene(camX, camY) {
   ctx.beginPath();
   shadowQuad(tractor.x, tractor.y, tractor.angle, -6, 8.5, 5.5);
   shadowQuad(pose.x, pose.y, pose.angle, impRear, -6.5, 6);
-  if (van.on && onScreen(van.x, van.y, camX, camY))
-    shadowQuad(van.x, van.y, van.angle, -4, 4, 2.8);
+  if (cart.on && onScreen(cart.x, cart.y, camX, camY))
+    shadowQuad(cart.x, cart.y, cart.angle, -6, 6.9, 2.2);
   for (const t of trees) {
     if (!onScreen(t.wx, t.wy, camX, camY)) continue;
     const sx = Math.round(projX(t.wx, t.wy) - camX);
@@ -3913,10 +3956,10 @@ function drawScene(camX, camY) {
   makeRoundItems(items, FARM_SHAPES, FARM.x, FARM.y, FARM.angle, 0, camX, camY);
   makeItems(items, CITY_BOXES, CITY.x, CITY.y, CITY.angle, 0, camX, camY);
   makeRoundItems(items, CITY_SHAPES, CITY.x, CITY.y, CITY.angle, 0, camX, camY);
-  if (van.on && onScreen(van.x, van.y, camX, camY)) {
-    makeItems(items, VAN_BOXES, van.x, van.y, van.angle, 0, camX, camY);
-    makeWheels(items, VAN_WHEELS, van.x, van.y, van.angle, 0, camX, camY);
-    makeRoundItems(items, VAN_DRIVER, van.x, van.y, van.angle, 0, camX, camY);
+  if (cart.on && onScreen(cart.x, cart.y, camX, camY)) {
+    makeItems(items, CART_BOXES, cart.x, cart.y, cart.angle, 0, camX, camY);
+    makeWheels(items, CART_WHEELS, cart.x, cart.y, cart.angle, 0, camX, camY);
+    makeRoundItems(items, CART_DRIVER, cart.x, cart.y, cart.angle, 0, camX, camY);
   }
   for (const t of trees) {
     if (!onScreen(t.wx, t.wy, camX, camY)) continue;
@@ -4142,6 +4185,7 @@ const GRASS_SEASONS = PROFILE.palette.grass;
 // (dried hay) in autumn rather than just tanning like the grass does
 const MEADOW_SEASONS = GRASS_SEASONS.map(meadowTint);
 const DIRT_SEASONS = PROFILE.palette.dirt;
+const STUBBLE_SEASONS = DIRT_SEASONS.map(stubbleTint);
 const TREE_BLOB_SEASONS = [
   PROFILE.palette.canopy,
   PROFILE.palette.canopy.map((c) => tint(c, 0.1)),
@@ -4183,12 +4227,15 @@ function updateSeason() {
   GRASS = seasonHex(GRASS_SEASONS);
   MEADOW = seasonHex(MEADOW_SEASONS);
   DIRT = seasonHex(DIRT_SEASONS);
+  STUBBLE = seasonHex(STUBBLE_SEASONS);
   const gDots = grassDotShades(GRASS);
   for (let i = 0; i < GRASS_DOTS.length; i++) GRASS_DOTS[i] = gDots[i];
   const mDots = grassDotShades(MEADOW);
   for (let i = 0; i < MEADOW_DOTS.length; i++) MEADOW_DOTS[i] = mDots[i];
   const dDots = dirtDotShades(DIRT);
   for (let i = 0; i < DIRT_DOTS.length; i++) DIRT_DOTS[i] = dDots[i];
+  const sDots = dirtDotShades(STUBBLE);
+  for (let i = 0; i < STUBBLE_DOTS.length; i++) STUBBLE_DOTS[i] = sDots[i];
   for (let i = 0; i < TREE_BLOBS.length; i++)
     TREE_BLOBS[i].color = seasonHex(TREE_BLOB_SEASONS[i]);
   // The sky is a full-canvas dithered repaint, so it only redraws on a
@@ -4214,6 +4261,15 @@ function updateSeason() {
 // ---------------------------------------------------------------------------
 
 let worldTime = 0;
+
+// How overcast the day is, 0 (clear) to 1 (socked in): two slow sines of
+// unrelated periods multiplied together, so it drifts continuously and
+// never repeats on a predictable beat or pops between frames — same
+// no-per-frame-randomness, no-snapping rule the rest of the weather/season
+// system follows.
+function mistiness() {
+  return 0.5 + 0.5 * Math.sin(worldTime * 0.02) * Math.sin(worldTime * 0.0053 + 1.7);
+}
 
 // The sky gradient is prerendered so it can be dithered, and repainted
 // whenever the season shifts its colors
@@ -4258,7 +4314,10 @@ for (let i = 0; i < 9; i++) {
 function drawClouds(camX, camY) {
   const wrapX = VIEW_W + 240;
   const wrapY = VIEW_H + 200;
-  ctx.fillStyle = "rgba(252,247,235,0.92)"; // paper-white, matching the palette
+  // Greyer and a touch more solid on overcast days, paper-white on clear ones
+  const m = mistiness();
+  const grey = Math.round(252 - 40 * m);
+  ctx.fillStyle = `rgba(${grey},${grey - 2},${grey - 8},${(0.8 + 0.15 * m).toFixed(2)})`;
   for (const c of CLOUDS) {
     const sx = ((((c.x + worldTime * c.speed - camX * c.par) % wrapX) + wrapX) % wrapX) - 120;
     const sy = ((((c.y - camY * c.par) % wrapY) + wrapY) % wrapY) - 100;
@@ -4308,6 +4367,49 @@ function drawSnow(camX, camY) {
     ctx.fillRect(sx | 0, sy | 0, f.size, f.size);
   }
   ctx.globalAlpha = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Mist: a soft overcast haze that thickens and thins with mistiness(), plus
+// a light shower once it's properly socked in. Pure screen-space overlay
+// drawn straight to ctx (like drawSnow), so it never touches the ink
+// outline pipeline. Rain reuses SNOWFLAKES' golden-ratio layout as streaks
+// instead of flakes, and is gated off whenever winter snow is falling so
+// the two never overlap.
+// ---------------------------------------------------------------------------
+
+function drawMist(camX, camY) {
+  const m = mistiness();
+
+  // Haze: a pale gradient, thicker toward the top of the view (distance)
+  if (m > 0.02) {
+    const g = ctx.createLinearGradient(0, 0, 0, VIEW_H);
+    g.addColorStop(0, `rgba(206,216,220,${(0.4 * m).toFixed(2)})`);
+    g.addColorStop(1, `rgba(206,216,220,${(0.06 * m).toFixed(2)})`);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  }
+
+  // Rain only once it's properly overcast, and never alongside winter snow
+  const rain = (Math.max(0, m - 0.55) / 0.45) * (1 - winterDepth());
+  if (rain <= 0) return;
+  const n = Math.ceil(SNOWFLAKES.length * Math.min(1, rain * 1.5));
+  ctx.strokeStyle = `rgba(205,218,226,${(0.3 + 0.35 * rain).toFixed(2)})`;
+  const wrapX = VIEW_W + 40;
+  for (let i = 0; i < n; i++) {
+    const f = SNOWFLAKES[i];
+    const sx =
+      ((((f.x + Math.sin(worldTime * 2 + f.sway) * 3 - camX * 0.4) % wrapX) +
+        wrapX) %
+        wrapX) -
+      20;
+    const sy =
+      (((f.y + worldTime * f.speed * 2.4 - camY * 0.4) % VIEW_H) + VIEW_H) % VIEW_H;
+    ctx.beginPath();
+    ctx.moveTo(sx, sy);
+    ctx.lineTo(sx - 1, sy + 4);
+    ctx.stroke();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -4496,13 +4598,13 @@ function drawSmoke(camX, camY) {
 
 const SEED_CAP = 64; // seeder hopper size, refilled at the farm
 const TRAILER_CAP = 12; // sacks the trailer can carry
-const SEED_PRICE = 2; // € per seed, bought automatically at the farm
-const SACK_PRICE = 10; // € earned per sack of grain sold
+const SEED_PRICE = 2; // £ per seed, bought automatically at the farm
+const SACK_PRICE = 10; // £ earned per sack of grain sold
 
 // Fuel: a tank sized so a full one comfortably covers a return trip from
 // anywhere on the map, refilled automatically at the farm like seeds
 const FUEL_CAP = 100;
-const FUEL_PRICE = 1; // € per unit, bought automatically at the farm
+const FUEL_PRICE = 1; // £ per unit, bought automatically at the farm
 
 const ROUND_TIME = 300; // seconds — one Apr 1 – Oct 31 season in either mode
 let timeLeft = ROUND_TIME;
@@ -4515,8 +4617,8 @@ let finalRank = -1; // this round's place in the best list, -1 if none
 // credit down to the debt limit; sink below it and the bank takes the farm.
 // The scoreboard is the longest runs in years, kept in localStorage.
 const SURVIVAL_START_CASH = 250;
-const TAX_BASE = 150; // € — the first year's property tax
-const TAX_STEP = 75; // € added to the tax each following year
+const TAX_BASE = 150; // £ — the first year's property tax
+const TAX_STEP = 75; // £ added to the tax each following year
 const DEBT_LIMIT = 400; // bankruptcy when cash drops below -this
 const SURVIVAL_SCORES_KEY = "traktoripeli.survival";
 let year = 1;
@@ -4943,7 +5045,7 @@ function update(dt) {
   updateButterflies(dt);
   updateAnimals(dt);
   updateHerds(dt);
-  updateVan(dt);
+  updateCart(dt);
   updateBirds(dt);
   updateLadybug(dt);
   updateSeason();
@@ -5419,6 +5521,7 @@ function draw() {
   drawLadybug(camX, camY);
   drawBirds(camX, camY);
   drawSnow(camX, camY);
+  drawMist(camX, camY);
 
   screenCtx.drawImage(view, 0, 0, screenCanvas.width, screenCanvas.height);
 
@@ -5476,10 +5579,10 @@ function draw() {
       Math.abs(tractor.speed) > 2 &&
       implementOverField();
     const cargoColor = fullRun && ((worldTime * 6) | 0) % 2 === 0 ? RED : null;
-    seg(`CARGO: ${cargo}/${TRAILER_CAP}${atCity ? " @CITY" : ""}   `, cargoColor);
+    seg(`CARGO: ${cargo}/${TRAILER_CAP}${atCity ? " @TOWN" : ""}   `, cargoColor);
   }
   const lucky = luckFlash > 0 && ((luckFlash * 8) | 0) % 2 === 0;
-  seg(`CASH: €${cash}   `, lucky ? "#c9e6a8" : cash < SEED_PRICE ? RED : "#ffd94f");
+  seg(`CASH: £${cash}   `, lucky ? "#c9e6a8" : cash < SEED_PRICE ? RED : "#ffd94f");
   seg(`SOLD: ${sold}   `);
   const fuelPct = Math.round((fuel / FUEL_CAP) * 100);
   seg(
@@ -5539,9 +5642,9 @@ function draw() {
   );
   screenCtx.textAlign = "left";
   const endLabel = taxJustPaid
-    ? `-€${taxPaid} PAID`
+    ? `-£${taxPaid} PAID`
     : mode === "survival" && !winter
-      ? `TAX €${propertyTax}`
+      ? `TAX £${propertyTax}`
       : "DEC 31";
   label(endLabel, bx + barW + 8, topY, taxJustPaid ? "#ff5040" : "#d8c49a");
   // The season grows along a wooden trough
@@ -5584,7 +5687,7 @@ function draw() {
     label("BANKRUPT — THE FARM IS LOST", cx, y + 40, "#ff7a5c");
     screenCtx.font = "bold 18px monospace";
     label(
-      `SURVIVED ${year} YEAR${year === 1 ? "" : "S"}   (€${cash})`,
+      `SURVIVED ${year} YEAR${year === 1 ? "" : "S"}   (£${cash})`,
       cx,
       y + 74,
       "#f5e9c8"
@@ -5592,7 +5695,7 @@ function draw() {
     screenCtx.font = "13px monospace";
     bestScores.forEach((entry, i) => {
       label(
-        `${i + 1}.  ${entry.years} YEAR${entry.years === 1 ? " " : "S"}   €${entry.cash}   (map ${entry.map ?? entry.seed ?? "?"})`,
+        `${i + 1}.  ${entry.years} YEAR${entry.years === 1 ? " " : "S"}   £${entry.cash}   (map ${entry.map ?? entry.seed ?? "?"})`,
         cx,
         y + 106 + i * 20,
         i === finalRank ? "#ffd94f" : "#e0d0a8"
@@ -5631,7 +5734,7 @@ function draw() {
   const tmy = mmY + ((tractor.x + tractor.y) / (2 * TILE)) * mmScale;
   screenCtx.fillStyle = "#ffffff";
   screenCtx.fillRect(tmx - 2, tmy - 2, 4, 4);
-  screenCtx.fillStyle = TRACTOR_RED;
+  screenCtx.fillStyle = TRACTOR_BODY;
   screenCtx.fillRect(tmx - 1, tmy - 1, 2, 2);
   screenCtx.restore();
 
@@ -5738,7 +5841,7 @@ function draw() {
     screenCtx.fillRect(x, y, w, h);
     screenCtx.textAlign = "center";
     screenCtx.font = "bold 16px monospace";
-    label(gameStarted ? "MENU" : "TRAKTORIPELI", cx, y + 26, "#ffd94f");
+    label(gameStarted ? "MENU" : "THE HOME FARM", cx, y + 26, "#ffd94f");
 
     screenCtx.font = "11px monospace";
     label("MAP", cx, y + 46, "#d8c49a");
