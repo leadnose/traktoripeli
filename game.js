@@ -938,6 +938,59 @@ function nearFuelTank() {
   return Math.hypot(tractor.x - p.x, tractor.y - p.y) < FUEL_TANK_RADIUS;
 }
 
+// ---------------------------------------------------------------------------
+// City location: where grain actually gets sold. Placed a real drive away
+// from the farm so hauling a full trailer there and back is a genuine trip,
+// not a same-spot errand.
+// ---------------------------------------------------------------------------
+
+// Keyed by its own hash (not the shared `rand()`), same reasoning as
+// yardHash below: placing the city must never shift the seeded sequence
+// hill/water/decoration generation depends on for the hand-tuned map
+// archetypes, and a rejection-sampling loop would otherwise burn a
+// different, unpredictable number of rand() calls on every map.
+function cityHash(i) {
+  let s = (SEED ^ Math.imul(i + 1, 0x27d4eb2f)) | 0;
+  s = (s + 0x165667b1) | 0;
+  let t = Math.imul(s ^ (s >>> 15), 1 | s);
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+
+const CITY_MIN_DIST = MAP_SIZE * 0.55;
+function pickCityPos() {
+  for (let tries = 0; tries < 50; tries++) {
+    const x = MAP_SIZE * (0.1 + cityHash(tries * 2) * 0.8);
+    const y = MAP_SIZE * (0.1 + cityHash(tries * 2 + 1) * 0.8);
+    if (Math.hypot(x - FARM.x, y - FARM.y) >= CITY_MIN_DIST) return { x, y };
+  }
+  // Fallback: the farthest corner of the sampling square from the farm.
+  // FARM only ever lands within the central 60% of the map, so even its
+  // worst case (dead center) leaves every corner of this 80%-wide square
+  // comfortably past CITY_MIN_DIST — unlike a mirror-through-center trick,
+  // which degrades to no distance at all exactly when the farm is central.
+  let best = null;
+  let bestDist = -1;
+  for (const fx of [0.1, 0.9]) {
+    for (const fy of [0.1, 0.9]) {
+      const x = MAP_SIZE * fx;
+      const y = MAP_SIZE * fy;
+      const d = Math.hypot(x - FARM.x, y - FARM.y);
+      if (d > bestDist) {
+        bestDist = d;
+        best = { x, y };
+      }
+    }
+  }
+  return best;
+}
+const CITY = { ...pickCityPos(), angle: cityHash(500) * Math.PI * 2 };
+const CITY_RADIUS = 30; // within this distance the depot buys grain
+
+function nearCity() {
+  return Math.hypot(tractor.x - CITY.x, tractor.y - CITY.y) < CITY_RADIUS;
+}
+
 // The trodden yard isn't a perfect ellipse: each map bends its rim in and
 // out by a deterministic amount so every farmyard reads as its own trampled
 // patch of ground rather than a stamped-out shape. Keyed by its own hash
@@ -1929,10 +1982,13 @@ function makeMap() {
   const awayFromFarm = (tx, ty) =>
     Math.hypot((tx + 0.5) * TILE - FARM.x, (ty + 0.5) * TILE - FARM.y) >
     FARM_RADIUS + 48;
+  const awayFromCity = (tx, ty) =>
+    Math.hypot((tx + 0.5) * TILE - CITY.x, (ty + 0.5) * TILE - CITY.y) >
+    CITY_RADIUS + 48;
   let waterTiles = 0;
   const setWater = (tx, ty) => {
     if (tx < 0 || ty < 0 || tx >= MAP_TILES || ty >= MAP_TILES) return;
-    if (!awayFromFarm(tx, ty)) return;
+    if (!awayFromFarm(tx, ty) || !awayFromCity(tx, ty)) return;
     if (tiles[ty][tx] === 4) return;
     tiles[ty][tx] = 4;
     waterTiles++;
@@ -2197,6 +2253,9 @@ function makeMap() {
     traceRoad(net[0], tx, ty, 3.0);
   }
 
+  // Trunk road to the city, so the grain run has a real route to follow
+  traceRoad(nearestRoadPoint(CITY.x, CITY.y), CITY.x, CITY.y, 3.0);
+
   // Field spurs, nearest fields first so far ones can chain off their roads.
   // Each spur aims for a point just outside its field's edge.
   const patchCenter = (p) => ({
@@ -2284,11 +2343,13 @@ function makeMap() {
     }
   }
 
-  // Keep the farmyard clear of fields
+  // Keep the farmyard and the city clear of fields
   for (let ty = 0; ty < MAP_TILES; ty++) {
     for (let tx = 0; tx < MAP_TILES; tx++) {
-      const d = Math.hypot((tx + 0.5) * TILE - FARM.x, (ty + 0.5) * TILE - FARM.y);
-      if (d < FARM_RADIUS + 24 && tiles[ty][tx] !== 4) tiles[ty][tx] = 0;
+      const df = Math.hypot((tx + 0.5) * TILE - FARM.x, (ty + 0.5) * TILE - FARM.y);
+      const dc = Math.hypot((tx + 0.5) * TILE - CITY.x, (ty + 0.5) * TILE - CITY.y);
+      if ((df < FARM_RADIUS + 24 || dc < CITY_RADIUS + 24) && tiles[ty][tx] !== 4)
+        tiles[ty][tx] = 0;
     }
   }
 
@@ -2306,13 +2367,16 @@ function makeMap() {
     if (tiles[cy][cx] !== 0) continue;
     if (Math.hypot((cx + 0.5) * TILE - FARM.x, (cy + 0.5) * TILE - FARM.y) < FARM_RADIUS + 40)
       continue;
+    if (Math.hypot((cx + 0.5) * TILE - CITY.x, (cy + 0.5) * TILE - CITY.y) < CITY_RADIUS + 40)
+      continue;
     const r = 2.5 + rand() * 4;
     for (let ty = Math.max(0, Math.floor(cy - r)); ty <= Math.min(MAP_TILES - 1, Math.ceil(cy + r)); ty++)
       for (let tx = Math.max(0, Math.floor(cx - r)); tx <= Math.min(MAP_TILES - 1, Math.ceil(cx + r)); tx++)
         if (
           tiles[ty][tx] === 0 &&
           Math.hypot(tx - cx, ty - cy) < r * (0.7 + rand() * 0.6) &&
-          Math.hypot((tx + 0.5) * TILE - FARM.x, (ty + 0.5) * TILE - FARM.y) > FARM_RADIUS + 40
+          Math.hypot((tx + 0.5) * TILE - FARM.x, (ty + 0.5) * TILE - FARM.y) > FARM_RADIUS + 40 &&
+          Math.hypot((tx + 0.5) * TILE - CITY.x, (ty + 0.5) * TILE - CITY.y) > CITY_RADIUS + 40
         )
           forestTiles.add(ty * MAP_TILES + tx);
   }
@@ -2327,6 +2391,8 @@ function makeMap() {
     if (tiles[cy][cx] !== 0 || forestTiles.has(cy * MAP_TILES + cx)) continue;
     if (Math.hypot((cx + 0.5) * TILE - FARM.x, (cy + 0.5) * TILE - FARM.y) < FARM_RADIUS + 40)
       continue;
+    if (Math.hypot((cx + 0.5) * TILE - CITY.x, (cy + 0.5) * TILE - CITY.y) < CITY_RADIUS + 40)
+      continue;
     const r = 2.5 + rand() * 4;
     for (let ty = Math.max(0, Math.floor(cy - r)); ty <= Math.min(MAP_TILES - 1, Math.ceil(cy + r)); ty++)
       for (let tx = Math.max(0, Math.floor(cx - r)); tx <= Math.min(MAP_TILES - 1, Math.ceil(cx + r)); tx++)
@@ -2334,7 +2400,8 @@ function makeMap() {
           tiles[ty][tx] === 0 &&
           !forestTiles.has(ty * MAP_TILES + tx) &&
           Math.hypot(tx - cx, ty - cy) < r * (0.7 + rand() * 0.6) &&
-          Math.hypot((tx + 0.5) * TILE - FARM.x, (ty + 0.5) * TILE - FARM.y) > FARM_RADIUS + 40
+          Math.hypot((tx + 0.5) * TILE - FARM.x, (ty + 0.5) * TILE - FARM.y) > FARM_RADIUS + 40 &&
+          Math.hypot((tx + 0.5) * TILE - CITY.x, (ty + 0.5) * TILE - CITY.y) > CITY_RADIUS + 40
         )
           meadowTiles.add(ty * MAP_TILES + tx);
   }
@@ -2494,6 +2561,15 @@ const FARM_MARKER = {
 FARM_MARKER.x1 = FARM_MARKER.x0 + 2;
 FARM_MARKER.y1 = FARM_MARKER.y0 + 2;
 
+// The city marker, same footprint math as the farm's, so minimapTile can
+// steer clear of it the same way
+const CITY_MARKER = {
+  x0: Math.round((CITY.x - CITY.y) / TILE) + MAP_TILES - 1,
+  y0: Math.round((CITY.x + CITY.y) / (2 * TILE)) - 1,
+};
+CITY_MARKER.x1 = CITY_MARKER.x0 + 2;
+CITY_MARKER.y1 = CITY_MARKER.y0 + 2;
+
 // Exact minimap pixels a road passes through, keyed "x,y". Built from
 // roadSamples once the road network exists, then consulted by minimapTile
 // so a road survives every future repaint of the tile underneath it instead
@@ -2511,6 +2587,8 @@ function minimapTile(tx, ty) {
   for (let dx = 0; dx < 2; dx++) {
     const x = px + dx;
     if (x >= FARM_MARKER.x0 && x <= FARM_MARKER.x1 && py >= FARM_MARKER.y0 && py <= FARM_MARKER.y1)
+      continue;
+    if (x >= CITY_MARKER.x0 && x <= CITY_MARKER.x1 && py >= CITY_MARKER.y0 && py <= CITY_MARKER.y1)
       continue;
     minimapCtx.fillStyle = shade(roadPixels.has(x + "," + py) ? ROAD_COLOR : color, 1);
     minimapCtx.fillRect(x, py, 1, 1);
@@ -2531,6 +2609,11 @@ for (let ty = 0; ty < MAP_TILES; ty++)
 // minimapTile's FARM_MARKER check above)
 minimapCtx.fillStyle = "#e04030";
 minimapCtx.fillRect(FARM_MARKER.x0, FARM_MARKER.y0, 3, 3);
+
+// City marker, same treatment as the farm's but a deeper red so the two
+// stay distinguishable at a glance
+minimapCtx.fillStyle = "#c0392b";
+minimapCtx.fillRect(CITY_MARKER.x0, CITY_MARKER.y0, 3, 3);
 
 // ---------------------------------------------------------------------------
 // Lollipop trees scattered over the meadows
@@ -2612,6 +2695,7 @@ for (let attempts = 0; trees.length < loneTarget && attempts < 5000; attempts++)
   if (meadowTiles.has(tileKey(wx, wy))) continue; // meadows stay open
   if (roadTiles.has(tileKey(wx, wy))) continue; // and never on a road
   if (Math.hypot(wx - FARM.x, wy - FARM.y) < FARM_RADIUS + 30) continue;
+  if (Math.hypot(wx - CITY.x, wy - CITY.y) < CITY_RADIUS + 30) continue;
   if (trees.some((t) => Math.hypot(t.wx - wx, t.wy - wy) < 20)) continue;
   // Open grass favors lone deciduous trees, with the odd conifer
   const r = rand();
@@ -2652,6 +2736,7 @@ for (let attempts = 0; bushes.length < 110 && attempts < 6000; attempts++) {
   if (tileTypeAt(wx, wy) !== 0) continue;
   if (roadTiles.has(tileKey(wx, wy))) continue;
   if (Math.hypot(wx - FARM.x, wy - FARM.y) < FARM_RADIUS + 12) continue;
+  if (Math.hypot(wx - CITY.x, wy - CITY.y) < CITY_RADIUS + 12) continue;
   if (trees.some((t) => Math.hypot(t.wx - wx, t.wy - wy) < 8)) continue;
   if (bushes.some((b) => Math.hypot(b.wx - wx, b.wy - wy) < 10)) continue;
   const r = 1.6 + rand();
@@ -2694,6 +2779,7 @@ for (const p of patches) {
       if (tileTypeAt(wx, wy) !== 0) continue; // not on another field
       if (roadTiles.has(tileKey(wx, wy))) continue; // keep the gates open
       if (Math.hypot(wx - FARM.x, wy - FARM.y) < FARM_RADIUS + 12) continue;
+      if (Math.hypot(wx - CITY.x, wy - CITY.y) < CITY_RADIUS + 12) continue;
       const r = 1.7 + rand() * 0.8;
       const seasonColors = HEDGE_COLORS[(rand() * HEDGE_COLORS.length) | 0];
       bushes.push({
@@ -3568,6 +3654,20 @@ for (const [ly, n] of [
   );
 }
 
+// City buildings, local to CITY: a small trading depot where the grain
+// actually gets sold. No need for FARM's elaborate trampled yard — the
+// depot just needs to read clearly from a distance as a destination.
+const CITY_BOXES = [
+  { x0: -14.0, x1: 6.0, y0: -9.0, y1: 5.0, z0: 0.0, z1: 8.0, color: "#8a7a68" }, // warehouse
+  { x0: -15.5, x1: 7.5, y0: -10.5, y1: 6.5, z0: 8.0, z1: 10.5, color: "#4a3f34" }, // warehouse roof
+  { x0: -7.0, x1: -3.0, y0: 4.6, y1: 5.0, z0: 0.0, z1: 6.0, color: "#f7e8d8" }, // loading door
+  { x0: 10.0, x1: 20.0, y0: -6.0, y1: 4.0, z0: 0.0, z1: 12.0, color: "#c9b896" }, // office block
+  { x0: 9.0, x1: 21.0, y0: -7.0, y1: 5.0, z0: 12.0, z1: 14.0, color: "#6b5a44" }, // office roof
+];
+const CITY_SHAPES = [
+  { blob: true, x: 15.0, y: -1.0, z: 15.5, r: 2.4, color: "#d94a2e" }, // roof accent
+];
+
 // Grain sacks dropped by the harvester: plump blobs with a tied-off top
 const SACK_SHAPES = [
   { blob: true, x: 0, y: 0, z: 1.5, r: 1.6, color: "#f0cf5e" },
@@ -3811,6 +3911,8 @@ function drawScene(camX, camY) {
   makeWheels(items, imp.wheels, pose.x, pose.y, pose.angle, liftZ, camX, camY);
   makeItems(items, FARM_BOXES, FARM.x, FARM.y, FARM.angle, 0, camX, camY);
   makeRoundItems(items, FARM_SHAPES, FARM.x, FARM.y, FARM.angle, 0, camX, camY);
+  makeItems(items, CITY_BOXES, CITY.x, CITY.y, CITY.angle, 0, camX, camY);
+  makeRoundItems(items, CITY_SHAPES, CITY.x, CITY.y, CITY.angle, 0, camX, camY);
   if (van.on && onScreen(van.x, van.y, camX, camY)) {
     makeItems(items, VAN_BOXES, van.x, van.y, van.angle, 0, camX, camY);
     makeWheels(items, VAN_WHEELS, van.x, van.y, van.angle, 0, camX, camY);
@@ -4048,11 +4150,15 @@ const TREE_BLOB_SEASONS = [
 const SKY_TOP_SEASONS = PROFILE.palette.skyTop;
 const SKY_BOTTOM_SEASONS = PROFILE.palette.skyBottom;
 
-// The round is presented as a calendar: April 1st through October 31st,
-// and in the cyclical modes the winter break carries it on to March 31st
+// The round is presented as a calendar running continuously Jan 1st through
+// Dec 31st: the growing season is Apr 1 - Oct 31, and the winter break either
+// side of it (Nov 1 - Mar 31) wraps across the New Year.
 const MONTH_NAMES = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
 const SEASON_DAYS = 213; // days from Apr 1 to Oct 31
 const WINTER_DAYS = 150; // days from Nov 1 to Mar 31
+const APR1_INDEX = 90; // Jan 1 - Mar 31 days, i.e. the day index Apr 1 lands on
+const NOV1_INDEX = APR1_INDEX + SEASON_DAYS + 1; // day index Nov 1 lands on
+const NOV_DEC_DAYS = 61; // Nov 1 - Dec 31 days, i.e. how far into winter Jan 1 falls
 const SEASON_BAR_COLORS = ["#6fce58", "#4fae4a", "#d99a33", "#eef4f7"];
 
 function seasonHex(colors) {
@@ -4095,9 +4201,9 @@ function updateSeason() {
   }
   // The ground turns gradually: random tiles repaint each frame with the
   // current colors (wheel marks survive: drawTile restamps them). Winter
-  // moves the colors ~7x faster than the round does, so it churns more
-  // tiles per frame to keep the patchwork spread just as tight.
-  const repaints = winterLeft > 0 ? 24 : 8;
+  // and the growing season move the colors at the same pace now, so one
+  // flat rate keeps the patchwork spread evenly all year.
+  const repaints = 8;
   for (let i = 0; i < repaints; i++) {
     drawTile((rand() * MAP_TILES) | 0, (rand() * MAP_TILES) | 0);
   }
@@ -4444,9 +4550,15 @@ const SANDBOX_GROW_FACTOR =
 // Winter: the year doesn't jump from Oct 31 straight back to spring — a
 // snowed-in Nov 1 – Mar 31 passes first. It runs on the wall clock in both
 // modes: nothing grows and nothing falls due, the world just whitens,
-// rests, and melts back to green.
-const WINTER_TIME = 45; // real seconds from Nov 1 to Mar 31
+// rests, and melts back to green. Paced to match the growing season's
+// days-per-real-second rate, so the calendar never lurches at the
+// Oct 31/Mar 31 boundaries.
+const WINTER_TIME = Math.round((ROUND_TIME * WINTER_DAYS) / SEASON_DAYS); // real seconds from Nov 1 to Mar 31
 let winterLeft = 0; // counts down while winter is running
+// The winterLeft value at which the calendar crosses Dec 31 -> Jan 1, i.e.
+// where the year counter should turn over instead of at spring
+const NEWYEAR_AT_WINTER_LEFT =
+  (WINTER_TIME * (WINTER_DAYS + 1 - NOV_DEC_DAYS)) / (WINTER_DAYS + 1);
 
 function sandboxClockRate() {
   return timeLeft > SUMMER_START_LEFT
@@ -4493,10 +4605,21 @@ function collectTax() {
   return true;
 }
 
-// Mar 31: the snow is gone and a new year begins
+// Mar 31: the snow is gone. The year itself already turned over at Jan 1,
+// partway through winter (see stepWinter below).
 function startSpring() {
-  year++;
   timeLeft = ROUND_TIME;
+}
+
+// Steps the winter countdown by `amount`, firing the New Year crossing
+// (year++) and the end-of-winter transition (startSpring()) exactly once
+// each, however big the step — shared by the live per-frame update and the
+// offline catch-up loop so this crossing logic only lives in one place.
+function stepWinter(amount) {
+  const preNewYear = winterLeft > NEWYEAR_AT_WINTER_LEFT;
+  winterLeft = Math.max(0, winterLeft - amount);
+  if (preNewYear && winterLeft <= NEWYEAR_AT_WINTER_LEFT) year++;
+  if (winterLeft === 0) startSpring();
 }
 
 // Away-clock catch-up: time the frame loop never saw (rAF stops in a
@@ -4507,12 +4630,15 @@ function advanceTime(sec) {
   if (!gameStarted || gameOver || paused) return;
   worldTime += sec;
   while (sec > 0 && !gameOver) {
-    // Winter runs on the wall clock in both cyclical modes; crops sleep
+    // Winter runs on the wall clock in both cyclical modes; crops sleep.
+    // Each step is capped at the New Year crossing so a big catch-up can't
+    // jump straight past it without ticking the year (stepWinter only
+    // detects a crossing it's actually stepped across).
     if (winterLeft > 0) {
-      const used = Math.min(sec, winterLeft);
-      winterLeft -= used;
+      const cap = winterLeft > NEWYEAR_AT_WINTER_LEFT ? NEWYEAR_AT_WINTER_LEFT : 0;
+      const used = Math.min(sec, winterLeft - cap);
       sec -= used;
-      if (winterLeft === 0) startSpring();
+      stepWinter(used);
       continue;
     }
     if (mode === "sandbox") {
@@ -4548,16 +4674,18 @@ function advanceTime(sec) {
   }
 }
 
-// Where the calendar stands as a day index of the game year: Apr 1 = 0,
-// Oct 31 = 213 (SEASON_DAYS), Nov 1 = 214, Mar 31 = 364. Mirrors the HUD's
-// date arithmetic exactly, so a jump lands on the date the player reads.
+// Where the calendar stands as a day index of the game year: Jan 1 = 0,
+// Mar 31 = 89, Apr 1 = 90 (APR1_INDEX), Oct 31 = 303, Nov 1 = 304
+// (NOV1_INDEX), Dec 31 = 364. Mirrors the HUD's date arithmetic exactly,
+// so a jump lands on the date the player reads.
 function currentCalendarDay() {
   if (winterLeft > 0) {
     const p = 1 - winterLeft / WINTER_TIME;
-    return SEASON_DAYS + 1 + Math.min(WINTER_DAYS, Math.floor(p * (WINTER_DAYS + 1)));
+    const w = Math.min(WINTER_DAYS, Math.floor(p * (WINTER_DAYS + 1)));
+    return w < NOV_DEC_DAYS ? NOV1_INDEX + w : w - NOV_DEC_DAYS;
   }
   const p = 1 - timeLeft / ROUND_TIME;
-  return Math.min(SEASON_DAYS, Math.floor(p * (SEASON_DAYS + 1)));
+  return APR1_INDEX + Math.min(SEASON_DAYS, Math.floor(p * (SEASON_DAYS + 1)));
 }
 
 // Enter in the date-jump field: parse the typed MMDD and fast-forward the
@@ -4571,8 +4699,8 @@ function tryDateJump() {
   }
   const mm = +dateJump.slice(0, 2);
   const dd = +dateJump.slice(2);
-  // The game year runs Apr 2000 – Mar 2001 (not a leap February)
-  const y = mm >= 4 ? 2000 : 2001;
+  // A fixed non-leap reference year, just to validate the typed date
+  const y = 2001;
   if (
     mm < 1 ||
     mm > 12 ||
@@ -4582,7 +4710,7 @@ function tryDateJump() {
     dateJumpError = true;
     return;
   }
-  const target = (Date.UTC(y, mm - 1, dd) - Date.UTC(2000, 3, 1)) / 86400000;
+  const target = (Date.UTC(y, mm - 1, dd) - Date.UTC(y, 0, 1)) / 86400000;
   // Always at least one step forward: jumping to today's date rolls a
   // whole year around in the cyclical modes. The guard comfortably covers
   // the longest year (sandbox's slow phases plus a winter) and the loop
@@ -4602,7 +4730,7 @@ function tryDateJump() {
 // ---------------------------------------------------------------------------
 
 const SAVE_KEY = "traktoripeli.save";
-const SAVE_VERSION = 2; // bump when map generation changes: stale saves drop
+const SAVE_VERSION = 3; // bump when map generation or calendar meaning changes: stale saves drop
 let saveTimer = 0;
 let savingDisabled = false; // set when navigating away from a discarded run
 
@@ -4709,8 +4837,13 @@ function continueInSandbox() {
 let cash = modeStartCash(mode);
 let seeds = 0; // start empty: buy seeds at the farm
 let cargo = 0; // sacks on the trailer
-let sold = 0; // total sacks delivered to the farm
+let sold = 0; // total sacks delivered to the city
 let fuel = FUEL_CAP; // start full
+// Set once per frame in update(dt) and read again by the HUD in draw(), so
+// each proximity check only runs its Math.hypot once a frame instead of once
+// per reader
+let atFuelTank = false;
+let atCity = false;
 const sacks = []; // grain sacks lying on the fields
 
 const tractor = {
@@ -4742,6 +4875,12 @@ const FUEL_BURN_ROAD = 1.1; // fuel/s, road gear on the gas
 // An empty tank never fully strands the tractor — it limps home at a
 // fraction of its usual top speed instead of stopping dead.
 const FUEL_EMPTY_LIMP = 4;
+// Ice underfoot: ramps continuously with winterDepth(), mildest at the
+// edges of winter and strongest at midwinter. Top speed drops, and so
+// does how quickly the tractor can speed up or brake — sluggish, not
+// just lower-geared.
+const WINTER_MAX_SPEED_PENALTY = 0.35; // top speed lost at midwinter's iciest
+const WINTER_ACCEL_PENALTY = 0.5; // accel/braking rate lost at midwinter's iciest
 // Fixed steering geometry: turn rate scales with speed, so the turning
 // radius stays ~TURN_RADIUS at working speeds — tight enough to U-turn
 // into the adjacent row (one tile = 16 units away).
@@ -4810,10 +4949,10 @@ function update(dt) {
   updateSeason();
   if (!gameStarted || gameOver) return;
 
-  // Winter runs on the wall clock; when the snow melts a new year begins
+  // Winter runs on the wall clock; the year turns over when it crosses
+  // Dec 31 -> Jan 1, and the snow melts into spring at the end of it
   if (winterLeft > 0) {
-    winterLeft = Math.max(0, winterLeft - dt);
-    if (winterLeft === 0) startSpring();
+    stepWinter(dt);
   } else {
     timeLeft = Math.max(
       0,
@@ -4877,6 +5016,13 @@ function update(dt) {
   // Packed dirt roads are ~30% faster than driving across the meadows
   if (roadTiles.has(tileKey(tractor.x, tractor.y))) maxForward *= 1.3;
 
+  // Ice underfoot saps top speed and how briskly the tractor can speed up
+  // or brake, worst at midwinter and easing off toward either edge
+  const wd = winterDepth();
+  maxForward *= 1 - WINTER_MAX_SPEED_PENALTY * wd;
+  maxReverse *= 1 - WINTER_MAX_SPEED_PENALTY * wd;
+  const accelRate = 120 * (1 - WINTER_ACCEL_PENALTY * wd);
+
   // A lowered implement digging into unbroken ground bogs the tractor down
   if (imp.liftable && tractor.implLift < 0.5 && !implementOverField()) {
     maxForward = 3;
@@ -4884,9 +5030,9 @@ function update(dt) {
   }
 
   if (tractor.speed > maxForward)
-    tractor.speed = Math.max(maxForward, tractor.speed - 120 * dt);
+    tractor.speed = Math.max(maxForward, tractor.speed - accelRate * dt);
   if (tractor.speed < maxReverse)
-    tractor.speed = Math.min(maxReverse, tractor.speed + 120 * dt);
+    tractor.speed = Math.min(maxReverse, tractor.speed + accelRate * dt);
 
   // Steering only has effect while moving; reversing flips it like a real vehicle
   const turnRate =
@@ -5032,11 +5178,14 @@ function update(dt) {
     }
   }
 
+  atFuelTank = nearFuelTank();
+  atCity = nearCity();
+
   // Refueling happens only at the fuel tank, off in its own corner of the
   // yard, rather than anywhere in the broader farm radius — refueling costs
   // cash, so it shouldn't happen incidentally every time the player is at
   // the farm to sell grain or buy seed.
-  if (nearFuelTank() && fuel < FUEL_CAP) {
+  if (atFuelTank && fuel < FUEL_CAP) {
     // Top up the tank with as many whole units as the cash covers (fuel
     // itself drains fractionally, cash never should); in survival the
     // farm sells fuel on credit down to the debt limit, same as seeds
@@ -5048,7 +5197,8 @@ function update(dt) {
     }
   }
 
-  // Farmyard services: seed purchase and grain delivery
+  // Farmyard services: seed purchase only — grain is sold at the city now,
+  // not handed over on the spot where it was grown
   if (nearFarm()) {
     if (tractor.implement === "seeder" && seeds < SEED_CAP) {
       // Top up the hopper with as many seeds as the cash covers; in
@@ -5060,14 +5210,17 @@ function update(dt) {
         cash -= bought * SEED_PRICE;
       }
     }
-    if (tractor.implement === "trailer" && cargo > 0) {
-      cash += cargo * SACK_PRICE;
-      sold += cargo;
-      cargo = 0;
-      const pose = implementPose();
-      spawnChaff(pose.x - 16 * Math.cos(pose.angle), pose.y - 16 * Math.sin(pose.angle));
-      playSell();
-    }
+  }
+
+  // City services: the depot pays out for a loaded trailer. The farm only
+  // stores and dispatches grain now — the payoff is hauling it to market.
+  if (atCity && tractor.implement === "trailer" && cargo > 0) {
+    cash += cargo * SACK_PRICE;
+    sold += cargo;
+    cargo = 0;
+    const pose = implementPose();
+    spawnChaff(pose.x - 16 * Math.cos(pose.angle), pose.y - 16 * Math.sin(pose.angle));
+    playSell();
   }
 
   updateTracks(dt);
@@ -5323,14 +5476,14 @@ function draw() {
       Math.abs(tractor.speed) > 2 &&
       implementOverField();
     const cargoColor = fullRun && ((worldTime * 6) | 0) % 2 === 0 ? RED : null;
-    seg(`CARGO: ${cargo}/${TRAILER_CAP}   `, cargoColor);
+    seg(`CARGO: ${cargo}/${TRAILER_CAP}${atCity ? " @CITY" : ""}   `, cargoColor);
   }
   const lucky = luckFlash > 0 && ((luckFlash * 8) | 0) % 2 === 0;
   seg(`CASH: €${cash}   `, lucky ? "#c9e6a8" : cash < SEED_PRICE ? RED : "#ffd94f");
   seg(`SOLD: ${sold}   `);
   const fuelPct = Math.round((fuel / FUEL_CAP) * 100);
   seg(
-    `FUEL: ${fuelPct}%${nearFuelTank() ? " @TANK" : ""}   `,
+    `FUEL: ${fuelPct}%${atFuelTank ? " @TANK" : ""}   `,
     fuelPct <= 20 ? RED : null
   );
   // The implement list at the farm, with the attached one lit up
@@ -5361,21 +5514,13 @@ function draw() {
   topSeg(`#${MAP_INDEX} ${PROFILE.name.toUpperCase()}  `);
   topSeg(`${mode.toUpperCase()}   `, "#ffd94f");
 
-  // Season calendar instead of a clock: the year and date count from spring
-  // toward Oct 31 along a wooden trough; in survival the tax bill waits at
-  // the far end of it. Flashes red for the last 30 seconds before the bill.
-  // The cyclical modes carry on through the winter toward Mar 31.
+  // Season calendar instead of a clock: the year and date count continuously
+  // Jan 1 through Dec 31 along a wooden trough; in survival the tax bill
+  // comes due at Oct 31, flashing red for the last 30 seconds before it.
   const winter = winterLeft > 0;
-  const progress = winter
-    ? 1 - winterLeft / WINTER_TIME
-    : 1 - timeLeft / ROUND_TIME;
-  const date = winter
-    ? new Date(
-        2000, 10, 1 + Math.min(WINTER_DAYS, Math.floor(progress * (WINTER_DAYS + 1)))
-      )
-    : new Date(
-        2000, 3, 1 + Math.min(SEASON_DAYS, Math.floor(progress * (SEASON_DAYS + 1)))
-      );
+  const day = currentCalendarDay();
+  const progress = day / 365;
+  const date = new Date(2001, 0, 1 + day);
   const barW = 140;
   const barH = 8;
   const bx = (screenCanvas.width - barW) / 2;
@@ -5395,11 +5540,9 @@ function draw() {
   screenCtx.textAlign = "left";
   const endLabel = taxJustPaid
     ? `-€${taxPaid} PAID`
-    : winter
-      ? "MAR 31"
-      : mode === "survival"
-        ? `TAX €${propertyTax}`
-        : "OCT 31";
+    : mode === "survival" && !winter
+      ? `TAX €${propertyTax}`
+      : "DEC 31";
   label(endLabel, bx + barW + 8, topY, taxJustPaid ? "#ff5040" : "#d8c49a");
   // The season grows along a wooden trough
   screenCtx.fillStyle = "#4a2f1a";
