@@ -423,7 +423,14 @@ function updateAudio() {
 
   // Engine pitch and volume track speed, with a bump while throttling
   const throttle =
-    !gameOver && !paused && (keys.ArrowUp || keys.ArrowDown || autoThrottling()) ? 1 : 0;
+    !gameOver &&
+    !paused &&
+    (keys.ArrowUp ||
+      keys.ArrowDown ||
+      autoThrottling() ||
+      (touchDrive.throttleActive && Math.abs(touchDrive.throttle) > 0.05))
+      ? 1
+      : 0;
   const rpm = gameOver
     ? 0
     : 0.25 + 0.55 * Math.min(1, Math.abs(tractor.speed) / GEAR_FAST) + 0.2 * throttle;
@@ -539,6 +546,12 @@ function playTax() {
 // ---------------------------------------------------------------------------
 
 const keys = {};
+const touchDrive = {
+  steering: 0, // -1..1 (left..right)
+  throttle: 0, // -1..1 (reverse/brake..forward)
+  steeringActive: false,
+  throttleActive: false,
+};
 const IMPLEMENT_KEYS = { 1: "plow", 2: "seeder", 3: "harvester", 4: "trailer" };
 
 // Music and sound toggles work both in-game and inside the menu (which
@@ -768,7 +781,8 @@ window.addEventListener("keyup", (e) => {
       const base = document.getElementById(baseId);
       const knob = document.getElementById(knobId);
       if (!base || !knob) return;
-      const RADIUS = 40; // px the knob can travel from centre
+      const axisSize = axes === "horizontal" ? base.clientWidth : base.clientHeight;
+      const RADIUS = Math.max(40, axisSize * 0.3); // px the knob can travel from centre
       const DEADZONE = deadzone; // fraction of RADIUS before an axis engages
       let pointerId = null;
       const dir = axes === "horizontal"
@@ -784,24 +798,42 @@ window.addEventListener("keyup", (e) => {
       function resetAll() {
         for (const key of Object.keys(dir)) setDir(key, false);
         knob.style.transform = "translate(0, 0)";
+        if (axes === "horizontal") {
+          touchDrive.steering = 0;
+          touchDrive.steeringActive = false;
+        } else {
+          touchDrive.throttle = 0;
+          touchDrive.throttleActive = false;
+        }
       }
 
       function handleMove(e) {
         const rect = base.getBoundingClientRect();
         const dx = e.clientX - (rect.left + rect.width / 2);
         const dy = e.clientY - (rect.top + rect.height / 2);
+        const applyDeadzone = (v) => {
+          const av = Math.abs(v);
+          if (av <= DEADZONE) return 0;
+          return ((av - DEADZONE) / (1 - DEADZONE)) * Math.sign(v);
+        };
         if (axes === "horizontal") {
-          const cx = Math.max(-RADIUS, Math.min(RADIUS, dx));
+          const nxRaw = Math.max(-1, Math.min(1, dx / RADIUS));
+          const cx = nxRaw * RADIUS;
           knob.style.transform = `translate(${cx}px, 0)`;
-          const nx = dx / RADIUS;
-          setDir("ArrowLeft", nx < -DEADZONE);
-          setDir("ArrowRight", nx > DEADZONE);
+          const steering = applyDeadzone(nxRaw);
+          touchDrive.steering = steering;
+          touchDrive.steeringActive = true;
+          setDir("ArrowLeft", steering < 0);
+          setDir("ArrowRight", steering > 0);
         } else {
-          const cy = Math.max(-RADIUS, Math.min(RADIUS, dy));
+          const nyRaw = Math.max(-1, Math.min(1, dy / RADIUS));
+          const cy = nyRaw * RADIUS;
           knob.style.transform = `translate(0, ${cy}px)`;
-          const ny = dy / RADIUS;
-          setDir("ArrowUp", ny < -DEADZONE);
-          setDir("ArrowDown", ny > DEADZONE);
+          const throttle = -applyDeadzone(nyRaw);
+          touchDrive.throttle = throttle;
+          touchDrive.throttleActive = true;
+          setDir("ArrowUp", throttle > 0);
+          setDir("ArrowDown", throttle < 0);
         }
       }
 
@@ -5144,7 +5176,8 @@ const smoke = [];
 let smokeTimer = 0;
 
 function updateSmoke(dt) {
-  const onGas = keys.ArrowUp || autoThrottling();
+  const onGas =
+    keys.ArrowUp || autoThrottling() || (touchDrive.throttleActive && touchDrive.throttle > 0.05);
   if (!gameOver && (onGas || Math.abs(tractor.speed) > 5)) {
     smokeTimer -= dt;
     if (smokeTimer <= 0) {
@@ -5643,7 +5676,12 @@ function implementOverField() {
 // engine sound and exhaust smoke so they all agree on when the tractor is
 // "on the gas".
 function autoThrottling() {
-  return autoThrottleOn && !tractor.fastGear && !keys.ArrowDown;
+  return (
+    autoThrottleOn &&
+    !tractor.fastGear &&
+    !keys.ArrowDown &&
+    !(touchDrive.throttleActive && touchDrive.throttle < -0.05)
+  );
 }
 
 function update(dt) {
@@ -5681,12 +5719,18 @@ function update(dt) {
 
   const imp = IMPLEMENTS[tractor.implement];
 
-  // Throttle / brake
-  const throttling = keys.ArrowUp || autoThrottling();
-  if (throttling) {
-    tractor.speed += ACCEL * dt;
-  } else if (keys.ArrowDown) {
-    tractor.speed -= BRAKE * dt;
+  // Throttle / brake (touch uses proportional input, keyboard stays digital)
+  const touchThrottle = touchDrive.throttleActive ? touchDrive.throttle : 0;
+  const throttleInput = Math.max(
+    keys.ArrowUp ? 1 : 0,
+    touchThrottle > 0 ? touchThrottle : 0,
+    autoThrottling() ? 1 : 0
+  );
+  const brakeInput = Math.max(keys.ArrowDown ? 1 : 0, touchThrottle < 0 ? -touchThrottle : 0);
+  if (throttleInput > 0) {
+    tractor.speed += ACCEL * throttleInput * dt;
+  } else if (brakeInput > 0) {
+    tractor.speed -= BRAKE * brakeInput * dt;
   } else {
     // Roll to a stop
     if (tractor.speed > 0) tractor.speed = Math.max(0, tractor.speed - FRICTION * dt);
@@ -5703,13 +5747,16 @@ function update(dt) {
 
   // At a crawl with no throttle the tractor simply stops — otherwise slope
   // gravity keeps it creeping forever and the camera never settles
-  if (!throttling && !keys.ArrowDown && Math.abs(tractor.speed) < 1.5) {
+  if (throttleInput === 0 && brakeInput === 0 && Math.abs(tractor.speed) < 1.5) {
     tractor.speed = 0;
   }
 
   // Burn fuel only while actually powering the wheels
-  if (throttling) {
-    fuel = Math.max(0, fuel - (tractor.fastGear ? FUEL_BURN_ROAD : FUEL_BURN_WORK) * dt);
+  if (throttleInput > 0) {
+    fuel = Math.max(
+      0,
+      fuel - (tractor.fastGear ? FUEL_BURN_ROAD : FUEL_BURN_WORK) * throttleInput * dt
+    );
   }
 
   // Top speed from the gear, further reduced by drag when working the ground
@@ -5749,9 +5796,10 @@ function update(dt) {
   const turnRate =
     Math.min(Math.abs(tractor.speed) / TURN_RADIUS, MAX_TURN_RATE) *
     Math.sign(tractor.speed);
-  let angVel = 0;
-  if (keys.ArrowLeft) angVel -= turnRate;
-  if (keys.ArrowRight) angVel += turnRate;
+  const steeringInput = touchDrive.steeringActive
+    ? touchDrive.steering
+    : (keys.ArrowRight ? 1 : 0) - (keys.ArrowLeft ? 1 : 0);
+  const angVel = turnRate * steeringInput;
   tractor.angle += angVel * dt;
 
   // Move on the ground plane
