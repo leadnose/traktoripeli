@@ -759,68 +759,77 @@ window.addEventListener("keyup", (e) => {
     fireKey("keyup", entry.key);
   }
 
-  // Drive joystick: a single drag reads as two independent axes (throttle
-  // and steering) so pushing the knob up-and-left, say, holds ArrowUp and
-  // ArrowLeft together — one thumb can accelerate and turn at the same
-  // time instead of needing to reach two separate buttons.
-  (function setupJoystick() {
-    const base = document.getElementById("td-joystick");
-    const knob = document.getElementById("td-joystick-knob");
-    if (!base || !knob) return;
-    const RADIUS = 40; // px the knob can travel from center
-    const DEADZONE = 0.35; // fraction of RADIUS before an axis engages
-    let pointerId = null;
-    const dir = { ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false };
+  // Drive controls: two separate joysticks so left hand steers and right
+  // hand controls the throttle.  Each joystick is constrained to a single
+  // axis so the intention is always unambiguous.
+  (function setupDriveJoysticks() {
+    // axes: "horizontal" → ArrowLeft/ArrowRight  |  "vertical" → ArrowUp/ArrowDown
+    function setupJoystickElement(baseId, knobId, axes) {
+      const base = document.getElementById(baseId);
+      const knob = document.getElementById(knobId);
+      if (!base || !knob) return;
+      const RADIUS = 40; // px the knob can travel from centre
+      const DEADZONE = 0.35; // fraction of RADIUS before an axis engages
+      let pointerId = null;
+      const dir = axes === "horizontal"
+        ? { ArrowLeft: false, ArrowRight: false }
+        : { ArrowUp: false, ArrowDown: false };
 
-    function setDir(key, on) {
-      if (dir[key] === on) return;
-      dir[key] = on;
-      fireKey(on ? "keydown" : "keyup", key);
+      function setDir(key, on) {
+        if (dir[key] === on) return;
+        dir[key] = on;
+        fireKey(on ? "keydown" : "keyup", key);
+      }
+
+      function resetAll() {
+        for (const key of Object.keys(dir)) setDir(key, false);
+        knob.style.transform = "translate(0, 0)";
+      }
+
+      function handleMove(e) {
+        const rect = base.getBoundingClientRect();
+        const dx = e.clientX - (rect.left + rect.width / 2);
+        const dy = e.clientY - (rect.top + rect.height / 2);
+        if (axes === "horizontal") {
+          const cx = Math.max(-RADIUS, Math.min(RADIUS, dx));
+          knob.style.transform = `translate(${cx}px, 0)`;
+          const nx = dx / RADIUS;
+          setDir("ArrowLeft", nx < -DEADZONE);
+          setDir("ArrowRight", nx > DEADZONE);
+        } else {
+          const cy = Math.max(-RADIUS, Math.min(RADIUS, dy));
+          knob.style.transform = `translate(0, ${cy}px)`;
+          const ny = dy / RADIUS;
+          setDir("ArrowUp", ny < -DEADZONE);
+          setDir("ArrowDown", ny > DEADZONE);
+        }
+      }
+
+      base.addEventListener("pointerdown", (e) => {
+        e.preventDefault();
+        pointerId = e.pointerId;
+        base.setPointerCapture(pointerId);
+        initAudio();
+        if (audio.ac.state === "suspended") audio.ac.resume();
+        handleMove(e);
+      });
+      base.addEventListener("pointermove", (e) => {
+        if (e.pointerId !== pointerId) return;
+        handleMove(e);
+      });
+      function end(e) {
+        if (pointerId === null || e.pointerId !== pointerId) return;
+        pointerId = null;
+        resetAll();
+      }
+      base.addEventListener("pointerup", end);
+      base.addEventListener("pointercancel", end);
+      window.addEventListener("pointerup", end);
+      window.addEventListener("pointercancel", end);
     }
 
-    function resetAll() {
-      for (const key of Object.keys(dir)) setDir(key, false);
-      knob.style.transform = "translate(0, 0)";
-    }
-
-    function handleMove(e) {
-      const rect = base.getBoundingClientRect();
-      const dx = e.clientX - (rect.left + rect.width / 2);
-      const dy = e.clientY - (rect.top + rect.height / 2);
-      const dist = Math.hypot(dx, dy) || 1;
-      const clamped = Math.min(dist, RADIUS);
-      const angle = Math.atan2(dy, dx);
-      knob.style.transform = `translate(${Math.cos(angle) * clamped}px, ${Math.sin(angle) * clamped}px)`;
-
-      const nx = dx / RADIUS;
-      const ny = dy / RADIUS;
-      setDir("ArrowUp", ny < -DEADZONE);
-      setDir("ArrowDown", ny > DEADZONE);
-      setDir("ArrowLeft", nx < -DEADZONE);
-      setDir("ArrowRight", nx > DEADZONE);
-    }
-
-    base.addEventListener("pointerdown", (e) => {
-      e.preventDefault();
-      pointerId = e.pointerId;
-      base.setPointerCapture(pointerId);
-      initAudio();
-      if (audio.ac.state === "suspended") audio.ac.resume();
-      handleMove(e);
-    });
-    base.addEventListener("pointermove", (e) => {
-      if (e.pointerId !== pointerId) return;
-      handleMove(e);
-    });
-    function end(e) {
-      if (pointerId === null || e.pointerId !== pointerId) return;
-      pointerId = null;
-      resetAll();
-    }
-    base.addEventListener("pointerup", end);
-    base.addEventListener("pointercancel", end);
-    window.addEventListener("pointerup", end);
-    window.addEventListener("pointercancel", end);
+    setupJoystickElement("td-joystick", "td-joystick-knob", "horizontal"); // steering
+    setupJoystickElement("td-throttle", "td-throttle-knob", "vertical");   // throttle
   })();
 
   root.querySelectorAll(".tbtn[data-key]").forEach((btn) => {
