@@ -93,9 +93,9 @@ html, body {
     position: absolute;
     right: max(14px, env(safe-area-inset-right));
     bottom: max(14px, env(safe-area-inset-bottom));
-    width: 140px;
-    height: 140px;
-    border-radius: 50%;
+    width: 220px;
+    height: 92px;
+    border-radius: 46px;
     background: rgba(40, 30, 20, 0.3);
     border: 2px solid rgba(245, 233, 200, 0.45);
     pointer-events: auto;
@@ -120,9 +120,9 @@ html, body {
     position: absolute;
     left: max(14px, env(safe-area-inset-left));
     bottom: max(14px, env(safe-area-inset-bottom));
-    width: 140px;
-    height: 140px;
-    border-radius: 50%;
+    width: 92px;
+    height: 220px;
+    border-radius: 46px;
     background: rgba(40, 30, 20, 0.3);
     border: 2px solid rgba(245, 233, 200, 0.45);
     pointer-events: auto;
@@ -158,7 +158,7 @@ html, body {
   #touch-right {
     position: absolute;
     left: max(14px, env(safe-area-inset-left));
-    bottom: calc(max(14px, env(safe-area-inset-bottom)) + 154px);
+    bottom: calc(max(14px, env(safe-area-inset-bottom)) + 234px);
     display: flex;
     flex-direction: column;
     align-items: flex-start;
