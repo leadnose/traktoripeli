@@ -914,6 +914,53 @@ function nearFarm() {
   return Math.hypot(tractor.x - FARM.x, tractor.y - FARM.y) < FARM_RADIUS;
 }
 
+// Cow and pig paddocks: unlike the other grazing species, these two stay
+// fenced rather than free-ranging the whole map (see PENNED_SPECIES
+// below), but each pen is a proper roomy field on open land — not a
+// cramped pocket between buildings, not overlapping the working yard, not
+// laid across a road, and not on water (cows get noticeably more room
+// than pigs). Which of those actually holds depends entirely on this
+// map's road/water layout, which doesn't exist yet this early — so only
+// each paddock's SIZE is fixed here. The actual placement is picked in
+// the block right after makeMap() below, once roadTiles/water exist, by
+// generating a ring-and-angle spread of candidate positions all the way
+// around the farm (not just a couple of fixed compass directions — a farm
+// on a small spit of land needs every direction tried, not just south and
+// east) and keeping whichever scores cleanest. PADDOCKS_LOCAL/PADDOCKS_WORLD
+// are declared here as `let` and stay null until that block runs —
+// nothing before it may read them.
+const PADDOCK_SIZE = {
+  cow: { w: 70, h: 32 },
+  pig: { w: 36, h: 30 },
+};
+const PENNED_SPECIES = new Set(Object.keys(PADDOCK_SIZE));
+let PADDOCKS_LOCAL = null;
+let PADDOCKS_WORLD = null;
+
+// Building footprints a paddock candidate must never cover — the same
+// list FARM_SOLID_LOCAL (tractor collision, further down) builds from,
+// minus the pig sty, which isn't a fixed obstacle: it gets carved out of
+// whichever pig candidate wins, not placed independently of it.
+const FARM_BUILDING_FOOTPRINTS = [
+  [-16.0, 2.0, -12.0, 2.0], // barn
+  [-13.0, 1.0, -30.0, -16.0], // farmhouse
+  [-9.0, -4.0, 6.0, 11.0], // hen house
+  [6.0, 15.0, -13.0, -4.0], // granary body
+  [40.0, 42.0, -3.0, 9.0], // cartshed back wall
+  [32.0, 42.0, -3.0, -1.0], // cartshed side wall
+  [32.0, 42.0, 7.0, 9.0], // cartshed side wall
+  [-2.0, 10.0, 32.0, 39.0], // cowshed
+];
+
+// Fixed rather than derived from the eventual pick (terrain generation
+// runs, and needs this, before any candidate is scored) — sized to clear
+// the single furthest corner the placement search below can ever produce
+// (ring radius up to 108 + a paddock's own far corner, checked by hand),
+// +16 margin (room for a forest blob's own radius, they grow up to ~6.5
+// units). Re-check this by hand if the search's ring radii or PADDOCK_SIZE
+// change.
+const FARM_PASTURE_RADIUS = 205;
+
 // The fuel tank sits out near the rim of the trampled yard (YARD_RADIUS
 // is ~64 units; this is ~90% of that, clear of the barn/yard cluster
 // near the center) rather than anywhere within FARM_RADIUS, so refueling
@@ -1539,6 +1586,22 @@ function drawTile(tx, ty) {
     y0 = Math.min(y0, fc.y - FARM_RADIUS * 0.9 * YARD_MAX_SCALE - 2);
     y1 = Math.max(y1, fc.y + FARM_RADIUS * 0.9 * YARD_MAX_SCALE + 2);
   }
+  // Same idea, for the trampled-pasture mud dabs inside/around a paddock
+  // fence (see paddockDabs, stamped once well after makeMap() — a
+  // paddock's exact position isn't known until then, so like the yard
+  // this can't live in paintTile's tile-type switch)
+  const nearPaddock = nearAnyPaddock(tx, ty);
+  if (nearPaddock) {
+    for (const species of Object.keys(PADDOCKS_WORLD)) {
+      const p = PADDOCKS_WORLD[species];
+      for (const pc of [mp(p.x0, p.y0), mp(p.x1, p.y0), mp(p.x1, p.y1), mp(p.x0, p.y1)]) {
+        x0 = Math.min(x0, pc.x - 4);
+        x1 = Math.max(x1, pc.x + 4);
+        y0 = Math.min(y0, pc.y - 4);
+        y1 = Math.max(y1, pc.y + 4);
+      }
+    }
+  }
 
   // Restore road and ditch surfaces: they live on top of the tiles and
   // their boundary lines. Both passes are clipped so an ink ellipse can
@@ -1617,6 +1680,18 @@ function drawTile(tx, ty) {
     mapCtx.stroke();
     mapCtx.fillStyle = shade(YARD_DIRT_DARK, 1);
     for (const p of yardPixels) mapCtx.fillRect(p.x, p.y, 1, 1);
+  }
+
+  // Restore the paddock ground — flat green fill, then the worn-dirt
+  // dabs on top — for whichever paddock(s) this tile is near. Same
+  // "whole thing repaints unclipped, overdraw is a no-op" deal as the
+  // yard just above.
+  if (nearPaddock) {
+    paintPaddockFills();
+    for (const d of paddockDabs) {
+      mapCtx.fillStyle = shade(d.color, 1);
+      mapCtx.fillRect(d.x, d.y, 1, 1);
+    }
   }
 
   // Re-dither everything that was repainted
@@ -2364,7 +2439,7 @@ function makeMap() {
     for (let tx = 0; tx < MAP_TILES; tx++) {
       const df = Math.hypot((tx + 0.5) * TILE - FARM.x, (ty + 0.5) * TILE - FARM.y);
       const dc = Math.hypot((tx + 0.5) * TILE - CITY.x, (ty + 0.5) * TILE - CITY.y);
-      if ((df < FARM_RADIUS + 24 || dc < CITY_RADIUS + 24) && tiles[ty][tx] !== 4)
+      if ((df < FARM_PASTURE_RADIUS || dc < CITY_RADIUS + 24) && tiles[ty][tx] !== 4)
         tiles[ty][tx] = 0;
     }
   }
@@ -2381,7 +2456,7 @@ function makeMap() {
     const cx = 2 + ((rand() * (MAP_TILES - 4)) | 0);
     const cy = 2 + ((rand() * (MAP_TILES - 4)) | 0);
     if (tiles[cy][cx] !== 0) continue;
-    if (Math.hypot((cx + 0.5) * TILE - FARM.x, (cy + 0.5) * TILE - FARM.y) < FARM_RADIUS + 40)
+    if (Math.hypot((cx + 0.5) * TILE - FARM.x, (cy + 0.5) * TILE - FARM.y) < FARM_PASTURE_RADIUS)
       continue;
     if (Math.hypot((cx + 0.5) * TILE - CITY.x, (cy + 0.5) * TILE - CITY.y) < CITY_RADIUS + 40)
       continue;
@@ -2391,7 +2466,7 @@ function makeMap() {
         if (
           tiles[ty][tx] === 0 &&
           Math.hypot(tx - cx, ty - cy) < r * (0.7 + rand() * 0.6) &&
-          Math.hypot((tx + 0.5) * TILE - FARM.x, (ty + 0.5) * TILE - FARM.y) > FARM_RADIUS + 40 &&
+          Math.hypot((tx + 0.5) * TILE - FARM.x, (ty + 0.5) * TILE - FARM.y) > FARM_PASTURE_RADIUS &&
           Math.hypot((tx + 0.5) * TILE - CITY.x, (ty + 0.5) * TILE - CITY.y) > CITY_RADIUS + 40
         )
           forestTiles.add(ty * MAP_TILES + tx);
@@ -2405,7 +2480,7 @@ function makeMap() {
     const cx = 2 + ((rand() * (MAP_TILES - 4)) | 0);
     const cy = 2 + ((rand() * (MAP_TILES - 4)) | 0);
     if (tiles[cy][cx] !== 0 || forestTiles.has(cy * MAP_TILES + cx)) continue;
-    if (Math.hypot((cx + 0.5) * TILE - FARM.x, (cy + 0.5) * TILE - FARM.y) < FARM_RADIUS + 40)
+    if (Math.hypot((cx + 0.5) * TILE - FARM.x, (cy + 0.5) * TILE - FARM.y) < FARM_PASTURE_RADIUS)
       continue;
     if (Math.hypot((cx + 0.5) * TILE - CITY.x, (cy + 0.5) * TILE - CITY.y) < CITY_RADIUS + 40)
       continue;
@@ -2416,7 +2491,7 @@ function makeMap() {
           tiles[ty][tx] === 0 &&
           !forestTiles.has(ty * MAP_TILES + tx) &&
           Math.hypot(tx - cx, ty - cy) < r * (0.7 + rand() * 0.6) &&
-          Math.hypot((tx + 0.5) * TILE - FARM.x, (ty + 0.5) * TILE - FARM.y) > FARM_RADIUS + 40 &&
+          Math.hypot((tx + 0.5) * TILE - FARM.x, (ty + 0.5) * TILE - FARM.y) > FARM_PASTURE_RADIUS &&
           Math.hypot((tx + 0.5) * TILE - CITY.x, (ty + 0.5) * TILE - CITY.y) > CITY_RADIUS + 40
         )
           meadowTiles.add(ty * MAP_TILES + tx);
@@ -2613,6 +2688,237 @@ function minimapTile(tx, ty) {
 
 makeMap();
 
+// Now that the road network (and water/terrain generally) exists,
+// finalize each paddock's placement. Generate a spread of candidate
+// positions all the way around the farm — 3 rings (near-corner distance
+// 82/95/108 from FARM.x/y, each far enough out to clear the yard's
+// trodden-dirt radius even at its lobed rim's worst case, ≈76.4 units,
+// see YARD_RADIUS/YARD_MAX_SCALE further down) × 16 angles — rather than
+// just a couple of fixed compass directions, so a farm on a small spit of
+// land still has somewhere dry to try. Each candidate is axis-aligned
+// (paddocks can't rotate independent of FARM.angle) with its NEAREST
+// corner to FARM.x/y sitting exactly on the ring, extending away from the
+// farm in whichever quadrant that angle falls in.
+{
+  const cos = Math.cos(FARM.angle);
+  const sin = Math.sin(FARM.angle);
+  const toWorld = (lx, ly) => ({
+    x: FARM.x + lx * cos - ly * sin,
+    y: FARM.y + lx * sin + ly * cos,
+  });
+  const RING_DISTS = [82, 95, 108];
+  const ANGLE_STEPS = 16;
+  const candidatesFor = (size) => {
+    const cands = [];
+    for (const nearDist of RING_DISTS)
+      for (let i = 0; i < ANGLE_STEPS; i++) {
+        const theta = (i / ANGLE_STEPS) * Math.PI * 2;
+        const cosT = Math.cos(theta);
+        const sinT = Math.sin(theta);
+        const nx = Math.abs(nearDist * cosT);
+        const ny = Math.abs(nearDist * sinT);
+        let x0, x1, y0, y1;
+        if (cosT >= 0) { x0 = nx; x1 = nx + size.w; } else { x1 = -nx; x0 = -nx - size.w; }
+        if (sinT >= 0) { y0 = ny; y1 = ny + size.h; } else { y1 = -ny; y0 = -ny - size.h; }
+        cands.push({ x0, x1, y0, y1 });
+      }
+    return cands;
+  };
+  // Hard rules first (disqualify outright — no amount of road/water
+  // cleanliness makes up for sitting on a building, another paddock, or
+  // hanging off the edge of the map), then a soft badness score for
+  // whatever's left.
+  const MAP_MARGIN = 30;
+  const overlapsBox = (p, [bx0, bx1, by0, by1]) =>
+    p.x0 < bx1 && p.x1 > bx0 && p.y0 < by1 && p.y1 > by0;
+  const disqualified = (p, extraBoxes) => {
+    for (const box of FARM_BUILDING_FOOTPRINTS) if (overlapsBox(p, box)) return true;
+    for (const box of extraBoxes) if (overlapsBox(p, box)) return true;
+    for (const lx of [p.x0, p.x1])
+      for (const ly of [p.y0, p.y1]) {
+        const w = toWorld(lx, ly);
+        if (w.x < MAP_MARGIN || w.x > MAP_SIZE - MAP_MARGIN || w.y < MAP_MARGIN || w.y > MAP_SIZE - MAP_MARGIN)
+          return true;
+      }
+    return false;
+  };
+  const badness = (p) => {
+    let hits = 0;
+    // Perimeter, 2 local units apart: any road tile along the fence line
+    for (const [ax0, ay0, ax1, ay1] of [
+      [p.x0, p.y0, p.x1, p.y0],
+      [p.x0, p.y1, p.x1, p.y1],
+      [p.x0, p.y0, p.x0, p.y1],
+      [p.x1, p.y0, p.x1, p.y1],
+    ]) {
+      const horizontal = ay0 === ay1;
+      const len = horizontal ? ax1 - ax0 : ay1 - ay0;
+      const steps = Math.max(1, Math.round(Math.abs(len) / 2));
+      for (let i = 0; i <= steps; i++) {
+        const t = i / steps;
+        const lx = horizontal ? ax0 + (ax1 - ax0) * t : ax0;
+        const ly = horizontal ? ay0 : ay0 + (ay1 - ay0) * t;
+        const w = toWorld(lx, ly);
+        if (roadTiles.has(tileKey(w.x, w.y))) hits++;
+      }
+    }
+    // Interior grid, roughly 4 local units apart: any water anywhere
+    // inside the paddock, not just on the fence line itself
+    const gx = Math.max(1, Math.round((p.x1 - p.x0) / 4));
+    const gy = Math.max(1, Math.round((p.y1 - p.y0) / 4));
+    for (let iy = 0; iy <= gy; iy++)
+      for (let ix = 0; ix <= gx; ix++) {
+        const lx = p.x0 + ((p.x1 - p.x0) * ix) / gx;
+        const ly = p.y0 + ((p.y1 - p.y0) * iy) / gy;
+        const w = toWorld(lx, ly);
+        if (tileTypeAt(w.x, w.y) === 4) hits++;
+      }
+    return hits;
+  };
+  PADDOCKS_LOCAL = {};
+  // Cow picked first, then excluded as an obstacle for pig's own search
+  // (and vice versa were the order reversed) so the two can never overlap.
+  for (const species of Object.keys(PADDOCK_SIZE)) {
+    const otherRects = Object.values(PADDOCKS_LOCAL).map((p) => [p.x0, p.x1, p.y0, p.y1]);
+    let best = null;
+    let bestHits = Infinity;
+    for (const cand of candidatesFor(PADDOCK_SIZE[species])) {
+      if (disqualified(cand, otherRects)) continue;
+      const hits = badness(cand);
+      if (hits < bestHits) {
+        bestHits = hits;
+        best = cand;
+      }
+      if (bestHits === 0) break;
+    }
+    // Every candidate disqualified (pathological map) — fall back to the
+    // innermost, dead-ahead ring rather than leaving the species unpenned.
+    PADDOCKS_LOCAL[species] = best || candidatesFor(PADDOCK_SIZE[species])[0];
+  }
+  PADDOCKS_WORLD = {};
+  for (const species of Object.keys(PADDOCKS_LOCAL)) {
+    const p = PADDOCKS_LOCAL[species];
+    let wx0 = Infinity, wx1 = -Infinity, wy0 = Infinity, wy1 = -Infinity;
+    for (const lx of [p.x0, p.x1])
+      for (const ly of [p.y0, p.y1]) {
+        const w = toWorld(lx, ly);
+        wx0 = Math.min(wx0, w.x); wx1 = Math.max(wx1, w.x);
+        wy0 = Math.min(wy0, w.y); wy1 = Math.max(wy1, w.y);
+      }
+    PADDOCKS_WORLD[species] = { x0: wx0, x1: wx1, y0: wy0, y1: wy1 };
+  }
+}
+
+// True if (wx,wy) falls inside either finalized paddock — used below to
+// keep vegetation planted after this point (lone trees, bushes,
+// hedgerows) from ending up fenced in with the stock. Forest stands and
+// meadow patches don't need this: they're generated earlier, inside
+// makeMap(), and already avoid the whole FARM_PASTURE_RADIUS circle,
+// which covers any possible paddock placement by construction.
+function insideAnyPaddock(wx, wy) {
+  for (const species of Object.keys(PADDOCKS_WORLD)) {
+    const p = PADDOCKS_WORLD[species];
+    if (wx > p.x0 && wx < p.x1 && wy > p.y0 && wy < p.y1) return true;
+  }
+  return false;
+}
+
+// True if a repainted tile needs its paddock ground restored afterward
+// (see paddockDabs below) — anywhere inside a paddock, plus a tile of
+// slop so the fence-hugging worn path along the rim doesn't go missing
+// when the tile just outside the rail repaints.
+function nearAnyPaddock(tx, ty) {
+  const wx = (tx + 0.5) * TILE;
+  const wy = (ty + 0.5) * TILE;
+  for (const species of Object.keys(PADDOCKS_WORLD)) {
+    const p = PADDOCKS_WORLD[species];
+    if (wx > p.x0 - TILE && wx < p.x1 + TILE && wy > p.y0 - TILE && wy < p.y1 + TILE) return true;
+  }
+  return false;
+}
+
+// Paddock ground: grazed pasture rather than plain untouched grass — a
+// uniform "cropped lawn" green fill (PADDOCK_GRASS, a touch darker/flatter
+// than GRASS) covering the whole interior, replacing the mottled,
+// flower-speckled wild grass that would otherwise be there, plus a thin,
+// broken worn-dirt line just inside the fence where real stock paces the
+// rail. 18j/18k tried leading with heavy mud dabs instead — it read as
+// messy/too-different rather than "grazed field," not what a paddock
+// should look like at a glance; the flat, even green fill is what actually
+// sells "uniform pasture," and the dirt is now a light accent, not the
+// point. Fixed color, not season-reactive — same simplification YARD_DIRT
+// already makes ("the farmyard's trodden dirt never turns with the
+// seasons").
+const PADDOCK_GRASS = tint(GRASS, -0.1);
+const PADDOCK_MUD = "#5a4a32";
+const PADDOCK_MUD_DARK = "#3d3220";
+
+// The flat fill: one solid screen-projected quad per paddock. Recomputed
+// (not cached as a pixel list like paddockDabs below) wherever it's
+// painted — it's only 4 mp() calls and a fill, cheaper to redo than store.
+function paintPaddockFills() {
+  mapCtx.fillStyle = shade(PADDOCK_GRASS, 1);
+  for (const species of Object.keys(PADDOCKS_WORLD)) {
+    const p = PADDOCKS_WORLD[species];
+    const pts = [mp(p.x0, p.y0), mp(p.x1, p.y0), mp(p.x1, p.y1), mp(p.x0, p.y1)];
+    mapCtx.beginPath();
+    mapCtx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) mapCtx.lineTo(pts[i].x, pts[i].y);
+    mapCtx.closePath();
+    mapCtx.fill();
+  }
+}
+
+// The worn-dirt accent: single-pixel dabs (not the bold 2-3px blocks
+// 18k used), broken up with gaps so it reads as a trodden line, not a
+// solid dark border. Screen-space (mp-projected), exactly like yardPixels
+// above — deterministic, so replaying it after a later repaint (drawTile's
+// nearAnyPaddock branch, see there) is a no-op.
+const paddockDabs = [];
+function stampPaddockGround(p) {
+  const inset = 1.6;
+  const w = p.x1 - p.x0 - inset * 2;
+  const h = p.y1 - p.y0 - inset * 2;
+  const perim = 2 * (w + h);
+  for (let d = 0; d < perim; d += 1.6) {
+    if (rand() < 0.55) continue; // gaps — a broken, worn line, not a solid border
+    let wx, wy;
+    if (d < w) {
+      wx = p.x0 + inset + d;
+      wy = p.y0 + inset;
+    } else if (d < w + h) {
+      const dd = d - w;
+      wx = p.x1 - inset;
+      wy = p.y0 + inset + dd;
+    } else if (d < 2 * w + h) {
+      const dd = d - w - h;
+      wx = p.x1 - inset - dd;
+      wy = p.y1 - inset;
+    } else {
+      const dd = d - 2 * w - h;
+      wx = p.x0 + inset;
+      wy = p.y1 - inset - dd;
+    }
+    const c = mp(wx + (rand() - 0.5) * 1.6, wy + (rand() - 0.5) * 1.6);
+    paddockDabs.push({
+      x: Math.round(c.x),
+      y: Math.round(c.y),
+      color: rand() < 0.4 ? PADDOCK_MUD_DARK : PADDOCK_MUD,
+    });
+  }
+}
+for (const species of Object.keys(PADDOCKS_WORLD)) stampPaddockGround(PADDOCKS_WORLD[species]);
+paintPaddockFills();
+for (const d of paddockDabs) {
+  mapCtx.fillStyle = shade(d.color, 1);
+  mapCtx.fillRect(d.x, d.y, 1, 1);
+}
+// Re-dither the whole map: makeMap() already did this once, before
+// paddock placement was known, so this new fill/dirt hasn't been covered
+// yet. A one-time load-time cost, same as makeMap()'s own full-canvas
+// pass — cheap enough not to bother computing a tighter bbox.
+ditherRegion(mapCtx, 0, 0, mapCanvas.width, mapCanvas.height);
+
 for (const p of roadSamples)
   roadPixels.add(
     Math.round((p.x - p.y) / TILE) + MAP_TILES + "," + Math.round((p.x + p.y) / (2 * TILE))
@@ -2719,8 +3025,9 @@ for (let attempts = 0; trees.length < loneTarget && attempts < 5000; attempts++)
   if (forestTiles.has(tileKey(wx, wy))) continue; // stands are planted above
   if (meadowTiles.has(tileKey(wx, wy))) continue; // meadows stay open
   if (roadTiles.has(tileKey(wx, wy))) continue; // and never on a road
-  if (Math.hypot(wx - FARM.x, wy - FARM.y) < FARM_RADIUS + 30) continue;
+  if (Math.hypot(wx - FARM.x, wy - FARM.y) < FARM_PASTURE_RADIUS) continue;
   if (Math.hypot(wx - CITY.x, wy - CITY.y) < CITY_RADIUS + 30) continue;
+  if (insideAnyPaddock(wx, wy)) continue;
   if (trees.some((t) => Math.hypot(t.wx - wx, t.wy - wy) < 20)) continue;
   const r = rand();
   trees.push({
@@ -2761,6 +3068,7 @@ for (let attempts = 0; bushes.length < 110 && attempts < 6000; attempts++) {
   if (roadTiles.has(tileKey(wx, wy))) continue;
   if (Math.hypot(wx - FARM.x, wy - FARM.y) < FARM_RADIUS + 12) continue;
   if (Math.hypot(wx - CITY.x, wy - CITY.y) < CITY_RADIUS + 12) continue;
+  if (insideAnyPaddock(wx, wy)) continue;
   if (trees.some((t) => Math.hypot(t.wx - wx, t.wy - wy) < 8)) continue;
   if (bushes.some((b) => Math.hypot(b.wx - wx, b.wy - wy) < 10)) continue;
   const r = 1.6 + rand();
@@ -2804,6 +3112,7 @@ for (const p of patches) {
       if (roadTiles.has(tileKey(wx, wy))) continue; // keep the gates open
       if (Math.hypot(wx - FARM.x, wy - FARM.y) < FARM_RADIUS + 12) continue;
       if (Math.hypot(wx - CITY.x, wy - CITY.y) < CITY_RADIUS + 12) continue;
+      if (insideAnyPaddock(wx, wy)) continue;
       const r = 1.7 + rand() * 0.8;
       const seasonColors = HEDGE_COLORS[(rand() * HEDGE_COLORS.length) | 0];
       bushes.push({
@@ -2966,9 +3275,18 @@ function spawnHerd(species, hx, hy, count) {
     // otherwise it can spawn in the water beside a shoreline home spot
     let wx = hx;
     let wy = hy;
+    const pad = PADDOCKS_WORLD[species];
     for (let t = 0; t < 20; t++) {
-      const cx = hx + (rand() - 0.5) * 24;
-      const cy = hy + (rand() - 0.5) * 24;
+      let cx = hx + (rand() - 0.5) * 24;
+      let cy = hy + (rand() - 0.5) * 24;
+      if (pad) {
+        cx = Math.min(pad.x1 - 0.7, Math.max(pad.x0 + 0.7, cx));
+        cy = Math.min(pad.y1 - 0.7, Math.max(pad.y0 + 0.7, cy));
+      } else if (insideAnyPaddock(cx, cy)) {
+        // Not this species' own paddock — every other species must never
+        // spawn inside either fence, not just its own
+        continue;
+      }
       if (
         tileTypeAt(cx, cy) === 0 &&
         (ANIMAL_SPECS[species].roads || !roadTiles.has(tileKey(cx, cy)))
@@ -3027,8 +3345,15 @@ function nearestShoreSpot(x, y) {
   return spot && { spot, dist: bd };
 }
 
-// The farm always keeps one herd of each grazing species close by
+// The farm always keeps one herd of each grazing species close by. Cows
+// and pigs are penned, so their home anchor is just their paddock's
+// center — no need to go hunting for open ground for them.
 for (const species of ["cow", "sheep", "horse", "pig", "goat"]) {
+  if (PADDOCKS_WORLD[species]) {
+    const p = PADDOCKS_WORLD[species];
+    spawnHerd(species, (p.x0 + p.x1) / 2, (p.y0 + p.y1) / 2);
+    continue;
+  }
   let hx = FARM.x;
   let hy = FARM.y;
   for (let tries = 0; tries < 200; tries++) {
@@ -3039,6 +3364,7 @@ for (const species of ["cow", "sheep", "horse", "pig", "goat"]) {
     if (cx < 24 || cy < 24 || cx > MAP_SIZE - 24 || cy > MAP_SIZE - 24) continue;
     if (tileTypeAt(cx, cy) !== 0) continue;
     if (forestTiles.has(tileKey(cx, cy)) || roadTiles.has(tileKey(cx, cy))) continue;
+    if (insideAnyPaddock(cx, cy)) continue; // not this species' pen to graze in
     hx = cx;
     hy = cy;
     break;
@@ -3059,16 +3385,18 @@ spawnHerd("dog", FARM.x, FARM.y, 1);
   if (near && near.dist < 260) spawnHerd("duck", near.spot.x, near.spot.y);
 }
 
-// Plus a few wild-placed herds further out
+// Plus a few wild-placed herds further out — cows and pigs are excluded
+// here, since those two are penned at the farm (see PENNED_SPECIES) and
+// have no business grazing loose out in the countryside
 for (let placed = 0, tries = 0; placed < 6 && tries < 400; tries++) {
   const hx = 30 + rand() * (MAP_SIZE - 60);
   const hy = 30 + rand() * (MAP_SIZE - 60);
   if (tileTypeAt(hx, hy) !== 0) continue;
   if (forestTiles.has(tileKey(hx, hy)) || roadTiles.has(tileKey(hx, hy))) continue;
   if (Math.hypot(hx - FARM.x, hy - FARM.y) < FARM_RADIUS + 24) continue;
+  if (insideAnyPaddock(hx, hy)) continue;
   const r = rand();
-  const species =
-    r < 0.2 ? "cow" : r < 0.4 ? "sheep" : r < 0.6 ? "horse" : r < 0.8 ? "pig" : "goat";
+  const species = r < 1 / 3 ? "sheep" : r < 2 / 3 ? "horse" : "goat";
   spawnHerd(species, hx, hy);
   placed++;
 }
@@ -3184,9 +3512,21 @@ function updateAnimals(dt) {
   for (const a of animals) {
     const spec = ANIMAL_SPECS[a.species];
     const tractorDist = Math.hypot(a.wx - tractor.x, a.wy - tractor.y);
+    const pad = PADDOCKS_WORLD[a.species];
     const walkable = (wx, wy) => {
       if (tileTypeAt(wx, wy) !== 0) return false;
       if (!spec.roads && roadTiles.has(tileKey(wx, wy))) return false;
+      // Penned species stop at their fence line — inset half a unit so
+      // they turn back before visibly clipping through the rails
+      if (pad && (wx < pad.x0 + 0.6 || wx > pad.x1 - 0.6 || wy < pad.y0 + 0.6 || wy > pad.y1 - 0.6))
+        return false;
+      // The rail itself blocks every species, not just the ones penned
+      // inside it — otherwise a wandering sheep or goat walks straight
+      // through the line and stands astride it, which is what let animals
+      // render in front of a fence they should have been behind
+      for (const b of FENCE_SOLID_WORLD) {
+        if (wx > b.x0 && wx < b.x1 && wy > b.y0 && wy < b.y1) return false;
+      }
       // Never walk into the tractor (moving further away is always allowed)
       const td = Math.hypot(wx - tractor.x, wy - tractor.y);
       return td > 5 || td > tractorDist;
@@ -3251,9 +3591,13 @@ function updateAnimals(dt) {
       a.pause -= dt;
       continue;
     }
-    // Amble about, turning back toward the herd's home spot when strayed
+    // Amble about, turning back toward the herd's home spot when strayed.
+    // Penned species skip this: the fence (via walkable, above) is their
+    // real boundary, so they're free to use the whole paddock rather than
+    // getting pulled back toward the center once they're spec.range from
+    // a home point that's just the paddock's middle.
     a.angle += (rand() - 0.5) * spec.turn * dt;
-    if (Math.hypot(a.wx - a.hx, a.wy - a.hy) > spec.range) {
+    if (!pad && Math.hypot(a.wx - a.hx, a.wy - a.hy) > spec.range) {
       const want = Math.atan2(a.hy - a.wy, a.hx - a.wx);
       const d = Math.atan2(Math.sin(want - a.angle), Math.cos(want - a.angle));
       a.angle += Math.max(-2.5 * dt, Math.min(2.5 * dt, d));
@@ -3279,9 +3623,10 @@ function updateAnimals(dt) {
 // anchor moves — the members' ordinary wander-and-home behavior walks them
 // there at their own pace.
 // Species that stay put rather than roaming to water on their own: the
-// chicken flock and farm cat/dog keep to the yard, and ducks already live
-// at the shore, so there's nowhere for their routine to send them
-const STATIONARY_HERDS = new Set(["chicken", "cat", "dog", "duck"]);
+// chicken flock and farm cat/dog keep to the yard, ducks already live at
+// the shore, and cows/pigs are fenced into their paddock (PENNED_SPECIES)
+// — none of them have anywhere their routine could send them
+const STATIONARY_HERDS = new Set(["chicken", "cat", "dog", "duck", ...PENNED_SPECIES]);
 
 function updateHerds(dt) {
   for (const h of herds) {
@@ -3647,7 +3992,17 @@ const IMPLEMENTS = {
 // Farm buildings, local to FARM
 // A straight post-and-rail run from (x0,y0) to (x1,y1) — axis-aligned only
 // (either x0===x1 or y0===y1), which is all the farmyard's fence lines need.
-// Posts every ~3 units, two long rails the length of the whole run.
+// Posts every ~3 units; rails are built as one short segment per post
+// interval rather than a single box spanning the whole run. Each box's
+// world height comes from sampling terrainHeight at its own corners (see
+// makeItems' local()), so a single long rail box only samples the run's
+// two far ends and draws a dead-straight line between them — over a long
+// run on real (unflattened) ground that visibly mismatches the posts,
+// which each follow their own local terrain, making the fence look like
+// it randomly changes height wherever the two disagree. Short segments
+// keep the rail sampling the ground about as often as the posts do, so
+// it actually hugs the same contour instead of floating over or sinking
+// into it between them.
 function addFenceRun(boxes, x0, y0, x1, y1, color) {
   const horizontal = y0 === y1;
   const len = horizontal ? Math.abs(x1 - x0) : Math.abs(y1 - y0);
@@ -3659,11 +4014,17 @@ function addFenceRun(boxes, x0, y0, x1, y1, color) {
     boxes.push({ x0: px - 0.3, x1: px + 0.3, y0: py - 0.3, y1: py + 0.3, z0: 0, z1: 2.6, color });
   }
   for (const [rz0, rz1] of [[1.1, 1.4], [2.0, 2.3]]) {
-    boxes.push(
-      horizontal
-        ? { x0: Math.min(x0, x1), x1: Math.max(x0, x1), y0: y0 - 0.15, y1: y0 + 0.15, z0: rz0, z1: rz1, color }
-        : { x0: x0 - 0.15, x1: x0 + 0.15, y0: Math.min(y0, y1), y1: Math.max(y0, y1), z0: rz0, z1: rz1, color }
-    );
+    for (let i = 0; i < n; i++) {
+      const sx0 = x0 + (x1 - x0) * (i / n);
+      const sy0 = y0 + (y1 - y0) * (i / n);
+      const sx1 = x0 + (x1 - x0) * ((i + 1) / n);
+      const sy1 = y0 + (y1 - y0) * ((i + 1) / n);
+      boxes.push(
+        horizontal
+          ? { x0: Math.min(sx0, sx1), x1: Math.max(sx0, sx1), y0: y0 - 0.15, y1: y0 + 0.15, z0: rz0, z1: rz1, color }
+          : { x0: x0 - 0.15, x1: x0 + 0.15, y0: Math.min(sy0, sy1), y1: Math.max(sy0, sy1), z0: rz0, z1: rz1, color }
+      );
+    }
   }
 }
 
@@ -3800,6 +4161,44 @@ addGableRoof(FARM_BOXES, 6.0, 15.0, -13.0, -4.0, 6.6, 9.2, "x", "#8a4a34", 0.7);
 addGableRoof(FARM_BOXES, 32.0, 42.0, -3.0, 9.0, 5.5, 7.7, "y", "#8a929a", 1.0); // cartshed, corrugated iron
 addGableRoof(FARM_BOXES, -2.0, 10.0, 32.0, 39.0, 4.0, 5.6, "x", "#5c4530", 0.6); // cowshed, plain tile
 
+// Paddock fences and the pig sty: kept in their own array rather than
+// pushed into FARM_BOXES, because they now sit far enough out (the
+// pastures were pushed well past the yard, see PADDOCKS_LOCAL) that the
+// shared farm-model depth base — which stamps every FARM_BOXES item with
+// the farm CENTER's terrain height, not its own — drifts enough at this
+// distance to sort behind/in front of nearby grazing animals wrong. Drawn
+// with a per-box depth override in drawScene (search PADDOCK_BOXES there)
+// using each box's own true ground position instead, the same convention
+// animals/bushes/signs already use, so the two compare on equal terms.
+const PADDOCK_BOXES = [];
+// Pig sty: a low lean-to shelter tucked in the pig paddock's near corner,
+// out past the yard — kept low and plain, the humblest building here.
+// Positioned relative to PADDOCKS_LOCAL.pig (not fixed coordinates) since
+// which candidate placement won is only known once makeMap() has run.
+const STY = (() => {
+  const p = PADDOCKS_LOCAL.pig;
+  const x0 = p.x0 + 1, x1 = x0 + 4, y0 = p.y0 + 1, y1 = y0 + 3.5;
+  return { x0, x1, y0, y1 };
+})();
+PADDOCK_BOXES.push(
+  { x0: STY.x0, x1: STY.x1, y0: STY.y0, y1: STY.y1, z0: 0.0, z1: 2.2, color: "#8a7355" }, // sty walls, plain boarding
+  {
+    x0: (STY.x0 + STY.x1) / 2 - 0.6, x1: (STY.x0 + STY.x1) / 2 + 0.6,
+    y0: STY.y1 - 0.1, y1: STY.y1 + 0.3, z0: 0.0, z1: 1.5, color: "#3d332a",
+  } // sty doorway
+);
+addGableRoof(PADDOCK_BOXES, STY.x0, STY.x1, STY.y0, STY.y1, 2.2, 3.1, "x", "#8a929a", 0.5); // sty roof, corrugated iron
+// Cow and pig paddock fences: always a full, unbroken ring — no gate gaps
+// (an open fence reads as unfenced, which defeats the point). Road/water
+// clashes are avoided by *placement* instead, via the candidate search
+// right after makeMap() above; this just draws whichever rect it picked.
+for (const p of Object.values(PADDOCKS_LOCAL)) {
+  addFenceRun(PADDOCK_BOXES, p.x0, p.y0, p.x1, p.y0, "#6b5a42"); // north rail
+  addFenceRun(PADDOCK_BOXES, p.x0, p.y1, p.x1, p.y1, "#6b5a42"); // south rail
+  addFenceRun(PADDOCK_BOXES, p.x0, p.y0, p.x0, p.y1, "#6b5a42"); // west rail
+  addFenceRun(PADDOCK_BOXES, p.x1, p.y0, p.x1, p.y1, "#6b5a42"); // east rail
+}
+
 // The two end-cap discs that round off the fuel tank's cylinder (same
 // box+disc trick as makeWheels: the disc facing the camera reads as the
 // tank's round end, the box gives its silhouette everywhere else), the
@@ -3833,16 +4232,40 @@ for (const [ly, n] of [
 // turned into world-space boxes once here — FARM.angle only ever lands on
 // a 90° step, so this stays a true axis-aligned box in world space too.
 const FARM_SOLID_LOCAL = [
-  [-16.0, 2.0, -12.0, 2.0], // barn
-  [-13.0, 1.0, -30.0, -16.0], // farmhouse
-  [-9.0, -4.0, 6.0, 11.0], // hen house
-  [6.0, 15.0, -13.0, -4.0], // granary body
-  [40.0, 42.0, -3.0, 9.0], // cartshed back wall
-  [32.0, 42.0, -3.0, -1.0], // cartshed side wall
-  [32.0, 42.0, 7.0, 9.0], // cartshed side wall
-  [-2.0, 10.0, 32.0, 39.0], // cowshed
+  ...FARM_BUILDING_FOOTPRINTS,
+  [STY.x0, STY.x1, STY.y0, STY.y1], // pig sty
 ];
 const FARM_SOLID_WORLD = FARM_SOLID_LOCAL.map(([x0, x1, y0, y1]) => {
+  const cos = Math.cos(FARM.angle);
+  const sin = Math.sin(FARM.angle);
+  let wx0 = Infinity, wx1 = -Infinity, wy0 = Infinity, wy1 = -Infinity;
+  for (const lx of [x0, x1])
+    for (const ly of [y0, y1]) {
+      const wx = FARM.x + lx * cos - ly * sin;
+      const wy = FARM.y + lx * sin + ly * cos;
+      wx0 = Math.min(wx0, wx); wx1 = Math.max(wx1, wx);
+      wy0 = Math.min(wy0, wy); wy1 = Math.max(wy1, wy);
+    }
+  return { x0: wx0, x1: wx1, y0: wy0, y1: wy1 };
+});
+
+// Paddock fence rings, as thin collision strips (unlike FARM_SOLID_WORLD's
+// buildings, which are solid clean through, a paddock's rectangle is open
+// pasture — only the fence line itself should stop the tractor). Always a
+// full unbroken ring, matching the visual fence — no gate gaps, same
+// reasoning as there. Four strips per paddock, one along each rail, each
+// half FENCE_COLLIDE_HALF thick either side of the line.
+const FENCE_COLLIDE_HALF = 0.9;
+const FENCE_SOLID_LOCAL = [];
+for (const p of Object.values(PADDOCKS_LOCAL)) {
+  FENCE_SOLID_LOCAL.push(
+    [p.x0, p.x1, p.y0 - FENCE_COLLIDE_HALF, p.y0 + FENCE_COLLIDE_HALF], // north rail
+    [p.x0, p.x1, p.y1 - FENCE_COLLIDE_HALF, p.y1 + FENCE_COLLIDE_HALF], // south rail
+    [p.x0 - FENCE_COLLIDE_HALF, p.x0 + FENCE_COLLIDE_HALF, p.y0, p.y1], // west rail
+    [p.x1 - FENCE_COLLIDE_HALF, p.x1 + FENCE_COLLIDE_HALF, p.y0, p.y1] // east rail
+  );
+}
+const FENCE_SOLID_WORLD = FENCE_SOLID_LOCAL.map(([x0, x1, y0, y1]) => {
   const cos = Math.cos(FARM.angle);
   const sin = Math.sin(FARM.angle);
   let wx0 = Infinity, wx1 = -Infinity, wy0 = Infinity, wy1 = -Infinity;
@@ -4113,6 +4536,24 @@ function drawScene(camX, camY) {
   makeWheels(items, imp.wheels, pose.x, pose.y, pose.angle, liftZ, camX, camY);
   makeItems(items, FARM_BOXES, FARM.x, FARM.y, FARM.angle, 0, camX, camY);
   makeRoundItems(items, FARM_SHAPES, FARM.x, FARM.y, FARM.angle, 0, camX, camY);
+  // Paddock fences and the pig sty get a per-box depth override using
+  // their own true world position (same "+2.5" ground convention as
+  // animals/bushes/signs below) instead of the farm-wide model depth
+  // makeItems just gave them — see the PADDOCK_BOXES comment for why.
+  {
+    const start = items.length;
+    makeItems(items, PADDOCK_BOXES, FARM.x, FARM.y, FARM.angle, 0, camX, camY);
+    const cos = Math.cos(FARM.angle);
+    const sin = Math.sin(FARM.angle);
+    for (let i = start; i < items.length; i++) {
+      const b = items[i].box;
+      const cx = (b.x0 + b.x1) / 2;
+      const cy = (b.y0 + b.y1) / 2;
+      const wx = FARM.x + cx * cos - cy * sin;
+      const wy = FARM.y + cx * sin + cy * cos;
+      items[i].depth = wx + wy + terrainHeight(wx, wy) + 2.5;
+    }
+  }
   makeItems(items, CITY_BOXES, CITY.x, CITY.y, CITY.angle, 0, camX, camY);
   makeRoundItems(items, CITY_SHAPES, CITY.x, CITY.y, CITY.angle, 0, camX, camY);
   if (cart.on && onScreen(cart.x, cart.y, camX, camY)) {
@@ -5357,6 +5798,18 @@ function update(dt) {
       tractor.y > b.y0 - BUILDING_COLLIDE_MARGIN &&
       tractor.y < b.y1 + BUILDING_COLLIDE_MARGIN
     ) {
+      tractor.x = prevX;
+      tractor.y = prevY;
+      tractor.speed = 0;
+      break;
+    }
+  }
+
+  // Paddock fences stop the tractor too, but only the rail line itself —
+  // FENCE_SOLID_WORLD is a ring of thin strips, not a solid block, so the
+  // pasture inside stays open ground the tractor just can't reach.
+  for (const b of FENCE_SOLID_WORLD) {
+    if (tractor.x > b.x0 && tractor.x < b.x1 && tractor.y > b.y0 && tractor.y < b.y1) {
       tractor.x = prevX;
       tractor.y = prevY;
       tractor.speed = 0;
