@@ -91,7 +91,7 @@ html, body {
 
   #td-joystick {
     position: absolute;
-    left: max(14px, env(safe-area-inset-left));
+    right: max(14px, env(safe-area-inset-right));
     bottom: max(14px, env(safe-area-inset-bottom));
     width: 140px;
     height: 140px;
@@ -118,7 +118,7 @@ html, body {
 
   #td-throttle {
     position: absolute;
-    right: max(14px, env(safe-area-inset-right));
+    left: max(14px, env(safe-area-inset-left));
     bottom: max(14px, env(safe-area-inset-bottom));
     width: 140px;
     height: 140px;
@@ -143,13 +143,25 @@ html, body {
     pointer-events: none;
   }
 
+  .joystick-hint {
+    position: absolute;
+    bottom: 10px;
+    left: 0;
+    right: 0;
+    text-align: center;
+    font: bold 0.6rem system-ui, sans-serif;
+    letter-spacing: 0.05em;
+    color: rgba(245, 233, 200, 0.65);
+    pointer-events: none;
+  }
+
   #touch-right {
     position: absolute;
-    right: max(14px, env(safe-area-inset-right));
+    left: max(14px, env(safe-area-inset-left));
     bottom: calc(max(14px, env(safe-area-inset-bottom)) + 154px);
     display: flex;
     flex-direction: column;
-    align-items: flex-end;
+    align-items: flex-start;
     gap: 10px;
   }
 

@@ -18,13 +18,15 @@
        existing keyboard-driven game logic (driving, menus, implements)
        works unchanged for touch input. -->
   <div id="touch-controls" aria-hidden="true">
-    <!-- Steering joystick (left hand): drag left/right to steer. -->
+    <!-- Steering joystick (right hand): drag left/right to steer. -->
     <div id="td-joystick" aria-label="Steer">
       <div id="td-joystick-knob"></div>
+      <span class="joystick-hint">← STEER →</span>
     </div>
-    <!-- Throttle joystick (right hand): drag up/down for forward/reverse. -->
+    <!-- Throttle joystick (left hand): drag up/down for forward/reverse. -->
     <div id="td-throttle" aria-label="Throttle">
       <div id="td-throttle-knob"></div>
+      <span class="joystick-hint">↑ GAS ↓</span>
     </div>
     <div id="touch-right">
       <div id="touch-implements">

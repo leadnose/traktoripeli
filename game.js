@@ -759,17 +759,17 @@ window.addEventListener("keyup", (e) => {
     fireKey("keyup", entry.key);
   }
 
-  // Drive controls: two separate joysticks so left hand steers and right
+  // Drive controls: two separate joysticks so right hand steers and left
   // hand controls the throttle.  Each joystick is constrained to a single
   // axis so the intention is always unambiguous.
   (function setupDriveJoysticks() {
     // axes: "horizontal" → ArrowLeft/ArrowRight  |  "vertical" → ArrowUp/ArrowDown
-    function setupJoystickElement(baseId, knobId, axes) {
+    function setupJoystickElement(baseId, knobId, axes, deadzone = 0.35) {
       const base = document.getElementById(baseId);
       const knob = document.getElementById(knobId);
       if (!base || !knob) return;
       const RADIUS = 40; // px the knob can travel from centre
-      const DEADZONE = 0.35; // fraction of RADIUS before an axis engages
+      const DEADZONE = deadzone; // fraction of RADIUS before an axis engages
       let pointerId = null;
       const dir = axes === "horizontal"
         ? { ArrowLeft: false, ArrowRight: false }
@@ -828,7 +828,7 @@ window.addEventListener("keyup", (e) => {
       window.addEventListener("pointercancel", end);
     }
 
-    setupJoystickElement("td-joystick", "td-joystick-knob", "horizontal"); // steering
+    setupJoystickElement("td-joystick", "td-joystick-knob", "horizontal", 0.55); // steering (higher dead-zone → less twitchy)
     setupJoystickElement("td-throttle", "td-throttle-knob", "vertical");   // throttle
   })();
 
