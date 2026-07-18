@@ -116,10 +116,37 @@ html, body {
     pointer-events: none;
   }
 
-  #touch-right {
+  #td-throttle {
     position: absolute;
     right: max(14px, env(safe-area-inset-right));
     bottom: max(14px, env(safe-area-inset-bottom));
+    width: 140px;
+    height: 140px;
+    border-radius: 50%;
+    background: rgba(40, 30, 20, 0.3);
+    border: 2px solid rgba(245, 233, 200, 0.45);
+    pointer-events: auto;
+    touch-action: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  #td-throttle-knob {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 60px;
+    height: 60px;
+    margin: -30px 0 0 -30px;
+    border-radius: 50%;
+    background: rgba(214, 69, 53, 0.5);
+    border: 2px solid rgba(255, 233, 184, 0.8);
+    pointer-events: none;
+  }
+
+  #touch-right {
+    position: absolute;
+    right: max(14px, env(safe-area-inset-right));
+    bottom: calc(max(14px, env(safe-area-inset-bottom)) + 154px);
     display: flex;
     flex-direction: column;
     align-items: flex-end;
@@ -198,7 +225,8 @@ html, body {
 
   /* Driving-only controls are hidden while a menu is open so a stray tap
      doesn't swap implements or shift gear behind the menu. */
-  body.menu-mode #touch-right {
+  body.menu-mode #touch-right,
+  body.menu-mode #td-throttle {
     display: none;
   }
 }
