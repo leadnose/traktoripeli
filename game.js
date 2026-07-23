@@ -31,6 +31,13 @@ function nearPoint(px, py, x, y, r) {
   return Math.hypot(px - x, py - y) < r;
 }
 
+// Never let a lit box/disc face go darker than 30% of its base color, no
+// matter how steep the angle away from the light — used by makeRoundItems'
+// disc shading and drawScene's box-face shading (a distinct constant from
+// groundShade()'s own 0.4/1.25 terrain-lighting clamp, which models a
+// different surface and isn't meant to track this one).
+const AMBIENT_FLOOR = 0.3;
+
 // ---------------------------------------------------------------------------
 // Map profiles: the world is always one of exactly 10 fixed archetypes,
 // each with its own RNG seed (so it's exactly as reproducible as a free
@@ -4484,7 +4491,7 @@ function makeRoundItems(items, shapes, ox, oy, angle, liftZ, camX, camY, baseDep
       }
       // Lit like a box's side face: normal is the rotated local y axis
       const d = -s.n * sin * LIGHT.x + s.n * cos * LIGHT.y;
-      const k = Math.min(1, Math.max(0.3, 0.3 + d));
+      const k = clamp(AMBIENT_FLOOR + d, AMBIENT_FLOOR, 1);
       items.push({ poly: pts, color: s.color, k, depth });
     } else {
       items.push({
@@ -4751,7 +4758,7 @@ function drawScene(camX, camY) {
       const nx = face.n[0] * item.cos - face.n[1] * item.sin;
       const ny = face.n[0] * item.sin + face.n[1] * item.cos;
       const d = nx * LIGHT.x + ny * LIGHT.y + face.n[2] * LIGHT.z;
-      const k = Math.min(1, Math.max(0.3, 0.3 + d));
+      const k = clamp(AMBIENT_FLOOR + d, AMBIENT_FLOOR, 1);
 
       sceneCtx.fillStyle = shade(item.box.color, k);
       sceneCtx.beginPath();
