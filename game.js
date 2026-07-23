@@ -3666,6 +3666,94 @@ function moveOrPivot(a, walkable, speed, pivotRate, dt) {
   }
 }
 
+// Herd spacing: crowding neighbors ease each other apart (also while
+// grazing) so animals never stand inside one another.
+function updateSeparation(a, spec, dt, walkable) {
+  for (const b of animals) {
+    if (b === a) continue;
+    const dx = a.wx - b.wx;
+    const dy = a.wy - b.wy;
+    const d = Math.hypot(dx, dy);
+    if (d < spec.sep && d > 0.001) {
+      const nx = a.wx + (dx / d) * (spec.sep - d) * dt * 3;
+      const ny = a.wy + (dy / d) * (spec.sep - d) * dt * 3;
+      if (walkable(nx, ny)) {
+        a.wx = nx;
+        a.wy = ny;
+      }
+    } else if (d <= 0.001) {
+      a.wx += rand() - 0.5; // unstick exact overlaps
+    }
+  }
+}
+
+// The delivery cart spooks animals just like the tractor does: flee
+// whichever machine is nearer, sideways off its path (not down the line of
+// travel), turning at the species' own pace but always smoothly (no
+// snaps). Returns true if the animal fled — fleeing overrides grazing and
+// homing for the rest of this frame.
+function updateFleeFromMachine(a, spec, dt, walkable, tractorDist) {
+  let spook = tractor;
+  let spookDist = tractorDist;
+  let spookSpeed = Math.abs(tractor.speed);
+  if (cart.on) {
+    const vd = Math.hypot(a.wx - cart.x, a.wy - cart.y);
+    if (vd < spookDist) {
+      spook = cart;
+      spookDist = vd;
+      spookSpeed = cart.moving;
+    }
+  }
+  if (!spec.spook || spookDist >= spec.spook) return false;
+  a.pause = 0;
+  const tdx = a.wx - spook.x;
+  const tdy = a.wy - spook.y;
+  const hx = Math.cos(spook.angle);
+  const hy = Math.sin(spook.angle);
+  const side = tdx * -hy + tdy * hx >= 0 ? 1 : -1;
+  const fx = -hy * side + (tdx / (spookDist || 1)) * 0.5;
+  const fy = hx * side + (tdy / (spookDist || 1)) * 0.5;
+  // Threshold scales with GEAR_SLOW_RATIO like the tractor's own
+  // "meaningfully moving" checks — this reads tractor.speed too (or
+  // cart.moving, fixed and unrelated to tractor gearing) and was
+  // missed by the original tractor-speed rescale
+  const want = spookSpeed > 3 * GEAR_SLOW_RATIO ? Math.atan2(fy, fx) : Math.atan2(tdy, tdx);
+  const d = Math.atan2(Math.sin(want - a.angle), Math.cos(want - a.angle));
+  a.angle += clamp(d, -spec.fleeTurn * dt, spec.fleeTurn * dt);
+  // cornered against water or a field: sidle along the obstacle
+  moveOrPivot(a, walkable, spec.flee, 3, dt);
+  return true;
+}
+
+// Tick down a resting pause; returns true while the animal is still paused.
+function updatePauseTimer(a, dt) {
+  if (a.pause > 0) {
+    a.pause -= dt;
+    return true;
+  }
+  return false;
+}
+
+// Amble about, turning back toward the herd's home spot when strayed.
+// Penned species (pad set) skip the homing pull: the fence (via walkable)
+// is their real boundary, so they're free to use the whole paddock rather
+// than getting pulled back toward the center once they're spec.range from
+// a home point that's just the paddock's middle.
+function updateWander(a, spec, pad, dt, walkable) {
+  a.angle += (rand() - 0.5) * spec.turn * dt;
+  if (!pad && Math.hypot(a.wx - a.hx, a.wy - a.hy) > spec.range) {
+    const want = Math.atan2(a.hy - a.wy, a.hx - a.wx);
+    const d = Math.atan2(Math.sin(want - a.angle), Math.cos(want - a.angle));
+    a.angle += clamp(d, -2.5 * dt, 2.5 * dt);
+  }
+  // Blocked by water, a field or a road: pivot smoothly until a clear
+  // direction opens up
+  moveOrPivot(a, walkable, spec.speed, 2.5, dt);
+  if (rand() < spec.pauseChance) {
+    a.pause = spec.pauseDur[0] + rand() * spec.pauseDur[1];
+  }
+}
+
 function updateAnimals(dt) {
   for (const a of animals) {
     const spec = ANIMAL_SPECS[a.species];
@@ -3689,81 +3777,10 @@ function updateAnimals(dt) {
       const td = Math.hypot(wx - tractor.x, wy - tractor.y);
       return td > 5 || td > tractorDist;
     };
-    // Herd spacing: crowding neighbors ease each other apart (also while
-    // grazing) so animals never stand inside one another
-    for (const b of animals) {
-      if (b === a) continue;
-      const dx = a.wx - b.wx;
-      const dy = a.wy - b.wy;
-      const d = Math.hypot(dx, dy);
-      if (d < spec.sep && d > 0.001) {
-        const nx = a.wx + (dx / d) * (spec.sep - d) * dt * 3;
-        const ny = a.wy + (dy / d) * (spec.sep - d) * dt * 3;
-        if (walkable(nx, ny)) {
-          a.wx = nx;
-          a.wy = ny;
-        }
-      } else if (d <= 0.001) {
-        a.wx += rand() - 0.5; // unstick exact overlaps
-      }
-    }
-    // The delivery cart spooks animals just like the tractor does: flee
-    // whichever machine is nearer
-    let spook = tractor;
-    let spookDist = tractorDist;
-    let spookSpeed = Math.abs(tractor.speed);
-    if (cart.on) {
-      const vd = Math.hypot(a.wx - cart.x, a.wy - cart.y);
-      if (vd < spookDist) {
-        spook = cart;
-        spookDist = vd;
-        spookSpeed = cart.moving;
-      }
-    }
-    // Spooked animals get clear of the machine — sideways off its path,
-    // not down the line of travel — turning at the species' own pace but
-    // always smoothly (no snaps)
-    if (spec.spook && spookDist < spec.spook) {
-      a.pause = 0;
-      const tdx = a.wx - spook.x;
-      const tdy = a.wy - spook.y;
-      const hx = Math.cos(spook.angle);
-      const hy = Math.sin(spook.angle);
-      const side = tdx * -hy + tdy * hx >= 0 ? 1 : -1;
-      const fx = -hy * side + (tdx / (spookDist || 1)) * 0.5;
-      const fy = hx * side + (tdy / (spookDist || 1)) * 0.5;
-      // Threshold scales with GEAR_SLOW_RATIO like the tractor's own
-      // "meaningfully moving" checks — this reads tractor.speed too (or
-      // cart.moving, fixed and unrelated to tractor gearing) and was
-      // missed by the original tractor-speed rescale
-      const want = spookSpeed > 3 * GEAR_SLOW_RATIO ? Math.atan2(fy, fx) : Math.atan2(tdy, tdx);
-      const d = Math.atan2(Math.sin(want - a.angle), Math.cos(want - a.angle));
-      a.angle += clamp(d, -spec.fleeTurn * dt, spec.fleeTurn * dt);
-      // cornered against water or a field: sidle along the obstacle
-      moveOrPivot(a, walkable, spec.flee, 3, dt);
-      continue; // fleeing overrides grazing and homing
-    }
-    if (a.pause > 0) {
-      a.pause -= dt;
-      continue;
-    }
-    // Amble about, turning back toward the herd's home spot when strayed.
-    // Penned species skip this: the fence (via walkable, above) is their
-    // real boundary, so they're free to use the whole paddock rather than
-    // getting pulled back toward the center once they're spec.range from
-    // a home point that's just the paddock's middle.
-    a.angle += (rand() - 0.5) * spec.turn * dt;
-    if (!pad && Math.hypot(a.wx - a.hx, a.wy - a.hy) > spec.range) {
-      const want = Math.atan2(a.hy - a.wy, a.hx - a.wx);
-      const d = Math.atan2(Math.sin(want - a.angle), Math.cos(want - a.angle));
-      a.angle += clamp(d, -2.5 * dt, 2.5 * dt);
-    }
-    // Blocked by water, a field or a road: pivot smoothly until a clear
-    // direction opens up
-    moveOrPivot(a, walkable, spec.speed, 2.5, dt);
-    if (rand() < spec.pauseChance) {
-      a.pause = spec.pauseDur[0] + rand() * spec.pauseDur[1];
-    }
+    updateSeparation(a, spec, dt, walkable);
+    if (updateFleeFromMachine(a, spec, dt, walkable, tractorDist)) continue;
+    if (updatePauseTimer(a, dt)) continue;
+    updateWander(a, spec, pad, dt, walkable);
   }
 }
 
