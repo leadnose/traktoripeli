@@ -931,6 +931,22 @@ function projY(wx, wy, wz) {
   return (wx + wy) / 2 - (wz || 0);
 }
 
+// Rotate a local (lx, ly) point by a precomputed cos/sin pair — the inner
+// step of rotateLocal(), split out so hot per-frame loops that already have
+// cos/sin for their model's heading can reuse them across many points
+// instead of recomputing Math.cos/Math.sin for each one.
+function rotateXY(cos, sin, lx, ly) {
+  return { x: lx * cos - ly * sin, y: lx * sin + ly * cos };
+}
+
+// Rotate a local (lx, ly) point by angle and place it relative to an origin
+// (ox, oy) — the common "local model point -> world position" transform
+// used for fixtures, collision boxes and box-model corners alike.
+function rotateLocal(ox, oy, angle, lx, ly) {
+  const p = rotateXY(Math.cos(angle), Math.sin(angle), lx, ly);
+  return { x: ox + p.x, y: oy + p.y };
+}
+
 // ---------------------------------------------------------------------------
 // Farmyard location (needed by the terrain: the yard sits on a flat pad)
 // ---------------------------------------------------------------------------
@@ -1011,12 +1027,7 @@ const FUEL_TANK_LEN = 5.0; // half-length of the cylinder
 const FUEL_TANK_R = 2.2; // cylinder radius
 const FUEL_TANK_STAND_H = 2.4; // leg height under the tank
 function fuelTankPos() {
-  const cos = Math.cos(FARM.angle);
-  const sin = Math.sin(FARM.angle);
-  return {
-    x: FARM.x + FUEL_TANK_LOCAL.x * cos - FUEL_TANK_LOCAL.y * sin,
-    y: FARM.y + FUEL_TANK_LOCAL.x * sin + FUEL_TANK_LOCAL.y * cos,
-  };
+  return rotateLocal(FARM.x, FARM.y, FARM.angle, FUEL_TANK_LOCAL.x, FUEL_TANK_LOCAL.y);
 }
 function nearFuelTank() {
   const p = fuelTankPos();
@@ -2809,12 +2820,7 @@ makeMap();
 // corner to FARM.x/y sitting exactly on the ring, extending away from the
 // farm in whichever quadrant that angle falls in.
 {
-  const cos = Math.cos(FARM.angle);
-  const sin = Math.sin(FARM.angle);
-  const toWorld = (lx, ly) => ({
-    x: FARM.x + lx * cos - ly * sin,
-    y: FARM.y + lx * sin + ly * cos,
-  });
+  const toWorld = (lx, ly) => rotateLocal(FARM.x, FARM.y, FARM.angle, lx, ly);
   const RING_DISTS = [82, 95, 108];
   const ANGLE_STEPS = 16;
   const candidatesFor = (size) => {
@@ -4347,19 +4353,20 @@ const FARM_SOLID_LOCAL = [
   ...FARM_BUILDING_FOOTPRINTS,
   [STY.x0, STY.x1, STY.y0, STY.y1], // pig sty
 ];
-const FARM_SOLID_WORLD = FARM_SOLID_LOCAL.map(([x0, x1, y0, y1]) => {
-  const cos = Math.cos(FARM.angle);
-  const sin = Math.sin(FARM.angle);
+// A rotated local rectangle's corners no longer line up with the world axes
+// unless FARM.angle is a 90° step (which it always is), so the world-space
+// AABB is just the min/max of all 4 rotated corners.
+function localRectToFarmWorldAABB([x0, x1, y0, y1]) {
   let wx0 = Infinity, wx1 = -Infinity, wy0 = Infinity, wy1 = -Infinity;
   for (const lx of [x0, x1])
     for (const ly of [y0, y1]) {
-      const wx = FARM.x + lx * cos - ly * sin;
-      const wy = FARM.y + lx * sin + ly * cos;
+      const { x: wx, y: wy } = rotateLocal(FARM.x, FARM.y, FARM.angle, lx, ly);
       wx0 = Math.min(wx0, wx); wx1 = Math.max(wx1, wx);
       wy0 = Math.min(wy0, wy); wy1 = Math.max(wy1, wy);
     }
   return { x0: wx0, x1: wx1, y0: wy0, y1: wy1 };
-});
+}
+const FARM_SOLID_WORLD = FARM_SOLID_LOCAL.map(localRectToFarmWorldAABB);
 
 // Paddock fence rings, as thin collision strips (unlike FARM_SOLID_WORLD's
 // buildings, which are solid clean through, a paddock's rectangle is open
@@ -4377,19 +4384,7 @@ for (const p of Object.values(PADDOCKS_LOCAL)) {
     [p.x1 - FENCE_COLLIDE_HALF, p.x1 + FENCE_COLLIDE_HALF, p.y0, p.y1] // east rail
   );
 }
-const FENCE_SOLID_WORLD = FENCE_SOLID_LOCAL.map(([x0, x1, y0, y1]) => {
-  const cos = Math.cos(FARM.angle);
-  const sin = Math.sin(FARM.angle);
-  let wx0 = Infinity, wx1 = -Infinity, wy0 = Infinity, wy1 = -Infinity;
-  for (const lx of [x0, x1])
-    for (const ly of [y0, y1]) {
-      const wx = FARM.x + lx * cos - ly * sin;
-      const wy = FARM.y + lx * sin + ly * cos;
-      wx0 = Math.min(wx0, wx); wx1 = Math.max(wx1, wx);
-      wy0 = Math.min(wy0, wy); wy1 = Math.max(wy1, wy);
-    }
-  return { x0: wx0, x1: wx1, y0: wy0, y1: wy1 };
-});
+const FENCE_SOLID_WORLD = FENCE_SOLID_LOCAL.map(localRectToFarmWorldAABB);
 
 // City buildings, local to CITY: a small trading depot where the grain
 // actually gets sold. No need for FARM's elaborate trampled yard — the
@@ -4452,8 +4447,9 @@ function makeItems(items, boxes, ox, oy, angle, liftZ, camX, camY, baseDepth) {
   // frame-to-frame jitter can't flip the draw order against neighbors
   const M = baseDepth !== undefined ? baseDepth : ox + oy + terrainHeight(ox, oy);
   const local = (lx, ly, lz) => {
-    const wx = ox + lx * cos - ly * sin;
-    const wy = oy + lx * sin + ly * cos;
+    const p = rotateXY(cos, sin, lx, ly);
+    const wx = ox + p.x;
+    const wy = oy + p.y;
     const wz = lz + terrainHeight(wx, wy);
     const fx = projX(wx, wy) - camX;
     const fy = projY(wx, wy, wz) - camY;
@@ -4486,8 +4482,9 @@ function makeRoundItems(items, shapes, ox, oy, angle, liftZ, camX, camY, baseDep
   const sin = Math.sin(angle);
   const M = baseDepth !== undefined ? baseDepth : ox + oy + terrainHeight(ox, oy);
   const project = (lx, ly, lz) => {
-    const wx = ox + lx * cos - ly * sin;
-    const wy = oy + lx * sin + ly * cos;
+    const p = rotateXY(cos, sin, lx, ly);
+    const wx = ox + p.x;
+    const wy = oy + p.y;
     const wz = lz + terrainHeight(wx, wy);
     return {
       x: Math.round(projX(wx, wy) - camX),
@@ -4575,8 +4572,9 @@ function drawScene(camX, camY) {
     const cos = Math.cos(angle);
     const sin = Math.sin(angle);
     const shPt = (lx, ly) => {
-      const wx = ox + lx * cos - ly * sin;
-      const wy = oy + lx * sin + ly * cos;
+      const p = rotateXY(cos, sin, lx, ly);
+      const wx = ox + p.x;
+      const wy = oy + p.y;
       return {
         x: Math.round(projX(wx, wy) - camX),
         y: Math.round(projY(wx, wy, terrainHeight(wx, wy)) - camY),
@@ -4655,14 +4653,11 @@ function drawScene(camX, camY) {
   {
     const start = items.length;
     makeItems(items, PADDOCK_BOXES, FARM.x, FARM.y, FARM.angle, 0, camX, camY);
-    const cos = Math.cos(FARM.angle);
-    const sin = Math.sin(FARM.angle);
     for (let i = start; i < items.length; i++) {
       const b = items[i].box;
       const cx = (b.x0 + b.x1) / 2;
       const cy = (b.y0 + b.y1) / 2;
-      const wx = FARM.x + cx * cos - cy * sin;
-      const wy = FARM.y + cx * sin + cy * cos;
+      const { x: wx, y: wy } = rotateLocal(FARM.x, FARM.y, FARM.angle, cx, cy);
       items[i].depth = wx + wy + terrainHeight(wx, wy) + 2.5;
     }
   }
@@ -4839,11 +4834,8 @@ function updateTracks(dt) {
   if (trackDist < 2) return;
   trackDist = 0;
 
-  const cos = Math.cos(tractor.angle);
-  const sin = Math.sin(tractor.angle);
   for (const wheel of TRACK_WHEELS) {
-    const wx = tractor.x + wheel.x * cos - wheel.y * sin;
-    const wy = tractor.y + wheel.x * sin + wheel.y * cos;
+    const { x: wx, y: wy } = rotateLocal(tractor.x, tractor.y, tractor.angle, wheel.x, wheel.y);
     // marks only on unplowed field dirt or the yard's trodden ground
     if (tileTypeAt(wx, wy) !== 1 && !inYard(wx, wy)) continue;
     const px = Math.round(projX(wx, wy) + MAP_OFFSET_X);
@@ -5722,8 +5714,6 @@ function implementPose() {
 // them — so working the edge rows of a field isn't fiddly.
 function implementOverField() {
   const pose = implementPose();
-  const cos = Math.cos(pose.angle);
-  const sin = Math.sin(pose.angle);
   const points = [
     [-9.8, -4],
     [-9.8, 0],
@@ -5731,8 +5721,7 @@ function implementOverField() {
     [-6, 0],
   ];
   for (const [lx, ly] of points) {
-    const wx = pose.x + lx * cos - ly * sin;
-    const wy = pose.y + lx * sin + ly * cos;
+    const { x: wx, y: wy } = rotateLocal(pose.x, pose.y, pose.angle, lx, ly);
     const tt = tileTypeAt(wx, wy);
     if (tt >= 1 && tt <= 3) return true;
   }
