@@ -19,6 +19,12 @@ view.width = VIEW_W;
 view.height = VIEW_H;
 const ctx = view.getContext("2d");
 
+// Restrict a value to a [lo, hi] range — used all over for keeping a number
+// (a coordinate, a rolling stick axis, an angle delta) within its bounds.
+function clamp(v, lo, hi) {
+  return Math.max(lo, Math.min(hi, v));
+}
+
 // ---------------------------------------------------------------------------
 // Map profiles: the world is always one of exactly 10 fixed archetypes,
 // each with its own RNG seed (so it's exactly as reproducible as a free
@@ -806,7 +812,7 @@ window.addEventListener("keyup", (e) => {
           return ((av - DEADZONE) / (1 - DEADZONE)) * Math.sign(v);
         };
         if (axes === "horizontal") {
-          const nxRaw = Math.max(-1, Math.min(1, dx / RADIUS));
+          const nxRaw = clamp(dx / RADIUS, -1, 1);
           const cx = nxRaw * RADIUS;
           knob.style.transform = `translate(${cx}px, 0)`;
           const steering = applyDeadzone(nxRaw);
@@ -815,7 +821,7 @@ window.addEventListener("keyup", (e) => {
           setDir("ArrowLeft", steering < 0);
           setDir("ArrowRight", steering > 0);
         } else {
-          const nyRaw = Math.max(-1, Math.min(1, dy / RADIUS));
+          const nyRaw = clamp(dy / RADIUS, -1, 1);
           const cy = nyRaw * RADIUS;
           knob.style.transform = `translate(0, ${cy}px)`;
           const throttle = -applyDeadzone(nyRaw);
@@ -1372,7 +1378,7 @@ function groundShade(wx, wy) {
   const dzdy = (terrainHeight(wx, wy + d) - terrainHeight(wx, wy - d)) / (2 * d);
   const len = Math.hypot(dzdx, dzdy, 1);
   const dot = (-dzdx * LIGHT.x - dzdy * LIGHT.y + LIGHT.z) / len;
-  return Math.max(0.4, Math.min(1.25, 0.3 + dot));
+  return clamp(0.3 + dot, 0.4, 1.25);
 }
 
 function isField(tx, ty) {
@@ -2221,7 +2227,7 @@ function makeMap() {
           bestDir = nd;
         }
       }
-      dir += Math.max(-0.12, Math.min(0.12, bestDir - dir));
+      dir += clamp(bestDir - dir, -0.12, 0.12);
       const dev = Math.atan2(Math.sin(dir - dir0), Math.cos(dir - dir0));
       if (dev > 0.9) dir = dir0 + 0.9;
       else if (dev < -0.9) dir = dir0 - 0.9;
@@ -2421,14 +2427,14 @@ function makeMap() {
     const c = patchCenter(p);
     const from = nearestRoadPoint(c.x, c.y);
     // Nearest point on the patch rectangle grown by a road's berth
-    const ax = Math.max(p.px * TILE - 14, Math.min((p.px + p.pw) * TILE + 14, from.x));
-    const ay = Math.max(p.py * TILE - 14, Math.min((p.py + p.ph) * TILE + 14, from.y));
+    const ax = clamp(from.x, p.px * TILE - 14, (p.px + p.pw) * TILE + 14);
+    const ay = clamp(from.y, p.py * TILE - 14, (p.py + p.ph) * TILE + 14);
     if (Math.hypot(ax - from.x, ay - from.y) >= 10) traceRoad(from, ax, ay, 2.0);
 
     // Short straight entry path from the road up to the field's edge
     const gate = nearestRoadPoint(c.x, c.y);
-    const bx = Math.max(p.px * TILE, Math.min((p.px + p.pw) * TILE, gate.x));
-    const by = Math.max(p.py * TILE, Math.min((p.py + p.ph) * TILE, gate.y));
+    const bx = clamp(gate.x, p.px * TILE, (p.px + p.pw) * TILE);
+    const by = clamp(gate.y, p.py * TILE, (p.py + p.ph) * TILE);
     const len = Math.hypot(bx - gate.x, by - gate.y);
     if (len > 2 && len < 45) {
       const dir = Math.atan2(by - gate.y, bx - gate.x);
@@ -3093,7 +3099,7 @@ const trees = [];
 // tree cover reads, on top of the fixed spruce:fir split within whatever's
 // left over. Lone trees on open grass always skew a bit more deciduous
 // than dense forest stands do, same relationship the old fixed odds had.
-const DECID_SHARE = Math.min(0.95, Math.max(0.05, 0.25 + PROFILE.broadleaf * 0.6));
+const DECID_SHARE = clamp(0.25 + PROFILE.broadleaf * 0.6, 0.05, 0.95);
 const DECID_SPRUCE_T = DECID_SHARE + (1 - DECID_SHARE) * 0.538;
 const LONE_DECID_SHARE = Math.min(0.97, DECID_SHARE + 0.25);
 const LONE_SPRUCE_T = LONE_DECID_SHARE + (1 - LONE_DECID_SHARE) * 0.625;
@@ -3382,8 +3388,8 @@ function spawnHerd(species, hx, hy, count) {
       let cx = hx + (rand() - 0.5) * 24;
       let cy = hy + (rand() - 0.5) * 24;
       if (pad) {
-        cx = Math.min(pad.x1 - 0.7, Math.max(pad.x0 + 0.7, cx));
-        cy = Math.min(pad.y1 - 0.7, Math.max(pad.y0 + 0.7, cy));
+        cx = clamp(cx, pad.x0 + 0.7, pad.x1 - 0.7);
+        cy = clamp(cy, pad.y0 + 0.7, pad.y1 - 0.7);
       } else if (insideAnyPaddock(cx, cy)) {
         // Not this species' own paddock — every other species must never
         // spawn inside either fence, not just its own
@@ -3682,7 +3688,7 @@ function updateAnimals(dt) {
       // missed by the original tractor-speed rescale
       const want = spookSpeed > 3 * GEAR_SLOW_RATIO ? Math.atan2(fy, fx) : Math.atan2(tdy, tdx);
       const d = Math.atan2(Math.sin(want - a.angle), Math.cos(want - a.angle));
-      a.angle += Math.max(-spec.fleeTurn * dt, Math.min(spec.fleeTurn * dt, d));
+      a.angle += clamp(d, -spec.fleeTurn * dt, spec.fleeTurn * dt);
       const nx = a.wx + Math.cos(a.angle) * spec.flee * dt;
       const ny = a.wy + Math.sin(a.angle) * spec.flee * dt;
       if (walkable(nx, ny)) {
@@ -3706,7 +3712,7 @@ function updateAnimals(dt) {
     if (!pad && Math.hypot(a.wx - a.hx, a.wy - a.hy) > spec.range) {
       const want = Math.atan2(a.hy - a.wy, a.hx - a.wx);
       const d = Math.atan2(Math.sin(want - a.angle), Math.cos(want - a.angle));
-      a.angle += Math.max(-2.5 * dt, Math.min(2.5 * dt, d));
+      a.angle += clamp(d, -2.5 * dt, 2.5 * dt);
     }
     const nx = a.wx + Math.cos(a.angle) * spec.speed * dt;
     const ny = a.wy + Math.sin(a.angle) * spec.speed * dt;
@@ -3844,7 +3850,7 @@ function updateCart(dt) {
   if (cart.seg <= 0 || cart.seg >= pts.length - 1) {
     // Reached an end of this road: make the delivery, then take any road
     // passing the spot — one of them is usually the road back
-    cart.seg = Math.max(0, Math.min(pts.length - 1, cart.seg));
+    cart.seg = clamp(cart.seg, 0, pts.length - 1);
     const end = pts[Math.round(cart.seg)];
     cart.pause = 2.5 + rand() * 3;
     const options = [];
@@ -3882,7 +3888,7 @@ function updateCart(dt) {
   // Ease the heading toward the direction of travel (never snap)
   const want = Math.atan2((b.y - a.y) * cart.dir, (b.x - a.x) * cart.dir);
   const d = Math.atan2(Math.sin(want - cart.angle), Math.cos(want - cart.angle));
-  cart.angle += Math.max(-4 * dt, Math.min(4 * dt, d));
+  cart.angle += clamp(d, -4 * dt, 4 * dt);
 }
 
 const birds = [];
@@ -4917,7 +4923,7 @@ function updateSeason() {
   // spring green over the whole year. It moves continuously every frame; the
   // blends themselves are quantized by mixHex's cache, so trees, bushes and
   // sky glide instead of ticking.
-  seasonQ = Math.min(1, Math.max(0, 1 - timeLeft / ROUND_TIME));
+  seasonQ = clamp(1 - timeLeft / ROUND_TIME, 0, 1);
   GRASS = seasonHex(GRASS_SEASONS);
   MEADOW = seasonHex(MEADOW_SEASONS);
   DIRT = seasonHex(DIRT_SEASONS);
@@ -5097,8 +5103,8 @@ function updateButterflies(dt) {
     b.wx += Math.cos(b.a) * 7 * dt;
     b.wy += Math.sin(b.a) * 7 * dt;
     if (b.wx < 16 || b.wx > MAP_SIZE - 16 || b.wy < 16 || b.wy > MAP_SIZE - 16) {
-      b.wx = Math.max(16, Math.min(MAP_SIZE - 16, b.wx));
-      b.wy = Math.max(16, Math.min(MAP_SIZE - 16, b.wy));
+      b.wx = clamp(b.wx, 16, MAP_SIZE - 16);
+      b.wy = clamp(b.wy, 16, MAP_SIZE - 16);
       b.a = Math.atan2(MAP_SIZE / 2 - b.wy, MAP_SIZE / 2 - b.wx);
     }
   }
@@ -5876,8 +5882,8 @@ function update(dt) {
 
   // Keep on the map
   const margin = 12;
-  tractor.x = Math.max(margin, Math.min(MAP_SIZE - margin, tractor.x));
-  tractor.y = Math.max(margin, Math.min(MAP_SIZE - margin, tractor.y));
+  tractor.x = clamp(tractor.x, margin, MAP_SIZE - margin);
+  tractor.y = clamp(tractor.y, margin, MAP_SIZE - margin);
 
   // Water blocks the tractor, except where a road bridges it
   if (
@@ -5968,7 +5974,7 @@ function update(dt) {
       ((tractor.speed * Math.sin(rel) + HITCH_X * tractor.angVel * Math.cos(rel)) /
         imp.towLength) *
       dt;
-    rel = Math.max(-MAX_HITCH_ANGLE, Math.min(MAX_HITCH_ANGLE, rel));
+    rel = clamp(rel, -MAX_HITCH_ANGLE, MAX_HITCH_ANGLE);
     tractor.implAngle = tractor.angle - rel;
   } else {
     tractor.implAngle = tractor.angle;
@@ -6138,11 +6144,11 @@ function drawWoodGrain(c2d, x, y, w, h) {
       rnd() < 0.7 ? "rgba(40,24,12,0.18)" : "rgba(255,235,200,0.10)";
     // Two offset segments so it reads as grain, not pinstripes
     const seg1 = Math.round(len * (0.3 + rnd() * 0.5));
-    c2d.fillRect(gx, gy, Math.max(0, Math.min(seg1, x + w - gx)), 1);
+    c2d.fillRect(gx, gy, clamp(seg1, 0, x + w - gx), 1);
     c2d.fillRect(
       gx + seg1,
       gy + (rnd() < 0.5 ? 1 : -1),
-      Math.max(0, Math.min(len - seg1, x + w - gx - seg1)),
+      clamp(len - seg1, 0, x + w - gx - seg1),
       1
     );
     if (rnd() < 0.06) {
