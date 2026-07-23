@@ -2163,8 +2163,16 @@ function makeMap() {
     growth.push(new Array(MAP_TILES).fill(0));
   }
 
+  // Shared across phases below: genWater fills waterTiles in, genFieldPatches
+  // fills fieldTiles in, genDrainageDitches fills ditchSamples in — each read
+  // again by a later phase (openLand's tile count, paintMapEdges' culverts).
+  let waterTiles = 0;
+  let fieldTiles = 0;
+  const ditchSamples = [];
+
   // Water first: seas flood low corners, lakes and ponds sit in hollows,
   // and rivers wander across following the low ground
+  function genWater() {
   const lowEnough = (tx, ty, limit = 3.5) =>
     terrainHeight((tx + 0.5) * TILE, (ty + 0.5) * TILE) < limit;
   const awayFromFarm = (tx, ty) =>
@@ -2173,7 +2181,6 @@ function makeMap() {
   const awayFromCity = (tx, ty) =>
     Math.hypot((tx + 0.5) * TILE - CITY.x, (ty + 0.5) * TILE - CITY.y) >
     CITY_RADIUS + 48;
-  let waterTiles = 0;
   const setWater = (tx, ty) => {
     if (tx < 0 || ty < 0 || tx >= MAP_TILES || ty >= MAP_TILES) return;
     if (!awayFromFarm(tx, ty) || !awayFromCity(tx, ty)) return;
@@ -2285,12 +2292,14 @@ function makeMap() {
         if (Math.hypot(tx - cx, ty - cy) < r * (BLOB_EDGE_MIN + rand() * BLOB_EDGE_SPREAD) && lowEnough(tx, ty, limit))
           setWater(tx, ty);
   }
+  }
+  genWater();
 
   // Field patches next: the road network is routed to them afterwards.
   // How much of the dry land is farmed comes from this map's profile; the
   // farm clearing and road carving eat a little of it back.
+  function genFieldPatches() {
   const targetFieldTiles = (MAP_TILES * MAP_TILES - waterTiles) * rollBand(PROFILE.field);
-  let fieldTiles = 0;
   for (let i = 0; i < 400 && fieldTiles < targetFieldTiles; i++) {
     const px = 1 + ((rand() * (MAP_TILES - 13)) | 0);
     const py = 1 + ((rand() * (MAP_TILES - 13)) | 0);
@@ -2309,11 +2318,13 @@ function makeMap() {
           fieldTiles++;
         }
   }
+  }
+  genFieldPatches();
 
   // Water-filled drainage ditches along some field edges; roads painted
   // over them later read as culverts. Registered as stamps so tile
   // repaints restore them.
-  const ditchSamples = [];
+  function genDrainageDitches() {
   for (const p of patches) {
     const x0 = p.px * TILE;
     const x1 = (p.px + p.pw) * TILE;
@@ -2338,6 +2349,8 @@ function makeMap() {
       }
     }
   }
+  }
+  genDrainageDitches();
 
   // Road network: main roads from the farm out to the map edges, then a spur
   // from the nearest existing road to each field. Each road is a fractal
@@ -2346,6 +2359,7 @@ function makeMap() {
   // bent again with a smaller nudge, recursively — the same self-similar
   // construction used for generating natural coastlines and rivers — so
   // roads wander like real ones instead of running dead straight.
+  function genRoadNetwork() {
   const net = [{ x: FARM.x, y: FARM.y }];
 
   const traceRoad = (from, tx, ty, r) => {
@@ -2530,8 +2544,11 @@ function makeMap() {
       }
     }
   }
+  }
+  genRoadNetwork();
 
   // Keep the farmyard and the city clear of fields
+  function clearFarmAndCity() {
   for (let ty = 0; ty < MAP_TILES; ty++) {
     for (let tx = 0; tx < MAP_TILES; tx++) {
       const df = Math.hypot((tx + 0.5) * TILE - FARM.x, (ty + 0.5) * TILE - FARM.y);
@@ -2540,6 +2557,8 @@ function makeMap() {
         tiles[ty][tx] = 0;
     }
   }
+  }
+  clearFarmAndCity();
 
   // Forest stands: how much of the leftover, unfarmed land is forested (as
   // opposed to open free grass) comes from this map's profile — a share of
@@ -2548,23 +2567,33 @@ function makeMap() {
   // here (darker floor and minimap color) — the trees themselves are
   // planted after the map exists.
   const openLand = MAP_TILES * MAP_TILES - waterTiles - fieldTiles;
+  function genForest() {
   const forestTarget = openLand * rollBand(PROFILE.forest);
   growPatch(forestTiles, forestTarget);
+  }
+  genForest();
 
   // Meadow patches: grown the same way as forest stands, but over whatever
   // free grass forest left behind — bright open wildflower ground instead
   // of tree cover. Share is of that remaining free land, from the profile.
+  function genMeadow() {
   const meadowTarget = (openLand - forestTiles.size) * rollBand(PROFILE.meadow);
   growPatch(meadowTiles, meadowTarget, (tx, ty) => forestTiles.has(ty * MAP_TILES + tx));
+  }
+  genMeadow();
 
   // Back-to-front so nearer hills paint over the ones behind them. paintTile
   // skips the per-tile dithering: the whole canvas gets one pass at the end.
+  function paintHills() {
   for (let s = 0; s <= 2 * (MAP_TILES - 1); s++) {
     for (let ty = Math.max(0, s - MAP_TILES + 1); ty <= Math.min(MAP_TILES - 1, s); ty++) {
       paintTile(s - ty, ty);
     }
   }
+  }
+  paintHills();
 
+  function paintMapEdges() {
   // Cliffs along the two near (bottom) edges of the map diamond. Their top
   // follows the real terrain height along the boundary — where a hill runs
   // up to the edge, the wall shows a slice through it — but the bottom rim
@@ -2722,6 +2751,8 @@ function makeMap() {
   // Dither everything painted after the tiles (ink, roads, yard); tiles are
   // already dithered and the pass leaves them unchanged
   ditherRegion(mapCtx, 0, 0, mapCanvas.width, mapCanvas.height);
+  }
+  paintMapEdges();
 }
 
 // ---------------------------------------------------------------------------
