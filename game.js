@@ -1143,25 +1143,24 @@ const HILLINESS = rollBand(PROFILE.hilliness);
 const HILLS = [];
 for (let i = 0; i < Math.round(40 * HILLINESS); i++) {
   HILLS.push({
-    cx: MAP_SIZE * (0.1 + rand() * 0.8),
-    cy: MAP_SIZE * (0.1 + rand() * 0.8),
+    cx: MAP_SIZE * rand(),
+    cy: MAP_SIZE * rand(),
     r: 60 + rand() * 100,
     h: (10 + rand() * 16) * HILLINESS,
   });
 }
 
 // No flattening under the farmyard: the buildings drape over the natural
-// terrain like everything else
+// terrain like everything else. No flattening at the map edges either —
+// hills run right up to (and are sliced by) the boundary; the cliff and
+// clip both trace the real per-point height so there's nothing to keep flat.
 function terrainHeight(wx, wy) {
   let h = 0;
   for (const hill of HILLS) {
     const d = Math.hypot(wx - hill.cx, wy - hill.cy);
     if (d < hill.r) h += hill.h * (0.5 + 0.5 * Math.cos((Math.PI * d) / hill.r));
   }
-  h = 40 * Math.tanh(h / 40); // soft cap where hills stack
-  const m = Math.min(wx, wy, MAP_SIZE - wx, MAP_SIZE - wy);
-  const t = Math.max(0, Math.min(1, m / 40));
-  return h * t * t * (3 - 2 * t);
+  return 40 * Math.tanh(h / 40); // soft cap where hills stack
 }
 
 // ---------------------------------------------------------------------------
@@ -1285,7 +1284,7 @@ function ditherRegion(c2d, x, y, w, h) {
 // Ground map (prerendered once)
 // ---------------------------------------------------------------------------
 
-const EDGE_DEPTH = 10; // thickness of the dirt "cliff" at the map's near edges
+const EDGE_DEPTH = 36; // thickness of the dirt "cliff" at the map's near edges
 const MAP_OFFSET_X = MAP_SIZE; // shift so projX is never negative
 const MAP_OFFSET_Y = 64; // headroom for hilltops that project above y = 0
 
@@ -1357,6 +1356,13 @@ const YARD_DIRT_DARK = tint(YARD_DIRT, -0.16);
 const mp = (wx, wy) => ({
   x: projX(wx, wy) + MAP_OFFSET_X,
   y: projY(wx, wy, terrainHeight(wx, wy)) + MAP_OFFSET_Y,
+});
+
+// Flat (height-0) projection: used only for the cliffs' straight bottom rim,
+// which sits level regardless of how the terrain above it undulates.
+const mp0 = (wx, wy) => ({
+  x: projX(wx, wy) + MAP_OFFSET_X,
+  y: projY(wx, wy, 0) + MAP_OFFSET_Y,
 });
 
 // Brightness at a world point from the terrain normal against the light
@@ -1436,13 +1442,33 @@ function fieldPath(P, rounded) {
   return path;
 }
 
+// Points along one straight edge of the map square, stepped per tile so the
+// polyline follows the real terrain height instead of cutting a flat line
+// corner-to-corner — hills run up to (and are sliced by) the boundary now.
+// `project` defaults to the real-height mp(); pass mp0 for a level line.
+function mapEdge(fromX, fromY, toX, toY, project = mp) {
+  const pts = [];
+  for (let i = 0; i <= MAP_TILES; i++) {
+    const t = i / MAP_TILES;
+    pts.push(project(fromX + (toX - fromX) * t, fromY + (toY - fromY) * t));
+  }
+  return pts;
+}
+
 // Clip the map context to the ground diamond (caller does save/restore)
 function clipMapDiamond() {
   mapCtx.beginPath();
-  for (const [ex, ey] of [[0, 0], [MAP_SIZE, 0], [MAP_SIZE, MAP_SIZE], [0, MAP_SIZE]]) {
-    const c = mp(ex, ey);
-    if (ex === 0 && ey === 0) mapCtx.moveTo(c.x, c.y);
-    else mapCtx.lineTo(c.x, c.y);
+  let started = false;
+  for (const edge of [
+    mapEdge(0, 0, MAP_SIZE, 0),
+    mapEdge(MAP_SIZE, 0, MAP_SIZE, MAP_SIZE),
+    mapEdge(MAP_SIZE, MAP_SIZE, 0, MAP_SIZE),
+    mapEdge(0, MAP_SIZE, 0, 0),
+  ]) {
+    for (const p of edge) {
+      if (!started) { mapCtx.moveTo(p.x, p.y); started = true; }
+      else mapCtx.lineTo(p.x, p.y);
+    }
   }
   mapCtx.closePath();
   mapCtx.clip();
@@ -2535,24 +2561,71 @@ function makeMap() {
     }
   }
 
-  // Dirt cliffs along the two near (bottom) edges of the map diamond. They
-  // go down before the ink so a border tile's repaint reproduces the same
-  // layering: cliff below, its boundary line on top.
-  const east = mp(MAP_SIZE, 0);
-  const south = mp(MAP_SIZE, MAP_SIZE);
-  const west = mp(0, MAP_SIZE);
-  for (const [a, b, color] of [
-    [east, south, tint(YARD_DIRT, -0.22)],
-    [south, west, tint(YARD_DIRT, -0.36)],
+  // Cliffs along the two near (bottom) edges of the map diamond. Their top
+  // follows the real terrain height along the boundary — where a hill runs
+  // up to the edge, the wall shows a slice through it — but the bottom rim
+  // stays a flat, level line (height 0) dropped by EDGE_DEPTH, so the wall
+  // reads as a slab of consistent thickness rather than undulating itself.
+  // Every segment fills dirt-colored first; where a lake or river touches
+  // the boundary, a water band sits on top of that, shallowest (0 deep)
+  // right where the water meets the shore and ramping down to
+  // WATER_EDGE_DEPTH a couple of tiles into open water — so it reads as
+  // water sloping off the edge over the dirt bed beneath, not a deep
+  // water-filled trench as tall as the dirt cliff. They go down before the
+  // ink so a border tile's repaint reproduces the same layering: cliff
+  // below, its boundary line on top.
+  const WATER_EDGE_DEPTH = 10; // max thickness of the water band, shallower than EDGE_DEPTH
+  const eastEdge = mapEdge(MAP_SIZE, 0, MAP_SIZE, MAP_SIZE);
+  const southEdge = mapEdge(MAP_SIZE, MAP_SIZE, 0, MAP_SIZE);
+  const eastFloor = mapEdge(MAP_SIZE, 0, MAP_SIZE, MAP_SIZE, mp0);
+  const southFloor = mapEdge(MAP_SIZE, MAP_SIZE, 0, MAP_SIZE, mp0);
+  // Per-vertex water depth along a boundary: how many tiles of open water
+  // separate this point from the nearest shore, ramped into a pixel depth
+  // that's 0 at the shore and caps at WATER_EDGE_DEPTH two tiles out.
+  function shoreDepths(tileAt) {
+    const steps = new Array(MAP_TILES).fill(0);
+    let run = -1;
+    for (let i = 0; i < MAP_TILES; i++) {
+      run = tileAt(i) === 4 ? run + 1 : -1;
+      if (run > steps[i]) steps[i] = run;
+    }
+    run = -1;
+    for (let i = MAP_TILES - 1; i >= 0; i--) {
+      run = tileAt(i) === 4 ? run + 1 : -1;
+      if (run > steps[i]) steps[i] = run;
+    }
+    const v = [];
+    for (let j = 0; j <= MAP_TILES; j++) {
+      const near = Math.min(steps[Math.max(0, j - 1)], steps[Math.min(MAP_TILES - 1, j)]);
+      v.push(Math.min(WATER_EDGE_DEPTH, near * (WATER_EDGE_DEPTH / 2)));
+    }
+    return v;
+  }
+  for (const [top, floor, tileAt, dirt, water] of [
+    [eastEdge, eastFloor, (i) => tiles[i][MAP_TILES - 1], tint(YARD_DIRT, -0.22), tint(WATER_COLOR, -0.22)],
+    [southEdge, southFloor, (i) => tiles[MAP_TILES - 1][MAP_TILES - 1 - i], tint(YARD_DIRT, -0.36), tint(WATER_COLOR, -0.36)],
   ]) {
-    mapCtx.fillStyle = shade(color, 1);
-    mapCtx.beginPath();
-    mapCtx.moveTo(a.x, a.y);
-    mapCtx.lineTo(b.x, b.y);
-    mapCtx.lineTo(b.x, b.y + EDGE_DEPTH);
-    mapCtx.lineTo(a.x, a.y + EDGE_DEPTH);
-    mapCtx.closePath();
-    mapCtx.fill();
+    const depth = shoreDepths(tileAt);
+    for (let i = 0; i < MAP_TILES; i++) {
+      mapCtx.fillStyle = shade(dirt, 1);
+      mapCtx.beginPath();
+      mapCtx.moveTo(top[i].x, top[i].y);
+      mapCtx.lineTo(top[i + 1].x, top[i + 1].y);
+      mapCtx.lineTo(floor[i + 1].x, floor[i + 1].y + EDGE_DEPTH);
+      mapCtx.lineTo(floor[i].x, floor[i].y + EDGE_DEPTH);
+      mapCtx.closePath();
+      mapCtx.fill();
+
+      if (tileAt(i) !== 4) continue;
+      mapCtx.fillStyle = shade(water, 1);
+      mapCtx.beginPath();
+      mapCtx.moveTo(top[i].x, top[i].y);
+      mapCtx.lineTo(top[i + 1].x, top[i + 1].y);
+      mapCtx.lineTo(top[i + 1].x, top[i + 1].y + depth[i + 1]);
+      mapCtx.lineTo(top[i].x, top[i].y + depth[i]);
+      mapCtx.closePath();
+      mapCtx.fill();
+    }
   }
 
   // Close the island's ink silhouette under the cliffs; their top edge is
@@ -2560,11 +2633,11 @@ function makeMap() {
   mapCtx.strokeStyle = INK;
   mapCtx.lineWidth = 1;
   mapCtx.beginPath();
-  mapCtx.moveTo(east.x, east.y);
-  mapCtx.lineTo(east.x, east.y + EDGE_DEPTH);
-  mapCtx.lineTo(south.x, south.y + EDGE_DEPTH);
-  mapCtx.lineTo(west.x, west.y + EDGE_DEPTH);
-  mapCtx.lineTo(west.x, west.y);
+  mapCtx.moveTo(eastEdge[0].x, eastEdge[0].y);
+  mapCtx.lineTo(eastFloor[0].x, eastFloor[0].y + EDGE_DEPTH);
+  mapCtx.lineTo(southFloor[0].x, southFloor[0].y + EDGE_DEPTH);
+  mapCtx.lineTo(southFloor[southFloor.length - 1].x, southFloor[southFloor.length - 1].y + EDGE_DEPTH);
+  mapCtx.lineTo(southEdge[southEdge.length - 1].x, southEdge[southEdge.length - 1].y);
   mapCtx.stroke();
 
   // Ink every terrain boundary before the roads go down on top
