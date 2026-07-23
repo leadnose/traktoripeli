@@ -1,79 +1,20 @@
-import {
-  screenCanvas,
-  screenCtx,
-  VIEW_W,
-  VIEW_H,
-  view,
-  ctx,
-  clamp,
-  nearPoint,
-  AMBIENT_FLOOR,
-} from "./setup.js";
+import { screenCanvas, screenCtx, VIEW_W, VIEW_H, view, ctx, clamp } from "./setup.js";
 import { MAP_PROFILES } from "./map-profiles.js";
-import {
-  MAP_INDEX,
-  PROFILE,
-  SEED,
-  MODES,
-  mode,
-  gameStarted,
-  setMode,
-  setGameStarted,
-  rand,
-  rollBand,
-} from "./rng.js";
+import { MAP_INDEX, PROFILE, SEED, mode, gameStarted, rand } from "./rng.js";
 import { TILE, MAP_TILES, MAP_SIZE, projX, projY, rotateLocal } from "./projection.js";
-import {
-  MAP_INK,
-  ROAD_INK,
-  shade,
-  mixHex,
-  tint,
-  grassDotShades,
-  dirtDotShades,
-  meadowTint,
-  stubbleTint,
-} from "./lighting.js";
+import { shade, tint } from "./lighting.js";
 import { ditherRegion } from "./dithering.js";
-import {
-  audio,
-  soundMuted,
-  musicMuted,
-  initAudio,
-  playHydraulic,
-  playClunk,
-  playPickup,
-  playSell,
-  playTax,
-  toggleMusic,
-  toggleSound,
-} from "./sound.js";
+import { audio, soundMuted, musicMuted } from "./sound.js";
 import { scheduleMusic } from "./music.js";
 import { initTerrain, terrainHeight } from "./terrain.js";
 import {
   FARM,
-  FARM_RADIUS,
-  nearFarm,
   PADDOCK_SIZE,
-  PENNED_SPECIES,
   PADDOCKS_LOCAL,
   PADDOCKS_WORLD,
   setPaddocksLocal,
   setPaddocksWorld,
-  insideAnyPaddock,
-  nearAnyPaddock,
   FARM_BUILDING_FOOTPRINTS,
-  FARM_PASTURE_RADIUS,
-  FUEL_TANK_LOCAL,
-  FUEL_TANK_LEN,
-  FUEL_TANK_R,
-  FUEL_TANK_STAND_H,
-  nearFuelTank,
-  yardScaleAt,
-  YARD_MAX_SCALE,
-  YARD_RADIUS,
-  inYard,
-  farmYardPath,
 } from "./farmyard.js";
 import {
   MAP_OFFSET_X,
@@ -83,57 +24,20 @@ import {
   tiles,
   dirs,
   growth,
-  CROP_STAGES,
-  cropStage,
   tileTypeAt,
-  GRASS,
-  GRASS_DOTS,
-  MEADOW,
-  MEADOW_DOTS,
-  DIRT,
-  DIRT_DOTS,
-  STUBBLE,
-  STUBBLE_DOTS,
-  setGrass,
-  setMeadow,
-  setDirt,
-  setStubble,
-  seasonStep,
-  setSeasonStep,
-  WATER_COLOR,
-  YARD_DIRT,
   mp,
-  isWater,
   drawTile,
-  plowTileAt,
-  seedTileAt,
-  harvestTileAt,
-  updateCrops,
   countFieldTiles,
-  roads,
   roadSamples,
   roadTiles,
-  patches,
-  forestTiles,
-  meadowTiles,
   tileKey,
-  ROAD_COLOR,
-  yardPixels,
   makeMap,
 } from "./ground.js";
-import {
-  minimapCanvas,
-  minimapCtx,
-  MINIMAP_COLORS,
-  FARM_MARKER,
-  CITY_MARKER,
-  roadPixels,
-  minimapTile,
-} from "./minimap.js";
+import { minimapCanvas, minimapCtx, MINIMAP_COLORS, FARM_MARKER, CITY_MARKER, roadPixels, minimapTile } from "./minimap.js";
 import { initTrees } from "./trees.js";
 import { initBushes } from "./bushes.js";
 import { initAnimals, initBirds, drawBirds } from "./animals.js";
-import { signs, drawSign, initSignposts } from "./signposts.js";
+import { initSignposts } from "./signposts.js";
 import { initCart } from "./cart.js";
 import { TRACTOR_BODY, IMPLEMENTS, initBoxModels } from "./box-models.js";
 import { drawScene } from "./scene-rendering.js";
@@ -150,31 +54,14 @@ import {
   menuSaveInfo,
   refreshMenuSaveInfo,
   awayClock,
-  setMenuOpen,
-  setPaused,
-  setDateJump,
-  setDateJumpError,
 } from "./input.js";
 import { touchDrive } from "./touch.js";
-import { updateTracks } from "./wheel-tracks.js";
-import {
-  GRASS,
-  MEADOW,
-  DIRT,
-  STUBBLE,
-  MONTH_NAMES,
-  SEASON_DAYS,
-  SEASON_BAR_COLORS,
-  SKY_TOP_SEASONS,
-  SKY_BOTTOM_SEASONS,
-  seasonHex,
-  updateSeason,
-} from "./seasons.js";
+import { GRASS, MONTH_NAMES, SEASON_BAR_COLORS, seasonHex } from "./seasons.js";
 import { skyCanvas, drawSun, drawClouds, initSky } from "./sky.js";
 import { drawMist } from "./mist.js";
-import { butterflies, initButterflies, updateButterflies, drawButterflies } from "./butterflies.js";
-import { ladybug, luckFlash, placeLadybug, updateLadybug, drawLadybug } from "./ladybug.js";
-import { updateSmoke, spawnChaff, drawSmoke } from "./smoke.js";
+import { initButterflies, drawButterflies } from "./butterflies.js";
+import { luckFlash, placeLadybug, drawLadybug } from "./ladybug.js";
+import { drawSmoke } from "./smoke.js";
 import {
   worldTime,
   tractor,
@@ -185,7 +72,6 @@ import {
   fuel,
   atFuelTank,
   atCity,
-  sacks,
   year,
   propertyTax,
   timeLeft,
@@ -202,6 +88,8 @@ import {
   autoThrottling,
   implementOverField,
   update,
+  advanceTime,
+  loadSavedRun,
   sandboxClockRate,
   currentCalendarDay,
 } from "./tractor.js";
@@ -1091,16 +979,7 @@ refreshMenuSaveInfo();
       dirs[ty] = s.dirs[ty];
       growth[ty] = s.growth[ty];
     }
-    sacks.push(...s.sacks);
-    cash = s.cash;
-    seeds = s.seeds;
-    cargo = s.cargo;
-    sold = s.sold;
-    fuel = s.fuel === undefined ? FUEL_CAP : s.fuel; // saves from before fuel existed: start full
-    year = s.year;
-    propertyTax = s.propertyTax;
-    timeLeft = s.timeLeft;
-    Object.assign(tractor, s.tractor);
+    loadSavedRun(s);
     cam.x = projX(tractor.x, tractor.y) - VIEW_W / 2;
     cam.y =
       projY(tractor.x, tractor.y, terrainHeight(tractor.x, tractor.y)) - VIEW_H / 2;

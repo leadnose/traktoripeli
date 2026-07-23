@@ -308,6 +308,23 @@ export function consumeSeed() {
   seeds--;
 }
 
+// Restores the economy/calendar numbers from an autosave. Only this module
+// may reassign cash/seeds/cargo/sold/fuel/year/propertyTax/timeLeft (ESM
+// imports are read-only bindings) — the startup resume logic calls this
+// instead of assigning each field directly.
+export function loadSavedRun(s) {
+  sacks.push(...s.sacks);
+  cash = s.cash;
+  seeds = s.seeds;
+  cargo = s.cargo;
+  sold = s.sold;
+  fuel = s.fuel === undefined ? FUEL_CAP : s.fuel; // saves from before fuel existed: start full
+  year = s.year;
+  propertyTax = s.propertyTax;
+  timeLeft = s.timeLeft;
+  Object.assign(tractor, s.tractor);
+}
+
 export const tractor = {
   x: FARM.x + 34,
   y: FARM.y + 10,
