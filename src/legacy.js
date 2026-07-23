@@ -52,6 +52,32 @@ import {
 } from "./sound.js";
 import { scheduleMusic } from "./music.js";
 import { initTerrain, terrainHeight } from "./terrain.js";
+import {
+  FARM,
+  FARM_RADIUS,
+  nearFarm,
+  PADDOCK_SIZE,
+  PENNED_SPECIES,
+  PADDOCKS_LOCAL,
+  PADDOCKS_WORLD,
+  setPaddocksLocal,
+  setPaddocksWorld,
+  insideAnyPaddock,
+  nearAnyPaddock,
+  FARM_BUILDING_FOOTPRINTS,
+  FARM_PASTURE_RADIUS,
+  FUEL_TANK_LOCAL,
+  FUEL_TANK_LEN,
+  FUEL_TANK_R,
+  FUEL_TANK_STAND_H,
+  nearFuelTank,
+  yardScaleAt,
+  YARD_MAX_SCALE,
+  YARD_RADIUS,
+  inYard,
+  farmYardPath,
+} from "./farmyard.js";
+import { CITY, CITY_RADIUS, nearCity } from "./city.js";
 
 const WORK_NOISE = { plow: [220, 0.16], seeder: [480, 0.14], harvester: [1100, 0.22] };
 
@@ -465,206 +491,6 @@ window.addEventListener("keyup", (e) => {
   requestAnimationFrame(syncVisibility);
 })();
 
-// ---------------------------------------------------------------------------
-// Farmyard location (needed by the terrain: the yard sits on a flat pad)
-// ---------------------------------------------------------------------------
-
-// The farmyard lands somewhere different on every map, kept well away from
-// the edges. The buildings are square-cornered boxes on an isometric grid,
-// so they only ever face one of the 4 cardinal ways — anything in between
-// reads as buildings sitting crooked, off the grid.
-const FARM = {
-  x: MAP_SIZE * (0.2 + rand() * 0.6),
-  y: MAP_SIZE * (0.2 + rand() * 0.6),
-  angle: (Math.floor(rand() * 4) * Math.PI) / 2,
-};
-const FARM_RADIUS = 50; // within this distance farm services are available
-
-function nearFarm() {
-  return nearPoint(tractor.x, tractor.y, FARM.x, FARM.y, FARM_RADIUS);
-}
-
-// Cow and pig paddocks: unlike the other grazing species, these two stay
-// fenced rather than free-ranging the whole map (see PENNED_SPECIES
-// below), but each pen is a proper roomy field on open land — not a
-// cramped pocket between buildings, not overlapping the working yard, not
-// laid across a road, and not on water (cows get noticeably more room
-// than pigs). Which of those actually holds depends entirely on this
-// map's road/water layout, which doesn't exist yet this early — so only
-// each paddock's SIZE is fixed here. The actual placement is picked in
-// the block right after makeMap() below, once roadTiles/water exist, by
-// generating a ring-and-angle spread of candidate positions all the way
-// around the farm (not just a couple of fixed compass directions — a farm
-// on a small spit of land needs every direction tried, not just south and
-// east) and keeping whichever scores cleanest. PADDOCKS_LOCAL/PADDOCKS_WORLD
-// are declared here as `let` and stay null until that block runs —
-// nothing before it may read them.
-const PADDOCK_SIZE = {
-  cow: { w: 70, h: 32 },
-  pig: { w: 36, h: 30 },
-};
-const PENNED_SPECIES = new Set(Object.keys(PADDOCK_SIZE));
-let PADDOCKS_LOCAL = null;
-let PADDOCKS_WORLD = null;
-
-// Building footprints a paddock candidate must never cover — the same
-// list FARM_SOLID_LOCAL (tractor collision, further down) builds from,
-// minus the pig sty, which isn't a fixed obstacle: it gets carved out of
-// whichever pig candidate wins, not placed independently of it.
-const FARM_BUILDING_FOOTPRINTS = [
-  [-16.0, 2.0, -12.0, 2.0], // barn
-  [-13.0, 1.0, -30.0, -16.0], // farmhouse
-  [-9.0, -4.0, 6.0, 11.0], // hen house
-  [6.0, 15.0, -13.0, -4.0], // granary body
-  [40.0, 42.0, -3.0, 9.0], // cartshed back wall
-  [32.0, 42.0, -3.0, -1.0], // cartshed side wall
-  [32.0, 42.0, 7.0, 9.0], // cartshed side wall
-  [-2.0, 10.0, 32.0, 39.0], // cowshed
-];
-
-// Fixed rather than derived from the eventual pick (terrain generation
-// runs, and needs this, before any candidate is scored) — sized to clear
-// the single furthest corner the placement search below can ever produce
-// (ring radius up to 108 + a paddock's own far corner, checked by hand),
-// +16 margin (room for a forest blob's own radius, they grow up to ~6.5
-// units). Re-check this by hand if the search's ring radii or PADDOCK_SIZE
-// change.
-const FARM_PASTURE_RADIUS = 205;
-
-// The fuel tank sits out near the rim of the trampled yard (YARD_RADIUS
-// is ~64 units; this is ~90% of that, clear of the barn/yard cluster
-// near the center) rather than anywhere within FARM_RADIUS, so refueling
-// (which costs cash) only happens when the player deliberately drives
-// out to it, instead of automatically every time they're at the farm
-// for seed or grain.
-const FUEL_TANK_LOCAL = { x: -8, y: 57 };
-const FUEL_TANK_RADIUS = 16;
-// Shape of the tank itself: a long horizontal cylinder up on legs,
-// see the FARM_BOXES/FARM_SHAPES entries built from these.
-const FUEL_TANK_LEN = 5.0; // half-length of the cylinder
-const FUEL_TANK_R = 2.2; // cylinder radius
-const FUEL_TANK_STAND_H = 2.4; // leg height under the tank
-function fuelTankPos() {
-  return rotateLocal(FARM.x, FARM.y, FARM.angle, FUEL_TANK_LOCAL.x, FUEL_TANK_LOCAL.y);
-}
-function nearFuelTank() {
-  const p = fuelTankPos();
-  return nearPoint(tractor.x, tractor.y, p.x, p.y, FUEL_TANK_RADIUS);
-}
-
-// ---------------------------------------------------------------------------
-// City location: where grain actually gets sold. Placed a real drive away
-// from the farm so hauling a full trailer there and back is a genuine trip,
-// not a same-spot errand.
-// ---------------------------------------------------------------------------
-
-// Keyed by its own hash (not the shared `rand()`), same reasoning as
-// yardHash below: placing the city must never shift the seeded sequence
-// hill/water/decoration generation depends on for the hand-tuned map
-// archetypes, and a rejection-sampling loop would otherwise burn a
-// different, unpredictable number of rand() calls on every map.
-function cityHash(i) {
-  let s = (SEED ^ Math.imul(i + 1, 0x27d4eb2f)) | 0;
-  s = (s + 0x165667b1) | 0;
-  let t = Math.imul(s ^ (s >>> 15), 1 | s);
-  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-}
-
-const CITY_MIN_DIST = MAP_SIZE * 0.55;
-function pickCityPos() {
-  for (let tries = 0; tries < 50; tries++) {
-    const x = MAP_SIZE * (0.1 + cityHash(tries * 2) * 0.8);
-    const y = MAP_SIZE * (0.1 + cityHash(tries * 2 + 1) * 0.8);
-    if (Math.hypot(x - FARM.x, y - FARM.y) >= CITY_MIN_DIST) return { x, y };
-  }
-  // Fallback: the farthest corner of the sampling square from the farm.
-  // FARM only ever lands within the central 60% of the map, so even its
-  // worst case (dead center) leaves every corner of this 80%-wide square
-  // comfortably past CITY_MIN_DIST — unlike a mirror-through-center trick,
-  // which degrades to no distance at all exactly when the farm is central.
-  let best = null;
-  let bestDist = -1;
-  for (const fx of [0.1, 0.9]) {
-    for (const fy of [0.1, 0.9]) {
-      const x = MAP_SIZE * fx;
-      const y = MAP_SIZE * fy;
-      const d = Math.hypot(x - FARM.x, y - FARM.y);
-      if (d > bestDist) {
-        bestDist = d;
-        best = { x, y };
-      }
-    }
-  }
-  return best;
-}
-const CITY = { ...pickCityPos(), angle: cityHash(500) * Math.PI * 2 };
-const CITY_RADIUS = 30; // within this distance the depot buys grain
-
-function nearCity() {
-  return nearPoint(tractor.x, tractor.y, CITY.x, CITY.y, CITY_RADIUS);
-}
-
-// The trodden yard isn't a perfect ellipse: each map bends its rim in and
-// out by a deterministic amount so every farmyard reads as its own trampled
-// patch of ground rather than a stamped-out shape. Keyed by its own hash
-// (not the shared `rand()`) so adding it never shifts the seeded sequence
-// everything after it — hills, decorations — depends on for the hand-tuned
-// map archetypes.
-const YARD_LOBES = 14;
-function yardHash(i) {
-  let s = (SEED ^ Math.imul(i + 1, 0x9e3779b9)) | 0;
-  s = (s + 0x6d2b79f5) | 0;
-  let t = Math.imul(s ^ (s >>> 15), 1 | s);
-  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-}
-const YARD_SHAPE = [];
-for (let i = 0; i < YARD_LOBES; i++) YARD_SHAPE.push(0.8 + yardHash(i) * 0.4);
-
-// Interpolated rim scale at a given angle (0 = the ellipse's own radius).
-function yardScaleAt(angle) {
-  const t = (((angle / (Math.PI * 2)) % 1) + 1) % 1 * YARD_LOBES;
-  const i0 = Math.floor(t) % YARD_LOBES;
-  const i1 = (i0 + 1) % YARD_LOBES;
-  const f = t - Math.floor(t);
-  return YARD_SHAPE[i0] * (1 - f) + YARD_SHAPE[i1] * f;
-}
-const YARD_MAX_SCALE = Math.max(...YARD_SHAPE);
-
-// A world-space circle matching the yard's screen ellipse (screen ellipse
-// radii are the true isometric projection of a world circle: projX has
-// amplitude r*sqrt(2), projY has amplitude r/sqrt(2), a 2:1 ratio — exactly
-// the ellipse's 1.8/0.9 radii). Used to gate tire tracks on the yard dirt,
-// which otherwise only marks the unplowed-field tile type.
-const YARD_RADIUS = (FARM_RADIUS * 1.8) / Math.SQRT2;
-function inYard(wx, wy) {
-  return Math.hypot(wx - FARM.x, wy - FARM.y) < YARD_RADIUS;
-}
-
-// Traces the yard's smoothed, lobed outline onto mapCtx around screen point
-// fc (as returned by mp()); caller fills/strokes/clips as needed. Points sit
-// at YARD_SHAPE's radii and the path threads their midpoints with quadratic
-// curves, the standard canvas trick for a smooth closed blob through a fixed
-// ring of control points.
-function farmYardPath(fc) {
-  const Rx = FARM_RADIUS * 1.8;
-  const Ry = FARM_RADIUS * 0.9;
-  const pts = YARD_SHAPE.map((scale, i) => {
-    const a = (i / YARD_LOBES) * Math.PI * 2;
-    return { x: fc.x + Math.cos(a) * Rx * scale, y: fc.y + Math.sin(a) * Ry * scale };
-  });
-  const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
-  mapCtx.beginPath();
-  const start = mid(pts[YARD_LOBES - 1], pts[0]);
-  mapCtx.moveTo(start.x, start.y);
-  for (let i = 0; i < YARD_LOBES; i++) {
-    const next = pts[(i + 1) % YARD_LOBES];
-    const nm = mid(pts[i], next);
-    mapCtx.quadraticCurveTo(pts[i].x, pts[i].y, nm.x, nm.y);
-  }
-  mapCtx.closePath();
-}
 
 initTerrain();
 
@@ -726,7 +552,7 @@ const STUBBLE_DOTS = dirtDotShades(STUBBLE);
 // already reads it (through seasonHex): 0 = spring, 1/3 = summer,
 // 2/3 = autumn; 1 wraps back onto spring. Continuous — mixHex quantizes
 // the blends, so colors still move in tiny ticks.
-let seasonQ = 0;
+export let seasonQ = 0;
 let seasonStep = -1; // sky repaint trigger, on a fine grid of seasonQ
 const FLOWER_COLORS = PROFILE.palette.flowers || ["#ff9ed2", "#ffffff", "#c9a6ff", "#ffb27d"];
 
@@ -1118,7 +944,7 @@ function drawTile(tx, ty) {
   // antialiasing seams across the yard.
   if (nearYard) {
     mapCtx.fillStyle = shade(YARD_DIRT, 1);
-    farmYardPath(fc);
+    farmYardPath(mapCtx, fc);
     mapCtx.fill();
     mapCtx.strokeStyle = MAP_INK;
     mapCtx.lineWidth = 1;
@@ -2091,7 +1917,7 @@ function makeMap() {
   // Trodden dirt yard around the farm buildings
   const fc = mp(FARM.x, FARM.y);
   mapCtx.fillStyle = shade(YARD_DIRT, 1);
-  farmYardPath(fc);
+  farmYardPath(mapCtx, fc);
   mapCtx.fill();
   mapCtx.strokeStyle = MAP_INK;
   mapCtx.lineWidth = 1;
@@ -2266,7 +2092,7 @@ makeMap();
       }
     return hits;
   };
-  PADDOCKS_LOCAL = {};
+  setPaddocksLocal({});
   // Cow picked first, then excluded as an obstacle for pig's own search
   // (and vice versa were the order reversed) so the two can never overlap.
   for (const species of Object.keys(PADDOCK_SIZE)) {
@@ -2286,7 +2112,7 @@ makeMap();
     // innermost, dead-ahead ring rather than leaving the species unpenned.
     PADDOCKS_LOCAL[species] = best || candidatesFor(PADDOCK_SIZE[species])[0];
   }
-  PADDOCKS_WORLD = {};
+  setPaddocksWorld({});
   for (const species of Object.keys(PADDOCKS_LOCAL)) {
     const p = PADDOCKS_LOCAL[species];
     let wx0 = Infinity, wx1 = -Infinity, wy0 = Infinity, wy1 = -Infinity;
@@ -2298,34 +2124,6 @@ makeMap();
       }
     PADDOCKS_WORLD[species] = { x0: wx0, x1: wx1, y0: wy0, y1: wy1 };
   }
-}
-
-// True if (wx,wy) falls inside either finalized paddock — used below to
-// keep vegetation planted after this point (lone trees, bushes,
-// hedgerows) from ending up fenced in with the stock. Forest stands and
-// meadow patches don't need this: they're generated earlier, inside
-// makeMap(), and already avoid the whole FARM_PASTURE_RADIUS circle,
-// which covers any possible paddock placement by construction.
-// Is world point (wx, wy) within margin of any paddock's rectangle?
-function paddockHit(wx, wy, margin) {
-  for (const species of Object.keys(PADDOCKS_WORLD)) {
-    const p = PADDOCKS_WORLD[species];
-    if (wx > p.x0 - margin && wx < p.x1 + margin && wy > p.y0 - margin && wy < p.y1 + margin)
-      return true;
-  }
-  return false;
-}
-
-function insideAnyPaddock(wx, wy) {
-  return paddockHit(wx, wy, 0);
-}
-
-// True if a repainted tile needs its paddock ground restored afterward
-// (see paddockDabs below) — anywhere inside a paddock, plus a tile of
-// slop so the fence-hugging worn path along the rim doesn't go missing
-// when the tile just outside the rail repaints.
-function nearAnyPaddock(tx, ty) {
-  return paddockHit((tx + 0.5) * TILE, (ty + 0.5) * TILE, TILE);
 }
 
 // Paddock ground: grazed pasture rather than plain untouched grass — a
@@ -4992,7 +4790,7 @@ let atFuelTank = false;
 let atCity = false;
 const sacks = []; // grain sacks lying on the fields
 
-const tractor = {
+export const tractor = {
   x: FARM.x + 34,
   y: FARM.y + 10,
   angle: -2.4, // facing up-left, toward the middle of the map
