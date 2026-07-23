@@ -1,246 +1,42 @@
-"use strict";
-
-// ---------------------------------------------------------------------------
-// Setup
-// ---------------------------------------------------------------------------
-
-const screenCanvas = document.getElementById("game");
-const screenCtx = screenCanvas.getContext("2d");
-screenCtx.imageSmoothingEnabled = false;
-
-// Everything is drawn to a low-res buffer and scaled up, so polygons come out
-// as chunky pixels instead of smooth edges.
-const PIXEL = 2;
-const VIEW_W = screenCanvas.width / PIXEL; // 320
-const VIEW_H = screenCanvas.height / PIXEL; // 200
-
-const view = document.createElement("canvas");
-view.width = VIEW_W;
-view.height = VIEW_H;
-const ctx = view.getContext("2d");
-
-// Restrict a value to a [lo, hi] range — used all over for keeping a number
-// (a coordinate, a rolling stick axis, an angle delta) within its bounds.
-function clamp(v, lo, hi) {
-  return Math.max(lo, Math.min(hi, v));
-}
-
-// Is (px, py) within radius r of (x, y)? Shared by every "am I standing at
-// this landmark" proximity check (farm, fuel tank, city).
-function nearPoint(px, py, x, y, r) {
-  return Math.hypot(px - x, py - y) < r;
-}
-
-// Never let a lit box/disc face go darker than 30% of its base color, no
-// matter how steep the angle away from the light — used by makeRoundItems'
-// disc shading and drawScene's box-face shading (a distinct constant from
-// groundShade()'s own 0.4/1.25 terrain-lighting clamp, which models a
-// different surface and isn't meant to track this one).
-const AMBIENT_FLOOR = 0.3;
-
-// ---------------------------------------------------------------------------
-// Map profiles: the world is always one of exactly 10 fixed archetypes,
-// each with its own RNG seed (so it's exactly as reproducible as a free
-// seed used to be) and its own target ranges for water/field/forest
-// coverage and hill scale. Within its own ranges a map still rolls organic
-// variation call to call — the bands just keep it from ever drifting into a
-// different archetype the way an arbitrary free-form seed could.
-// water and field are shares the generator always rolled (water: share of
-// the whole grid, field: share of dry land). forest is a share of what's
-// left over after water and field — the open, unfarmed grass — so forest
-// and "free land" are a direct complementary pair: forest: [0,1] means
-// none of that leftover land is wooded (all free/open grass) up to all of
-// it (no free land at all), and every value in between is reachable.
-// meadow is, in turn, a share of whatever free grass forest didn't claim —
-// open ground given over to tall wildflower patches instead of plain grass.
-// hilliness is a multiplier on the hill generator's stock count/height.
-// ---------------------------------------------------------------------------
-
-// Each profile also carries a palette: the map's own take on ground, water,
-// sky and canopy color, so e.g. Highlands reads as cool heather moorland
-// while Patchwork Farm reads as bright cultivated lowland. grass/dirt/skyTop/
-// skyBottom/canopy are [spring, summer, autumn] triples fed through the same
-// seasonHex() wheel as before; water/road/conifer are single tones (conifers
-// don't turn with the seasons, and water/roads read as one steady color
-// year-round). Everything else — dot speckles, furrows, bridges, ditches,
-// minimap tones, tree canopy tiers — is derived from these few tones at load
-// time via tint(), so a new theme only needs these fields.
-const MAP_PROFILES = [
-  {
-    name: "Homestead Plains", seed: 1137, water: [0.03, 0.10], field: [0.45, 0.65], forest: [0.10, 0.25], meadow: [0.20, 0.40], hilliness: [0.4, 0.6], broadleaf: 0.8,
-    palette: {
-      grass: ["#78b064", "#609554", "#a69e62"],
-      dirt: ["#9c8771", "#9c8771", "#9c8771"],
-      water: "#4e7eb3",
-      skyTop: ["#93b8cc", "#8ab0c3", "#9db1c0"],
-      skyBottom: ["#d4e5ec", "#cee0e6", "#e0e1cb"],
-      road: "#b2a38e",
-      canopy: ["#659f61", "#5f945a", "#a18049"],
-      conifer: "#365938",
-    },
-  },
-  {
-    name: "River Valley", seed: 1274, water: [0.35, 0.50], field: [0.20, 0.35], forest: [0.15, 0.30], meadow: [0.15, 0.30], hilliness: [0.8, 1.2], broadleaf: 0.6,
-    palette: {
-      grass: ["#73ad60", "#5a8d4e", "#9d955a"],
-      dirt: ["#937c65", "#937c65", "#937c65"],
-      water: "#4e85b7",
-      skyTop: ["#97b9cd", "#8bafc3", "#99aebd"],
-      skyBottom: ["#d7e5eb", "#d0e0e5", "#dadbc6"],
-      road: "#aa9a86",
-      canopy: ["#639b5f", "#598d57", "#9c7c47"],
-      conifer: "#365938",
-    },
-  },
-  {
-    name: "Highlands", seed: 1411, water: [0.10, 0.20], field: [0.15, 0.30], forest: [0.30, 0.50], meadow: [0.25, 0.45], hilliness: [1.7, 2.2], broadleaf: 0.1,
-    palette: {
-      grass: ["#7d8863", "#707d56", "#90875e"],
-      dirt: ["#8b8376", "#8b8376", "#8b8376"],
-      water: "#607a86",
-      skyTop: ["#95a0a8", "#8b98a1", "#89929a"],
-      skyBottom: ["#ced5d7", "#c8d0d3", "#d0d0c5"],
-      road: "#9b9488",
-      canopy: ["#6a7d5a", "#5e6f50", "#8b764c"],
-      conifer: "#3e4e42",
-      flowers: ["#b48fd1", "#ffffff", "#e0d156"], // heather and gorse, not the usual meadow mix
-    },
-  },
-  {
-    name: "Deep Woods", seed: 1548, water: [0.20, 0.35], field: [0.05, 0.15], forest: [0.85, 1.00], meadow: [0.00, 0.10], hilliness: [0.8, 1.2], broadleaf: 0.25,
-    palette: {
-      grass: ["#659058", "#547e4c", "#8e8856"],
-      dirt: ["#786b5a", "#786b5a", "#786b5a"],
-      water: "#416989",
-      skyTop: ["#86a5b8", "#7d9eb0", "#8c9ead"],
-      skyBottom: ["#c9d9de", "#c4d5d6", "#d4d4c2"],
-      road: "#9b8d7d",
-      canopy: ["#4a754d", "#3f6642", "#846f40"],
-      conifer: "#2d4436",
-    },
-  },
-  {
-    name: "Patchwork Farm", seed: 1685, water: [0.03, 0.10], field: [0.55, 0.72], forest: [0.00, 0.08], meadow: [0.35, 0.55], hilliness: [0.4, 0.6], broadleaf: 0.85,
-    palette: {
-      grass: ["#82b96c", "#679d5a", "#aca46e"],
-      dirt: ["#a08b73", "#a08b73", "#a08b73"],
-      water: "#5a8cbb",
-      skyTop: ["#9abdd0", "#91b6c9", "#a2b6c5"],
-      skyBottom: ["#d8e9ef", "#d3e5ea", "#e3e5cf"],
-      road: "#b8a995",
-      canopy: ["#6ca467", "#64965e", "#ad8d4e"],
-      conifer: "#365938",
-    },
-  },
-  {
-    name: "Lake District", seed: 1822, water: [0.45, 0.60], field: [0.10, 0.20], forest: [0.10, 0.25], meadow: [0.20, 0.35], hilliness: [0.4, 0.6], broadleaf: 0.45,
-    palette: {
-      grass: ["#76b568", "#609c57", "#a19a5f"],
-      dirt: ["#95846e", "#95846e", "#95846e"],
-      water: "#5091c3",
-      skyTop: ["#98bfd1", "#8eb7ca", "#9fb7c6"],
-      skyBottom: ["#cee5ec", "#c9e1e8", "#dcdeca"],
-      road: "#ab9c88",
-      canopy: ["#68a463", "#5e9359", "#9d8148"],
-      conifer: "#39603f",
-    },
-  },
-  {
-    name: "Rolling Hills", seed: 1959, water: [0.10, 0.20], field: [0.30, 0.45], forest: [0.30, 0.50], meadow: [0.25, 0.45], hilliness: [1.3, 1.7], broadleaf: 0.65,
-    palette: {
-      grass: ["#7cb065", "#659757", "#a99e65"],
-      dirt: ["#9b8771", "#9b8771", "#9b8771"],
-      water: "#5785b1",
-      skyTop: ["#96bbcd", "#8db3c5", "#9fb2be"],
-      skyBottom: ["#d5e5eb", "#d0dfe4", "#e1e2cb"],
-      road: "#afa08c",
-      canopy: ["#67a062", "#5e925b", "#a1824b"],
-      conifer: "#3c6441",
-    },
-  },
-  {
-    name: "Wetlands", seed: 2096, water: [0.35, 0.50], field: [0.05, 0.15], forest: [0.60, 0.80], meadow: [0.05, 0.20], hilliness: [0.4, 0.6], broadleaf: 0.7,
-    palette: {
-      grass: ["#789465", "#698558", "#89885f"],
-      dirt: ["#70695b", "#70695b", "#70695b"],
-      water: "#4f7061",
-      skyTop: ["#99aeb4", "#90a7ad", "#9ba5a5"],
-      skyBottom: ["#d6e0df", "#d0dcdc", "#d2d5c4"],
-      road: "#8b8373",
-      canopy: ["#62865c", "#567851", "#8b8051"],
-      conifer: "#394f40",
-    },
-  },
-  {
-    name: "The Common", seed: 2233, water: [0.03, 0.10], field: [0.05, 0.15], forest: [0.00, 0.08], meadow: [0.45, 0.65], hilliness: [0.8, 1.2], broadleaf: 0.6,
-    palette: {
-      grass: ["#8ea369", "#7d915b", "#a99f61"],
-      dirt: ["#a2907a", "#a2907a", "#a2907a"],
-      water: "#638fb4",
-      skyTop: ["#b5cad8", "#adc2d0", "#adb9c1"],
-      skyBottom: ["#e6eff2", "#e1eaee", "#dfe1cb"],
-      road: "#b5a894",
-      canopy: ["#7da469", "#6e935d", "#a38b51"],
-      conifer: "#436245",
-    },
-  },
-  {
-    name: "The Weald", seed: 2370, water: [0.10, 0.20], field: [0.05, 0.15], forest: [0.85, 1.00], meadow: [0.00, 0.10], hilliness: [1.7, 2.2], broadleaf: 0.75,
-    palette: {
-      grass: ["#69885c", "#59794f", "#7f7a4c"],
-      dirt: ["#7b6d5e", "#7b6d5e", "#7b6d5e"],
-      water: "#497088",
-      skyTop: ["#8caabb", "#81a1b2", "#8897a1"],
-      skyBottom: ["#cbdbde", "#c6d6da", "#d1d3c0"],
-      road: "#968978",
-      canopy: ["#568457", "#4a764c", "#817045"],
-      conifer: "#2c4435",
-    },
-  },
-];
-
-// ---------------------------------------------------------------------------
-// Seeded RNG: the whole world is generated through rand(), so the same map
-// number always produces the same world. Picked from the F1 menu (or ?map=
-// in the URL, 1-10); anything out of range gets replaced with a random pick.
-// ---------------------------------------------------------------------------
-
-const urlParams = new URLSearchParams(location.search);
-const mapParam = parseInt(urlParams.get("map"), 10);
-const MAP_INDEX =
-  Number.isInteger(mapParam) && mapParam >= 1 && mapParam <= MAP_PROFILES.length
-    ? mapParam
-    : 1 + ((Math.random() * MAP_PROFILES.length) | 0);
-const PROFILE = MAP_PROFILES[MAP_INDEX - 1];
-const SEED = PROFILE.seed;
-
-// Game mode: "survival" rolls year after year — growing season running
-// straight through, Jan 1 to Dec 31 — with a property tax due every Dec 31,
-// and "sandbox" rolls the same years with no taxes, no failure and no end —
-// just roaming. Chosen in the start menu; reloads carry the mode in the URL
-// next to the map number, and a fresh visit (no mode in the URL) opens the
-// start menu before anything moves.
-const MODES = ["survival", "sandbox"];
-let mode = MODES.includes(urlParams.get("mode")) ? urlParams.get("mode") : "survival";
-let gameStarted = urlParams.has("mode");
-
-const rand = (function mulberry32(a) {
-  return function () {
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-})(SEED >>> 0);
-
-console.log(
-  `map ${MAP_INDEX}/${MAP_PROFILES.length} — ${PROFILE.name} — reload with ?map=${MAP_INDEX} to reproduce`
-);
-
-// Roll a value within one of this map's profile bands (a [min,max] pair)
-function rollBand(range) {
-  return range[0] + rand() * (range[1] - range[0]);
-}
+import {
+  screenCanvas,
+  screenCtx,
+  VIEW_W,
+  VIEW_H,
+  view,
+  ctx,
+  clamp,
+  nearPoint,
+  AMBIENT_FLOOR,
+} from "./setup.js";
+import { MAP_PROFILES } from "./map-profiles.js";
+import {
+  MAP_INDEX,
+  PROFILE,
+  SEED,
+  MODES,
+  mode,
+  gameStarted,
+  setMode,
+  setGameStarted,
+  rand,
+  rollBand,
+} from "./rng.js";
+import { TILE, MAP_TILES, MAP_SIZE, projX, projY, rotateXY, rotateLocal } from "./projection.js";
+import {
+  LIGHT,
+  INK,
+  MAP_INK,
+  ROAD_INK,
+  shade,
+  mixHex,
+  tint,
+  grassDotShades,
+  dirtDotShades,
+  meadowTint,
+  stubbleTint,
+} from "./lighting.js";
+import { ditherRegion } from "./dithering.js";
 
 // ---------------------------------------------------------------------------
 // Sound: synthesized with the Web Audio API. A continuous engine loop follows
@@ -940,40 +736,6 @@ window.addEventListener("keyup", (e) => {
 })();
 
 // ---------------------------------------------------------------------------
-// Isometric projection (2:1, SimCity 2000 style)
-// ---------------------------------------------------------------------------
-
-// World: x/y on the ground plane, z up. One tile is TILE x TILE world units
-// and projects to a 2*TILE wide, TILE tall diamond on screen.
-const TILE = 16;
-const MAP_TILES = 60;
-const MAP_SIZE = MAP_TILES * TILE;
-
-function projX(wx, wy) {
-  return wx - wy;
-}
-
-function projY(wx, wy, wz) {
-  return (wx + wy) / 2 - (wz || 0);
-}
-
-// Rotate a local (lx, ly) point by a precomputed cos/sin pair — the inner
-// step of rotateLocal(), split out so hot per-frame loops that already have
-// cos/sin for their model's heading can reuse them across many points
-// instead of recomputing Math.cos/Math.sin for each one.
-function rotateXY(cos, sin, lx, ly) {
-  return { x: lx * cos - ly * sin, y: lx * sin + ly * cos };
-}
-
-// Rotate a local (lx, ly) point by angle and place it relative to an origin
-// (ox, oy) — the common "local model point -> world position" transform
-// used for fixtures, collision boxes and box-model corners alike.
-function rotateLocal(ox, oy, angle, lx, ly) {
-  const p = rotateXY(Math.cos(angle), Math.sin(angle), lx, ly);
-  return { x: ox + p.x, y: oy + p.y };
-}
-
-// ---------------------------------------------------------------------------
 // Farmyard location (needed by the terrain: the yard sits on a flat pad)
 // ---------------------------------------------------------------------------
 
@@ -1206,122 +968,6 @@ function terrainHeight(wx, wy) {
   return 40 * Math.tanh(h / 40); // soft cap where hills stack
 }
 
-// ---------------------------------------------------------------------------
-// Shared lighting helpers
-// ---------------------------------------------------------------------------
-
-const LIGHT = { x: 0.35, y: 0.6, z: 0.71 };
-
-// Before shading, every base color is pulled a little toward warm cream and
-// tilted away from blue, so the scene reads like inks printed on soft paper
-// rather than raw screen color. Direct fills that skip lighting use
-// shade(color, 1) to pick up the same treatment.
-const PAPER_MIX = 0.12;
-const PAPER = [246, 233, 205];
-const INK_GAIN = [1.03, 1.0, 0.93];
-
-// Outline ink shared by the scene silhouettes and the map's boundary lines
-const INK = "#4a3827";
-
-// Same ink, thinned out for the ground's own boundary lines so they read as
-// soft creases in the paper rather than the heavier silhouette lines used
-// elsewhere. The road/ditch rim gets its own, fainter still: stamps overlap
-// along a path, so any tint there stacks up darker than a single tile edge.
-const MAP_INK = "rgba(74, 56, 39, 0.3)";
-const ROAD_INK = "rgba(74, 56, 39, 0.14)";
-
-const shadeCache = {};
-function shade(color, k) {
-  const key = color + ((k * 100 + 0.5) | 0);
-  if (shadeCache[key]) return shadeCache[key];
-  const ch = (i) => {
-    const v = parseInt(color.slice(1 + i * 2, 3 + i * 2), 16);
-    const p = (v * (1 - PAPER_MIX) + PAPER[i] * PAPER_MIX) * INK_GAIN[i];
-    return Math.min(255, Math.round(p * k));
-  };
-  return (shadeCache[key] = `rgb(${ch(0)},${ch(1)},${ch(2)})`);
-}
-
-const mixCache = {};
-function mixHex(a, b, t) {
-  const key = a + b + ((t * 64) | 0);
-  if (mixCache[key]) return mixCache[key];
-  const va = parseInt(a.slice(1), 16);
-  const vb = parseInt(b.slice(1), 16);
-  let out = "#";
-  for (const shift of [16, 8, 0]) {
-    const v = Math.round(((va >> shift) & 255) * (1 - t) + ((vb >> shift) & 255) * t);
-    out += v.toString(16).padStart(2, "0");
-  }
-  return (mixCache[key] = out);
-}
-
-// Lighten (amt > 0) or darken (amt < 0) a hex color toward white/black. Used
-// to derive dot speckles, tiers, furrows and the like from a palette's few
-// base tones instead of hand-authoring every shade per map.
-function tint(hex, amt) {
-  return amt >= 0 ? mixHex(hex, "#ffffff", amt) : mixHex(hex, "#000000", -amt);
-}
-
-function grassDotShades(base) {
-  return [tint(base, -0.16), tint(base, 0.2), tint(base, 0.32), tint(base, -0.3)];
-}
-
-function dirtDotShades(base) {
-  return [tint(base, -0.16), tint(base, 0.16)];
-}
-
-// Warms a grass tone toward wildflower-meadow yellow-green, so meadows read
-// as a distinct patch of a map's own grass rather than a separate hue
-function meadowTint(hex) {
-  return mixHex(hex, "#ffe066", 0.35);
-}
-
-// Dries a dirt tone toward pale straw-gold, for stubble left standing after
-// harvest but not yet plowed under — distinct from the darker turned-soil
-// tone of a plowed or seeded tile, derived from the map's own dirt rather
-// than a separate authored color
-function stubbleTint(hex) {
-  return mixHex(hex, "#e6c85a", 0.5);
-}
-
-// ---------------------------------------------------------------------------
-// Ordered dithering: posterize colors to coarse levels and dither between
-// them with a Bayer matrix, the classic pixel-art way to draw gradients.
-// ---------------------------------------------------------------------------
-
-const BAYER = [
-  [0, 8, 2, 10],
-  [12, 4, 14, 6],
-  [3, 11, 1, 9],
-  [15, 7, 13, 5],
-];
-const DITHER_STEP = 24; // size of one posterized color level
-
-function ditherRegion(c2d, x, y, w, h) {
-  x = Math.max(0, Math.floor(x));
-  y = Math.max(0, Math.floor(y));
-  w = Math.min(c2d.canvas.width - x, Math.ceil(w));
-  h = Math.min(c2d.canvas.height - y, Math.ceil(h));
-  if (w <= 0 || h <= 0) return;
-  const img = c2d.getImageData(x, y, w, h);
-  const data = img.data;
-  for (let py = 0; py < h; py++) {
-    for (let px = 0; px < w; px++) {
-      const i = (py * w + px) * 4;
-      if (data[i + 3] === 0) continue;
-      // Threshold from the absolute canvas position, so re-dithering a
-      // repainted region is stable and lines up with its surroundings
-      const t = ((BAYER[(y + py) & 3][(x + px) & 3] + 0.5) / 16) * DITHER_STEP;
-      for (let ch = 0; ch < 3; ch++) {
-        const v = data[i + ch];
-        const base = Math.floor(v / DITHER_STEP) * DITHER_STEP;
-        data[i + ch] = Math.min(255, base + (v - base > t ? DITHER_STEP : 0));
-      }
-    }
-  }
-  c2d.putImageData(img, x, y);
-}
 
 // ---------------------------------------------------------------------------
 // Ground map (prerendered once)
@@ -5406,9 +5052,9 @@ function modeStartCash(m) {
 }
 
 function startGame(m) {
-  mode = m;
+  setMode(m);
   cash = modeStartCash(m);
-  gameStarted = true;
+  setGameStarted(true);
   menuOpen = false;
   paused = false;
 }
@@ -5625,7 +5271,7 @@ function endSurvival() {
 // farm — tractor, fields, calendar — carries on in sandbox mode, debt
 // forgiven and no tax ever falling due again.
 function continueInSandbox() {
-  mode = "sandbox";
+  setMode("sandbox");
   cash = SANDBOX_START_CASH;
   gameOver = false;
   taxFlash = 0;
