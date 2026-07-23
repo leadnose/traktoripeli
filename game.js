@@ -5759,6 +5759,17 @@ function approach(current, target, maxDelta) {
   return Math.max(target, current - maxDelta);
 }
 
+// Undo the tractor's move for this frame and bring it to a hard stop —
+// shared by every solid-obstacle collision check below (water, trees,
+// buildings, fences, animals). A hard stop, not a coast: angVel is zeroed
+// too so the tractor doesn't sit there spinning in place against the wall.
+function stopTractor(prevX, prevY) {
+  tractor.x = prevX;
+  tractor.y = prevY;
+  tractor.speed = 0;
+  tractor.angVel = 0;
+}
+
 function update(dt) {
   if (paused) return;
   // Ambient life keeps moving even after the round ends
@@ -5885,10 +5896,7 @@ function update(dt) {
     tileTypeAt(tractor.x, tractor.y) === 4 &&
     !roadTiles.has(tileKey(tractor.x, tractor.y))
   ) {
-    tractor.x = prevX;
-    tractor.y = prevY;
-    tractor.speed = 0;
-    tractor.angVel = 0; // a hard stop, not a coast — don't leave it spinning in place
+    stopTractor(prevX, prevY);
   }
 
   // Trees are solid trunks: driving into one stops the tractor dead, same
@@ -5903,10 +5911,7 @@ function update(dt) {
       if (!list) continue;
       for (const t of list) {
         if (Math.hypot(t.wx - tractor.x, t.wy - tractor.y) < TREE_COLLIDE_R) {
-          tractor.x = prevX;
-          tractor.y = prevY;
-          tractor.speed = 0;
-          tractor.angVel = 0;
+          stopTractor(prevX, prevY);
           break outer;
         }
       }
@@ -5924,10 +5929,7 @@ function update(dt) {
       tractor.y > b.y0 - BUILDING_COLLIDE_MARGIN &&
       tractor.y < b.y1 + BUILDING_COLLIDE_MARGIN
     ) {
-      tractor.x = prevX;
-      tractor.y = prevY;
-      tractor.speed = 0;
-      tractor.angVel = 0;
+      stopTractor(prevX, prevY);
       break;
     }
   }
@@ -5937,10 +5939,7 @@ function update(dt) {
   // pasture inside stays open ground the tractor just can't reach.
   for (const b of FENCE_SOLID_WORLD) {
     if (tractor.x > b.x0 && tractor.x < b.x1 && tractor.y > b.y0 && tractor.y < b.y1) {
-      tractor.x = prevX;
-      tractor.y = prevY;
-      tractor.speed = 0;
-      tractor.angVel = 0;
+      stopTractor(prevX, prevY);
       break;
     }
   }
@@ -5952,10 +5951,7 @@ function update(dt) {
     if (an.species !== "cow" && an.species !== "sheep" && an.species !== "pig") continue;
     const dNew = Math.hypot(an.wx - tractor.x, an.wy - tractor.y);
     if (dNew < 6.5 && dNew < Math.hypot(an.wx - prevX, an.wy - prevY)) {
-      tractor.x = prevX;
-      tractor.y = prevY;
-      tractor.speed = 0;
-      tractor.angVel = 0;
+      stopTractor(prevX, prevY);
       break;
     }
   }
