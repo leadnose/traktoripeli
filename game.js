@@ -5811,14 +5811,21 @@ function update(dt) {
 
   const imp = IMPLEMENTS[tractor.implement];
 
+  // Shared across the phases below: applyThrottleAndGravity fills
+  // cos/sin/throttleInput/brakeInput in, each read again by a later phase
+  // (burnFuel's throttle check, moveTractor's cos/sin, checkCollisions'
+  // prevX/prevY set by moveTractor).
+  let cos, sin, throttleInput, brakeInput, prevX, prevY;
+
   // Throttle / brake (touch uses proportional input, keyboard stays digital)
+  function applyThrottleAndGravity() {
   const touchThrottle = touchDrive.throttleActive ? touchDrive.throttle : 0;
-  const throttleInput = Math.max(
+  throttleInput = Math.max(
     keys.ArrowUp ? 1 : 0,
     touchThrottle > 0 ? touchThrottle : 0,
     autoThrottling() ? 1 : 0
   );
-  const brakeInput = Math.max(keys.ArrowDown ? 1 : 0, touchThrottle < 0 ? -touchThrottle : 0);
+  brakeInput = Math.max(keys.ArrowDown ? 1 : 0, touchThrottle < 0 ? -touchThrottle : 0);
   if (throttleInput > 0) {
     tractor.speed += ACCEL * throttleInput * dt;
   } else if (brakeInput > 0) {
@@ -5832,8 +5839,8 @@ function update(dt) {
   // Scaled with ACCEL/BRAKE/FRICTION (was a bare 60) — left at its old
   // strength it would now overpower the much weaker period engine on any
   // real hill, instead of just leaning on it the way it used to.
-  const cos = Math.cos(tractor.angle);
-  const sin = Math.sin(tractor.angle);
+  cos = Math.cos(tractor.angle);
+  sin = Math.sin(tractor.angle);
   const grade =
     (terrainHeight(tractor.x + cos * 4, tractor.y + sin * 4) -
       terrainHeight(tractor.x - cos * 4, tractor.y - sin * 4)) /
@@ -5845,16 +5852,22 @@ function update(dt) {
   if (throttleInput === 0 && brakeInput === 0 && Math.abs(tractor.speed) < 1.5 * GEAR_SLOW_RATIO) {
     tractor.speed = 0;
   }
+  }
+  applyThrottleAndGravity();
 
   // Burn fuel only while actually powering the wheels
+  function burnFuel() {
   if (throttleInput > 0) {
     fuel = Math.max(
       0,
       fuel - (tractor.fastGear ? FUEL_BURN_ROAD : FUEL_BURN_WORK) * throttleInput * dt
     );
   }
+  }
+  burnFuel();
 
   // Top speed from the gear, further reduced by drag when working the ground
+  function limitGearSpeed() {
   let maxForward =
     (tractor.fastGear ? GEAR_FAST : GEAR_SLOW) *
     (imp.liftable ? 1 - 0.35 * (1 - tractor.implLift) : 1);
@@ -5879,8 +5892,11 @@ function update(dt) {
 
   if (tractor.speed > maxForward) tractor.speed = approach(tractor.speed, maxForward, accelRate * dt);
   if (tractor.speed < maxReverse) tractor.speed = approach(tractor.speed, maxReverse, accelRate * dt);
+  }
+  limitGearSpeed();
 
   // Steering only has effect while moving; reversing flips it like a real vehicle
+  function applySteering() {
   const turnRate =
     Math.min(Math.abs(tractor.speed) / TURN_RADIUS, MAX_TURN_RATE) *
     Math.sign(tractor.speed);
@@ -5893,10 +5909,13 @@ function update(dt) {
   const targetAngVel = turnRate * steeringInput;
   tractor.angVel = approach(tractor.angVel, targetAngVel, STEER_RESPONSE * dt);
   tractor.angle += tractor.angVel * dt;
+  }
+  applySteering();
 
   // Move on the ground plane
-  const prevX = tractor.x;
-  const prevY = tractor.y;
+  function moveTractor() {
+  prevX = tractor.x;
+  prevY = tractor.y;
   tractor.x += cos * tractor.speed * dt;
   tractor.y += sin * tractor.speed * dt;
 
@@ -5904,7 +5923,10 @@ function update(dt) {
   const margin = 12;
   tractor.x = clamp(tractor.x, margin, MAP_SIZE - margin);
   tractor.y = clamp(tractor.y, margin, MAP_SIZE - margin);
+  }
+  moveTractor();
 
+  function checkCollisions() {
   // Water blocks the tractor, except where a road bridges it
   if (
     tileTypeAt(tractor.x, tractor.y) === 4 &&
@@ -5969,9 +5991,12 @@ function update(dt) {
       break;
     }
   }
+  }
+  checkCollisions();
 
   // A towed implement's wheels roll rather than skid, so the hitch's
   // sideways motion swings its heading toward the tractor's over time
+  function updateHitchAndLift() {
   if (imp.towed) {
     let rel = tractor.angle - tractor.implAngle;
     rel = Math.atan2(Math.sin(rel), Math.cos(rel)); // wrap to (-pi, pi]
@@ -5994,6 +6019,8 @@ function update(dt) {
   }
   tractor.implLift += (liftTarget - tractor.implLift) * Math.min(1, dt * 5);
   tractor.implFlash = Math.max(0, tractor.implFlash - dt);
+  }
+  updateHitchAndLift();
 
   // Field work under the implement while it's down and moving. A pass is
   // locked to a single row of tiles: the lane is picked where work starts,
@@ -6002,6 +6029,7 @@ function update(dt) {
   // distance, which would let a zigzag cover two rows in one pass). The
   // lock moves once the centerline is well inside a neighboring row, or
   // when the travel axis flips. Raising the implement ends the pass.
+  function doFieldWork() {
   if (imp.liftable && tractor.implLift < 0.3 && Math.abs(tractor.speed) > MOVING_THRESHOLD) {
     const pose = implementPose();
     const pcos = Math.cos(pose.angle);
@@ -6031,12 +6059,15 @@ function update(dt) {
   } else if (tractor.implLift >= 0.3) {
     tractor.workLane = null;
   }
+  }
+  doFieldWork();
 
   // The trailer scoops up grain sacks it passes over — only in work mode,
   // same as the other implements needing their gear down to do their job.
   // The trailer has no lift of its own to gate this on (it's not
   // liftable), so without this it would scoop just as well at road-gear
   // speed, sacks flying into the bed at 40+.
+  function pickUpTrailerSacks() {
   if (tractor.implement === "trailer" && !tractor.fastGear) {
     const pose = implementPose();
     const bx = pose.x - 16 * Math.cos(pose.angle);
@@ -6049,7 +6080,10 @@ function update(dt) {
       }
     }
   }
+  }
+  pickUpTrailerSacks();
 
+  function handleRefuelAndTrading() {
   atFuelTank = nearFuelTank();
   atCity = nearCity();
 
@@ -6094,6 +6128,8 @@ function update(dt) {
     spawnChaff(pose.x - 16 * Math.cos(pose.angle), pose.y - 16 * Math.sin(pose.angle));
     playSell();
   }
+  }
+  handleRefuelAndTrading();
 
   updateTracks(dt);
   updateCrops(
@@ -6101,11 +6137,14 @@ function update(dt) {
   );
 
   // Periodic autosave so even a crash or hard reload loses only moments
+  function triggerAutosave() {
   saveTimer += dt;
   if (saveTimer >= 5) {
     saveTimer = 0;
     saveGame();
   }
+  }
+  triggerAutosave();
 }
 
 // ---------------------------------------------------------------------------
