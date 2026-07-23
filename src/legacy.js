@@ -172,6 +172,25 @@ import {
   signedArea4,
   initBoxModels,
 } from "./box-models.js";
+import {
+  keys,
+  IMPLEMENT_KEYS,
+  menuOpen,
+  paused,
+  autoThrottleOn,
+  dateJump,
+  dateJumpError,
+  menuMap,
+  menuMode,
+  menuSaveInfo,
+  refreshMenuSaveInfo,
+  awayClock,
+  setMenuOpen,
+  setPaused,
+  setDateJump,
+  setDateJumpError,
+} from "./input.js";
+import { touchDrive } from "./touch.js";
 
 const WORK_NOISE = { plow: [220, 0.16], seeder: [480, 0.14], harvester: [1100, 0.22] };
 
@@ -208,382 +227,6 @@ function updateAudio() {
   set(audio.workGain.gain, working ? level : 0, 0.15);
 }
 
-// ---------------------------------------------------------------------------
-// Input
-// ---------------------------------------------------------------------------
-
-const keys = {};
-const touchDrive = {
-  steering: 0, // -1..1 (left..right)
-  throttle: 0, // -1..1 (reverse/brake..forward)
-  steeringActive: false,
-  throttleActive: false,
-};
-const IMPLEMENT_KEYS = { 1: "plow", 2: "seeder", 3: "harvester", 4: "trailer" };
-
-// F1 opens the menu, the only place the map and mode can be picked. It is
-// also the start menu: a fresh visit begins with it open and the clock held.
-let menuOpen = !gameStarted;
-// P holds the whole world still — clock, crops, critters — until P again.
-// Unlike the F1 menu, which leaves the calendar running, pause means pause.
-let paused = false;
-// A toggles work mode's auto-throttle off and back on, for anyone who'd
-// rather hold the accelerator themselves. On by default.
-let autoThrottleOn = true;
-// D opens a little date field: type MMDD and Enter fast-forwards the
-// calendar to that date — into next year if it's already passed, in the
-// cyclical modes — growing crops and collecting taxes on the way, exactly
-// like the away clock would.
-let dateJump = null; // null = closed, else the digits typed so far
-let dateJumpError = false; // the last Enter was an impossible or past date
-let menuMap = 1; // the start menu defaults to map 1; R rolls a random one
-let menuMode = mode;
-// The autosave the menu offers to continue, read once when the menu opens
-// (parsing the save JSON every drawn frame would be wasteful)
-let menuSaveInfo = null;
-
-// Away clock, toggled in the menu: rAF stops in a hidden tab, so normally
-// game time freezes there. With this on, the lost time is applied in one
-// catch-up step on return — crops grow, the calendar turns, taxes fall due.
-const AWAY_CLOCK_KEY = "traktoripeli.awayclock";
-let awayClock = false;
-try {
-  awayClock = localStorage.getItem(AWAY_CLOCK_KEY) === "1";
-} catch {
-  // private browsing etc: the option just isn't persisted
-}
-
-window.addEventListener("keydown", (e) => {
-  // Browsers only allow audio after a user gesture
-  initAudio();
-  if (audio.ac.state === "suspended") audio.ac.resume();
-  if (e.key === "F1" && !e.repeat) {
-    e.preventDefault();
-    if (!gameStarted) return; // the start menu stays until a mode is picked
-    menuOpen = !menuOpen;
-    dateJump = null; // one sign at a time
-    menuMap = MAP_INDEX; // mid-game the field opens on the current map
-    menuMode = mode;
-    if (menuOpen) menuSaveInfo = loadSave();
-    return;
-  }
-  if (gameOver && !menuOpen && (e.key === "s" || e.key === "S") && !e.repeat) {
-    continueInSandbox();
-    return;
-  }
-  if (menuOpen) {
-    handleMenuKey(e);
-    return;
-  }
-  if (dateJump !== null) {
-    handleDateJumpKey(e);
-    return;
-  }
-  handleGameplayKey(e);
-});
-
-// The menu swallows all input: left/right pick the map, up/down pick
-// the mode, digits jump straight to a map, R rolls a random one, Enter
-// starts, Esc closes (once a game is running)
-function handleMenuKey(e) {
-    e.preventDefault();
-    if (e.key === "Enter") {
-      clearSave(); // Enter always begins a fresh run
-      if (!gameStarted && menuMap === MAP_INDEX) {
-        // Same map as the one already generated: start without a reload
-        startGame(menuMode);
-      } else {
-        // The reload's pagehide must not re-save the run just discarded
-        savingDisabled = true;
-        location.search = `?map=${menuMap}&mode=${menuMode}`;
-      }
-    } else if (e.key === "c" || e.key === "C") {
-      // Continue the autosaved run: reloading with its map and mode in
-      // the URL restores the save at boot
-      if (menuSaveInfo)
-        location.search = `?map=${menuSaveInfo.map}&mode=${menuSaveInfo.mode}`;
-    } else if (e.key === "r" || e.key === "R") {
-      menuMap = 1 + ((Math.random() * MAP_PROFILES.length) | 0);
-    } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
-      const dir = e.key === "ArrowDown" ? 1 : -1;
-      menuMode = MODES[(MODES.indexOf(menuMode) + dir + MODES.length) % MODES.length];
-    } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
-      const dir = e.key === "ArrowRight" ? 1 : -1;
-      menuMap = ((menuMap - 1 + dir + MAP_PROFILES.length) % MAP_PROFILES.length) + 1;
-    } else if ((e.key === "t" || e.key === "T") && !e.repeat) {
-      awayClock = !awayClock;
-      try {
-        localStorage.setItem(AWAY_CLOCK_KEY, awayClock ? "1" : "0");
-      } catch {
-        // not persisted, still applies to this session
-      }
-    } else if ((e.key === "m" || e.key === "M") && !e.repeat) {
-      toggleMusic();
-    } else if ((e.key === "q" || e.key === "Q") && !e.repeat) {
-      toggleSound();
-    } else if (e.key === "Escape") {
-      if (gameStarted) menuOpen = false;
-    } else if (/^[0-9]$/.test(e.key)) {
-      // 1-9 jump straight to that map, 0 is map 10
-      const n = e.key === "0" ? 10 : parseInt(e.key, 10);
-      if (n <= MAP_PROFILES.length) menuMap = n;
-    }
-}
-
-// The date-jump field swallows all input while it is open: type the
-// digits of MMDD, Enter jumps, Esc (or D again) closes
-function handleDateJumpKey(e) {
-    e.preventDefault();
-    if (e.key === "Enter") {
-      tryDateJump();
-    } else if (e.key === "Escape" || e.key === "d" || e.key === "D") {
-      dateJump = null;
-    } else if (e.key === "Backspace") {
-      dateJump = dateJump.slice(0, -1);
-      dateJumpError = false;
-    } else if (/^[0-9]$/.test(e.key) && dateJump.length < 4) {
-      dateJump += e.key;
-      dateJumpError = false;
-    }
-}
-
-function handleGameplayKey(e) {
-  if (e.key.startsWith("Arrow")) e.preventDefault();
-  keys[e.key] = true;
-  if ((e.key === "m" || e.key === "M") && !e.repeat) toggleMusic();
-  if ((e.key === "q" || e.key === "Q") && !e.repeat) toggleSound();
-  if ((e.key === "f" || e.key === "F") && !e.repeat) fpsShown = !fpsShown;
-  if ((e.key === "p" || e.key === "P") && !e.repeat && gameStarted && !gameOver)
-    paused = !paused;
-  if (paused) return; // the frozen world ignores gear and implement keys
-  if ((e.key === "a" || e.key === "A") && !e.repeat && gameStarted && !gameOver) {
-    autoThrottleOn = !autoThrottleOn;
-  }
-  if ((e.key === "d" || e.key === "D") && !e.repeat && gameStarted && !gameOver) {
-    dateJump = "";
-    dateJumpError = false;
-    return;
-  }
-  if (e.key === " " && !e.repeat) {
-    e.preventDefault();
-    // One toggle for the whole maneuver: road mode is the fast gear with the
-    // implement raised, work mode the slow gear with it lowered
-    const imp = IMPLEMENTS[tractor.implement];
-    if (tractor.fastGear) {
-      tractor.fastGear = false;
-      if (imp.liftable) {
-        // Lowering needs field dirt under the working width
-        if (!implementOverField()) {
-          tractor.implBounce = 0.6; // it tries, catches, and springs back up
-        } else {
-          tractor.implDown = true;
-          tractor.implBounce = 0;
-        }
-        playHydraulic(true);
-      }
-    } else {
-      // Lift before shifting up
-      tractor.fastGear = true;
-      if (tractor.implDown) {
-        tractor.implDown = false;
-        playHydraulic(false);
-      }
-    }
-  }
-  if (IMPLEMENT_KEYS[e.key] && !e.repeat) {
-    // Implements are swapped at the farmyard
-    if (nearFarm()) {
-      if (tractor.implement !== IMPLEMENT_KEYS[e.key]) {
-        tractor.implement = IMPLEMENT_KEYS[e.key];
-        tractor.implDown = false;
-        tractor.implLift = 1;
-        playClunk();
-      }
-    } else {
-      tractor.implFlash = 0.9;
-    }
-  }
-}
-
-window.addEventListener("keyup", (e) => {
-  keys[e.key] = false;
-});
-
-// ---------------------------------------------------------------------------
-// Touch controls: on-screen buttons for phones/tablets (CSS shows them only
-// on coarse, hover-less pointers). Every button just dispatches the same
-// synthetic keyboard events the handlers above already process, so driving,
-// menus and implement switching all work identically to keyboard input
-// without a second code path to keep in sync.
-// ---------------------------------------------------------------------------
-
-(function setupTouchControls() {
-  const root = document.getElementById("touch-controls");
-  if (!root) return;
-
-  function fireKey(type, key) {
-    initAudio(); // a touch is a user gesture too; unlocks audio the same way
-    if (audio.ac.state === "suspended") audio.ac.resume();
-    window.dispatchEvent(new KeyboardEvent(type, { key }));
-  }
-
-  // Tracked by pointerId (not just per-button) so a finger that slides off
-  // a button, or a cancelled touch, can never leave a key stuck down.
-  const activePointers = new Map();
-
-  function release(pointerId) {
-    const entry = activePointers.get(pointerId);
-    if (!entry) return;
-    activePointers.delete(pointerId);
-    entry.btn.classList.remove("tbtn-active");
-    fireKey("keyup", entry.key);
-  }
-
-  // Drive controls: two separate joysticks so right hand steers and left
-  // hand controls the throttle.  Each joystick is constrained to a single
-  // axis so the intention is always unambiguous.
-  (function setupDriveJoysticks() {
-    // axes: "horizontal" → ArrowLeft/ArrowRight  |  "vertical" → ArrowUp/ArrowDown
-    function setupJoystickElement(baseId, knobId, axes, deadzone = 0.35) {
-      const base = document.getElementById(baseId);
-      const knob = document.getElementById(knobId);
-      if (!base || !knob) return;
-      const axisSize = axes === "horizontal" ? base.clientWidth : base.clientHeight;
-      const RADIUS = Math.max(40, axisSize * 0.3); // px the knob can travel from centre
-      const DEADZONE = deadzone; // fraction of RADIUS before an axis engages
-      let pointerId = null;
-      const dir = axes === "horizontal"
-        ? { ArrowLeft: false, ArrowRight: false }
-        : { ArrowUp: false, ArrowDown: false };
-
-      function setDir(key, on) {
-        if (dir[key] === on) return;
-        dir[key] = on;
-        fireKey(on ? "keydown" : "keyup", key);
-      }
-
-      function resetAll() {
-        for (const key of Object.keys(dir)) setDir(key, false);
-        knob.style.transform = "translate(0, 0)";
-        if (axes === "horizontal") {
-          touchDrive.steering = 0;
-          touchDrive.steeringActive = false;
-        } else {
-          touchDrive.throttle = 0;
-          touchDrive.throttleActive = false;
-        }
-      }
-
-      function handleMove(e) {
-        const rect = base.getBoundingClientRect();
-        const dx = e.clientX - (rect.left + rect.width / 2);
-        const dy = e.clientY - (rect.top + rect.height / 2);
-        const applyDeadzone = (v) => {
-          const av = Math.abs(v);
-          if (av <= DEADZONE) return 0;
-          return ((av - DEADZONE) / (1 - DEADZONE)) * Math.sign(v);
-        };
-        if (axes === "horizontal") {
-          const nxRaw = clamp(dx / RADIUS, -1, 1);
-          const cx = nxRaw * RADIUS;
-          knob.style.transform = `translate(${cx}px, 0)`;
-          const steering = applyDeadzone(nxRaw);
-          touchDrive.steering = steering;
-          touchDrive.steeringActive = true;
-          setDir("ArrowLeft", steering < 0);
-          setDir("ArrowRight", steering > 0);
-        } else {
-          const nyRaw = clamp(dy / RADIUS, -1, 1);
-          const cy = nyRaw * RADIUS;
-          knob.style.transform = `translate(0, ${cy}px)`;
-          const throttle = -applyDeadzone(nyRaw);
-          touchDrive.throttle = throttle;
-          touchDrive.throttleActive = true;
-          setDir("ArrowUp", throttle > 0);
-          setDir("ArrowDown", throttle < 0);
-        }
-      }
-
-      base.addEventListener("pointerdown", (e) => {
-        e.preventDefault();
-        pointerId = e.pointerId;
-        base.setPointerCapture(pointerId);
-        initAudio();
-        if (audio.ac.state === "suspended") audio.ac.resume();
-        handleMove(e);
-      });
-      base.addEventListener("pointermove", (e) => {
-        if (e.pointerId !== pointerId) return;
-        handleMove(e);
-      });
-      function end(e) {
-        if (pointerId === null || e.pointerId !== pointerId) return;
-        pointerId = null;
-        resetAll();
-      }
-      base.addEventListener("pointerup", end);
-      base.addEventListener("pointercancel", end);
-      window.addEventListener("pointerup", end);
-      window.addEventListener("pointercancel", end);
-    }
-
-    setupJoystickElement("td-joystick", "td-joystick-knob", "horizontal", 0.55); // steering (higher dead-zone → less twitchy)
-    setupJoystickElement("td-throttle", "td-throttle-knob", "vertical");   // throttle
-  })();
-
-  root.querySelectorAll(".tbtn[data-key]").forEach((btn) => {
-    const key = btn.dataset.key;
-    btn.addEventListener("pointerdown", (e) => {
-      e.preventDefault();
-      btn.classList.add("tbtn-active");
-      activePointers.set(e.pointerId, { btn, key });
-      fireKey("keydown", key);
-    });
-    btn.addEventListener("pointerup", (e) => release(e.pointerId));
-    btn.addEventListener("pointercancel", (e) => release(e.pointerId));
-    btn.addEventListener("pointerleave", (e) => release(e.pointerId));
-    btn.addEventListener("contextmenu", (e) => e.preventDefault());
-  });
-  window.addEventListener("pointerup", (e) => release(e.pointerId));
-  window.addEventListener("pointercancel", (e) => release(e.pointerId));
-
-  const fsBtn = document.getElementById("td-fullscreen");
-  fsBtn.addEventListener("pointerdown", (e) => {
-    e.preventDefault();
-    initAudio();
-    if (audio.ac.state === "suspended") audio.ac.resume();
-    if (document.fullscreenElement) {
-      document.exitFullscreen();
-    } else if (screenCanvas.requestFullscreen) {
-      screenCanvas.requestFullscreen().catch(() => {});
-    }
-  });
-
-  // The Enter button and the driving-only controls (gear/implements) are
-  // shown or hidden depending on whether a menu or the date-jump field is
-  // currently open, so idle buttons never sit in the way of the other mode.
-  // The gear button also relabels itself to match the current mode (the
-  // HUD's own "MODE: ROAD/WORK") instead of showing a static glyph, and
-  // flashes the same way the HUD text does when a lower is refused.
-  const spaceBtn = document.getElementById("td-space");
-  const autoBtn = document.getElementById("td-auto");
-  function syncVisibility() {
-    const menuish = !gameStarted || menuOpen || dateJump !== null;
-    document.body.classList.toggle("menu-mode", menuish);
-    if (gameStarted) {
-      const flash = tractor.implFlash > 0 && ((tractor.implFlash * 8) | 0) % 2 === 0;
-      spaceBtn.textContent = tractor.fastGear ? "⬆ ROAD" : "⬇ WORK";
-      spaceBtn.classList.toggle("tbtn-warn", flash);
-      spaceBtn.setAttribute(
-        "aria-label",
-        tractor.fastGear ? "Lower implement, work mode" : "Raise implement, road mode"
-      );
-      autoBtn.classList.toggle("tbtn-off", !autoThrottleOn);
-    }
-    requestAnimationFrame(syncVisibility);
-  }
-  requestAnimationFrame(syncVisibility);
-})();
 
 
 initTerrain();
@@ -1657,7 +1300,7 @@ const FUEL_PRICE = 1; // £ per unit, bought automatically at the farm
 // the old Apr-Oct growing season ran at (300s / 213 days)
 const ROUND_TIME = Math.round((300 * SEASON_DAYS) / 213);
 let timeLeft = ROUND_TIME;
-let gameOver = false;
+export let gameOver = false;
 let bestScores = [];
 let finalRank = -1; // this round's place in the best list, -1 if none
 
@@ -1743,12 +1386,12 @@ function modeStartCash(m) {
   return m === "sandbox" ? SANDBOX_START_CASH : SURVIVAL_START_CASH;
 }
 
-function startGame(m) {
+export function startGame(m) {
   setMode(m);
   cash = modeStartCash(m);
   setGameStarted(true);
-  menuOpen = false;
-  paused = false;
+  setMenuOpen(false);
+  setPaused(false);
 }
 
 // Dec 31: the tax collector comes around. Returns false when the bill
@@ -1830,9 +1473,9 @@ function currentCalendarDay() {
 // calendar to that date's next occurrence. The world advances in small
 // real-time steps through advanceTime, so crops grow and taxes fall due
 // exactly as if the time had really been played.
-function tryDateJump() {
+export function tryDateJump() {
   if (dateJump.length !== 4) {
-    dateJumpError = true;
+    setDateJumpError(true);
     return;
   }
   const mm = +dateJump.slice(0, 2);
@@ -1845,7 +1488,7 @@ function tryDateJump() {
     dd < 1 ||
     new Date(Date.UTC(y, mm - 1, dd)).getUTCDate() !== dd
   ) {
-    dateJumpError = true;
+    setDateJumpError(true);
     return;
   }
   const target = (Date.UTC(y, mm - 1, dd) - Date.UTC(y, 0, 1)) / 86400000;
@@ -1857,7 +1500,7 @@ function tryDateJump() {
     advanceTime(0.2);
     if (currentCalendarDay() === target) break;
   }
-  dateJump = null;
+  setDateJump(null);
 }
 
 // ---------------------------------------------------------------------------
@@ -1870,7 +1513,12 @@ function tryDateJump() {
 const SAVE_KEY = "traktoripeli.save";
 const SAVE_VERSION = 4; // bump when map generation or calendar meaning changes: stale saves drop
 let saveTimer = 0;
-let savingDisabled = false; // set when navigating away from a discarded run
+export let savingDisabled = false; // set when navigating away from a discarded run
+// Only this module may reassign savingDisabled (ESM imports are read-only
+// bindings) - input.js's handleMenuKey() calls this instead.
+export function setSavingDisabled(v) {
+  savingDisabled = v;
+}
 
 function saveGame() {
   if (!gameStarted || gameOver || savingDisabled) return;
@@ -1908,7 +1556,7 @@ function saveGame() {
   }
 }
 
-function loadSave() {
+export function loadSave() {
   try {
     const s = JSON.parse(localStorage.getItem(SAVE_KEY));
     return s && s.v === SAVE_VERSION && s.tiles && s.tiles.length === MAP_TILES
@@ -1919,7 +1567,7 @@ function loadSave() {
   }
 }
 
-function clearSave() {
+export function clearSave() {
   try {
     localStorage.removeItem(SAVE_KEY);
   } catch {
@@ -1962,7 +1610,7 @@ function endSurvival() {
 // Offered on the bankruptcy screen: rather than starting over, the same
 // farm — tractor, fields, calendar — carries on in sandbox mode, debt
 // forgiven and no tax ever falling due again.
-function continueInSandbox() {
+export function continueInSandbox() {
   setMode("sandbox");
   cash = SANDBOX_START_CASH;
   gameOver = false;
@@ -2105,7 +1753,7 @@ function implementPose() {
 // True when any part of the implement's working width is over field dirt.
 // Deliberately generous — samples across the blades and a bit ahead of
 // them — so working the edge rows of a field isn't fiddly.
-function implementOverField() {
+export function implementOverField() {
   const pose = implementPose();
   const points = [
     [-9.8, -4],
@@ -3137,7 +2785,7 @@ function draw() {
 // player changed need repainting; the season's colors then catch up through
 // the usual gradual background repaint.
 // A fresh visit opens the start menu: let it offer the autosaved run
-if (menuOpen) menuSaveInfo = loadSave();
+refreshMenuSaveInfo();
 
 {
   const s = gameStarted ? loadSave() : null;
@@ -3172,7 +2820,12 @@ let lastTime = performance.now();
 let awayPool = 0; // time the dt cap discarded, waiting to be applied
 
 // FPS readout (Shift+F): frames averaged over half-second windows
-let fpsShown = false;
+export let fpsShown = false;
+// Only this module may reassign fpsShown (ESM imports are read-only
+// bindings) - input.js's handleGameplayKey() calls this instead.
+export function setFpsShown(v) {
+  fpsShown = v;
+}
 let fpsFrames = 0;
 let fpsMs = 0;
 let fpsValue = 0;
