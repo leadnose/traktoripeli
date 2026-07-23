@@ -442,7 +442,7 @@ function updateAudio() {
   // Ground work noise while a lowered implement is moving
   const imp = IMPLEMENTS[tractor.implement];
   const working =
-    !gameOver && imp.liftable && tractor.implLift < 0.3 && Math.abs(tractor.speed) > 2;
+    !gameOver && imp.liftable && tractor.implLift < 0.3 && Math.abs(tractor.speed) > MOVING_THRESHOLD;
   const [center, level] = WORK_NOISE[tractor.implement] || [300, 0.15];
   set(audio.workFilter.frequency, center, 0.1);
   set(audio.workGain.gain, working ? level : 0, 0.15);
@@ -4570,7 +4570,7 @@ function drawScene(camX, camY) {
   makeRoundItems(items, TRACTOR_SHAPES, tractor.x, tractor.y, tractor.angle, 0, camX, camY);
   // The driver bounces gently in the seat while rolling; the whole stack
   // shares one offset so its internal ordering never changes
-  const bob = Math.abs(tractor.speed) > 2 ? Math.sin(worldTime * 11) * 0.22 : 0;
+  const bob = Math.abs(tractor.speed) > MOVING_THRESHOLD ? Math.sin(worldTime * 11) * 0.22 : 0;
   for (const s of DRIVER_SHAPES) s.z = s.rest + bob;
   makeRoundItems(items, DRIVER_SHAPES, tractor.x, tractor.y, tractor.angle, 0, camX, camY);
   makeItems(items, impBoxes, pose.x, pose.y, pose.angle, liftZ, camX, camY);
@@ -5139,9 +5139,10 @@ function updateLadybug(dt) {
     return;
   }
   if (!gameStarted || gameOver) return;
-  // Only a slow, deliberate approach counts as finding it
+  // Only a slow, deliberate approach counts as finding it (half the work
+  // gear's top speed, same proportion as before GEAR_SLOW was rescaled)
   const d = Math.hypot(tractor.x - ladybug.wx, tractor.y - ladybug.wy);
-  if (d < 8 && Math.abs(tractor.speed) < 8) {
+  if (d < 8 && Math.abs(tractor.speed) < 7) {
     cash += LADYBUG_BONUS;
     luckFlash = 1.2;
     playPickup();
@@ -5178,7 +5179,7 @@ let smokeTimer = 0;
 function updateSmoke(dt) {
   const onGas =
     keys.ArrowUp || autoThrottling() || (touchDrive.throttleActive && touchDrive.throttle > 0.05);
-  if (!gameOver && (onGas || Math.abs(tractor.speed) > 5)) {
+  if (!gameOver && (onGas || Math.abs(tractor.speed) > 3.3)) {
     smokeTimer -= dt;
     if (smokeTimer <= 0) {
       smokeTimer = onGas ? 0.07 : 0.18;
@@ -5595,6 +5596,7 @@ const tractor = {
   y: FARM.y + 10,
   angle: -2.4, // facing up-left, toward the middle of the map
   speed: 0, // world units/s, positive = forward
+  angVel: 0, // rad/s, ramps toward the steering target instead of snapping to it
   fastGear: true, // Space toggles road mode (fast, lifted) vs work mode (slow, lowered)
   implement: "plow", // current implement: plow / seeder / harvester / trailer
   implAngle: -2.4, // world heading of a towed implement (trails the hitch)
@@ -5605,19 +5607,50 @@ const tractor = {
   workLane: null, // tile row/column the current pass is locked to (see field work)
 };
 
-const ACCEL = 55;
-const BRAKE = 80;
-const FRICTION = 28;
-const GEAR_FAST = 42;
-const GEAR_SLOW = 16;
+// Top speeds lean toward history without fully committing to it: true
+// pre-WW2 British tractor speeds (Ivel/Saunderson ~2-4mph in the field,
+// even a late-1930s Fordson N's top road gear only ~8mph) played too
+// slow to be fun once tried. These split the difference, about 2/3 of
+// the way back from that historical pace toward the original arcade-y
+// numbers (GEAR_FAST 42, GEAR_SLOW 16) — still noticeably more sedate
+// than a modern tractor, just not a literal simulation. World-unit/mph
+// conversion (for whoever retunes
+// this again): derived from the tractor model's own proportions
+// (TRACTOR_WHEELS' 3.0-unit rear wheel radius vs a real period wheel's
+// ~0.68m, and the 9.5-unit wheelbase vs a real Fordson's ~2.03m, both
+// agreeing on ~0.23m/unit, i.e. ~1.96 world units/s per mph) — so
+// GEAR_FAST≈28 is ~14mph; GEAR_SLOW≈14 is ~7mph (nudged up from an
+// initial ~5mph — felt too slow for fieldwork even after the road gear
+// was judged right), both above the historical figures on purpose.
+// ACCEL/BRAKE/FRICTION/accelRate/gravity (below, and in update()) scale
+// with GEAR_FAST's ratio to the original 42 (28/42 ≈ 0.67), so the
+// tractor still reaches its top speed and coasts to a stop over roughly
+// the same relative time as the original — only the ceiling moved, not
+// how "heavy" it feels getting there.
+const ACCEL = 37;
+const BRAKE = 53;
+const FRICTION = 19;
+const GEAR_FAST = 28; // ~14mph, top (road) gear
+const GEAR_SLOW = 14; // ~7mph, working (plow) gear
 const MAX_REVERSE = -GEAR_SLOW; // backing up is never faster than the work gear
+// Shared "is the tractor meaningfully moving" gate — field work, the
+// ground-work engine noise, the driver's seat bounce, and a couple of HUD
+// warnings all use this rather than a bare 0 so a stopped-but-twitching
+// tractor doesn't flicker them on and off. Scaled with GEAR_SLOW's ratio
+// to the original 16 (was a bare 2 there).
+const MOVING_THRESHOLD = 1.75;
 // Fuel burn only applies while actually on the gas; coasting or sitting
 // still is free. Road gear burns faster than a work-gear pass, giving the
 // work-mode auto-throttle choice real stakes.
 const FUEL_BURN_WORK = 0.5; // fuel/s, work gear on the gas
 const FUEL_BURN_ROAD = 1.1; // fuel/s, road gear on the gas
 // An empty tank never fully strands the tractor — it limps home at a
-// fraction of its usual top speed instead of stopping dead.
+// fraction of its usual top speed instead of stopping dead. Left at its
+// original (pre-rescale) value rather than scaled down with the gears —
+// scaling it along with GEAR_SLOW made the limp speed feel painfully
+// slow, and unlike normal driving there's no "it should feel heavy"
+// case for it: running dry is already a punishing enough state on its
+// own without also crawling.
 const FUEL_EMPTY_LIMP = 4;
 // Ice underfoot: ramps continuously with winterDepth(), mildest at the
 // edges of winter and strongest at midwinter. Top speed drops, and so
@@ -5630,6 +5663,14 @@ const WINTER_ACCEL_PENALTY = 0.5; // accel/braking rate lost at midwinter's icie
 // into the adjacent row (one tile = 16 units away).
 const TURN_RADIUS = 7; // world units
 const MAX_TURN_RATE = 2.5; // rad/s cap so the fast gear doesn't spin wildly
+// Steering doesn't snap to its target rate — it ramps there at this
+// angular acceleration instead, so turning in feels like leaning a heavy
+// machine into a corner rather than an instant twitch. This only softens
+// the *approach* to a turn; once angVel catches up to the target it holds
+// steady there, so the sustained-turn radius stays ~TURN_RADIUS exactly
+// as before (see steering below, in update()) — only the entry/exit of a
+// turn gets slower, not the circle itself.
+const STEER_RESPONSE = 5; // rad/s²
 
 // Towed implements pivot at the drawbar pin and trail behind the tractor
 const HITCH_X = -7; // hitch pin position in tractor-local coords
@@ -5736,18 +5777,22 @@ function update(dt) {
     if (tractor.speed > 0) tractor.speed = Math.max(0, tractor.speed - FRICTION * dt);
     else tractor.speed = Math.min(0, tractor.speed + FRICTION * dt);
   }
-  // Gravity along the slope: uphill fights the engine, downhill helps
+  // Gravity along the slope: uphill fights the engine, downhill helps.
+  // Scaled with ACCEL/BRAKE/FRICTION (was a bare 60) — left at its old
+  // strength it would now overpower the much weaker period engine on any
+  // real hill, instead of just leaning on it the way it used to.
   const cos = Math.cos(tractor.angle);
   const sin = Math.sin(tractor.angle);
   const grade =
     (terrainHeight(tractor.x + cos * 4, tractor.y + sin * 4) -
       terrainHeight(tractor.x - cos * 4, tractor.y - sin * 4)) /
     8;
-  tractor.speed -= grade * 60 * dt;
+  tractor.speed -= grade * 40 * dt;
 
   // At a crawl with no throttle the tractor simply stops — otherwise slope
   // gravity keeps it creeping forever and the camera never settles
-  if (throttleInput === 0 && brakeInput === 0 && Math.abs(tractor.speed) < 1.5) {
+  // (scaled with GEAR_SLOW's ratio to the original 16, was a bare 1.5)
+  if (throttleInput === 0 && brakeInput === 0 && Math.abs(tractor.speed) < 1.3) {
     tractor.speed = 0;
   }
 
@@ -5779,12 +5824,12 @@ function update(dt) {
   const wd = winterDepth();
   maxForward *= 1 - WINTER_MAX_SPEED_PENALTY * wd;
   maxReverse *= 1 - WINTER_MAX_SPEED_PENALTY * wd;
-  const accelRate = 120 * (1 - WINTER_ACCEL_PENALTY * wd);
+  const accelRate = 80 * (1 - WINTER_ACCEL_PENALTY * wd); // scaled with GEAR_FAST, see its comment
 
   // A lowered implement digging into unbroken ground bogs the tractor down
   if (imp.liftable && tractor.implLift < 0.5 && !implementOverField()) {
-    maxForward = 3;
-    maxReverse = -3;
+    maxForward = 2.6;
+    maxReverse = -2.6;
   }
 
   if (tractor.speed > maxForward)
@@ -5799,8 +5844,15 @@ function update(dt) {
   const steeringInput = touchDrive.steeringActive
     ? touchDrive.steering
     : (keys.ArrowRight ? 1 : 0) - (keys.ArrowLeft ? 1 : 0);
-  const angVel = turnRate * steeringInput;
-  tractor.angle += angVel * dt;
+  // Ramp toward the target rate rather than snapping to it (see
+  // STEER_RESPONSE) — the sustained-turn radius is unchanged, only how
+  // briskly the tractor winds up to and out of it.
+  const targetAngVel = turnRate * steeringInput;
+  const maxAngVelStep = STEER_RESPONSE * dt;
+  if (tractor.angVel < targetAngVel)
+    tractor.angVel = Math.min(targetAngVel, tractor.angVel + maxAngVelStep);
+  else tractor.angVel = Math.max(targetAngVel, tractor.angVel - maxAngVelStep);
+  tractor.angle += tractor.angVel * dt;
 
   // Move on the ground plane
   const prevX = tractor.x;
@@ -5894,7 +5946,7 @@ function update(dt) {
     let rel = tractor.angle - tractor.implAngle;
     rel = Math.atan2(Math.sin(rel), Math.cos(rel)); // wrap to (-pi, pi]
     rel -=
-      ((tractor.speed * Math.sin(rel) + HITCH_X * angVel * Math.cos(rel)) /
+      ((tractor.speed * Math.sin(rel) + HITCH_X * tractor.angVel * Math.cos(rel)) /
         imp.towLength) *
       dt;
     rel = Math.max(-MAX_HITCH_ANGLE, Math.min(MAX_HITCH_ANGLE, rel));
@@ -5920,7 +5972,7 @@ function update(dt) {
   // distance, which would let a zigzag cover two rows in one pass). The
   // lock moves once the centerline is well inside a neighboring row, or
   // when the travel axis flips. Raising the implement ends the pass.
-  if (imp.liftable && tractor.implLift < 0.3 && Math.abs(tractor.speed) > 2) {
+  if (imp.liftable && tractor.implLift < 0.3 && Math.abs(tractor.speed) > MOVING_THRESHOLD) {
     const pose = implementPose();
     const pcos = Math.cos(pose.angle);
     const psin = Math.sin(pose.angle);
@@ -6248,7 +6300,7 @@ function draw() {
     const dryRun =
       seeds === 0 &&
       tractor.implLift < 0.3 &&
-      Math.abs(tractor.speed) > 2 &&
+      Math.abs(tractor.speed) > MOVING_THRESHOLD &&
       implementOverField();
     const seedColor = dryRun
       ? ((worldTime * 6) | 0) % 2 === 0
@@ -6264,7 +6316,7 @@ function draw() {
     // by grain sacks it has no room to pick up
     const fullRun =
       cargo === TRAILER_CAP &&
-      Math.abs(tractor.speed) > 2 &&
+      Math.abs(tractor.speed) > MOVING_THRESHOLD &&
       implementOverField();
     const cargoColor = fullRun && ((worldTime * 6) | 0) % 2 === 0 ? RED : null;
     seg(`CARGO: ${cargo}/${TRAILER_CAP}${atCity ? " @TOWN" : ""}   `, cargoColor);
