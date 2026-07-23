@@ -4,10 +4,11 @@ import { MAP_TILES } from "./projection.js";
 import { mixHex, tint, meadowTint, stubbleTint, grassDotShades, dirtDotShades } from "./lighting.js";
 import { GRASS_DOTS, MEADOW_DOTS, DIRT_DOTS, STUBBLE_DOTS, drawTile } from "./ground.js";
 import { TREE_BLOBS } from "./trees.js";
-// paintSky (Sky section) and timeLeft/ROUND_TIME (Tractor section) aren't
-// split out yet - genuine circular imports, safe because they're only
-// read/called inside updateSeason(), never at this module's own top level.
-import { paintSky, timeLeft, ROUND_TIME } from "./legacy.js";
+import { paintSky } from "./sky.js";
+// timeLeft/ROUND_TIME aren't split out yet (Tractor section) - a genuine
+// circular import, safe because they're only read inside updateSeason(),
+// never at this module's own top level.
+import { timeLeft, ROUND_TIME } from "./legacy.js";
 
 // ---------------------------------------------------------------------------
 // Seasons: the round runs from spring through summer into autumn and back

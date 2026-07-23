@@ -205,6 +205,10 @@ import {
   seasonHex,
   updateSeason,
 } from "./seasons.js";
+import { skyCanvas, drawSun, drawClouds, initSky } from "./sky.js";
+import { drawMist } from "./mist.js";
+import { butterflies, initButterflies, updateButterflies, drawButterflies } from "./butterflies.js";
+import { ladybug, luckFlash, placeLadybug, updateLadybug, drawLadybug } from "./ladybug.js";
 
 const WORK_NOISE = { plow: [220, 0.16], seeder: [480, 0.14], harvester: [1100, 0.22] };
 
@@ -471,6 +475,9 @@ initSignposts();
 initCart();
 initBirds();
 initBoxModels();
+initSky();
+initButterflies();
+placeLadybug();
 
 // ---------------------------------------------------------------------------
 // Scene rendering: all box sets (tractor, implement, farm, sacks) go into one
@@ -844,245 +851,7 @@ function drawScene(camX, camY) {
   ctx.drawImage(sceneCanvas, 0, 0);
 }
 
-// ---------------------------------------------------------------------------
-// Sky: gradient, a friendly sun, and puffy clouds drifting past the island
-// ---------------------------------------------------------------------------
-
 export let worldTime = 0;
-
-// How overcast the day is, 0 (clear) to 1 (socked in): two slow sines of
-// unrelated periods multiplied together, so it drifts continuously and
-// never repeats on a predictable beat or pops between frames — same
-// no-per-frame-randomness, no-snapping rule the rest of the weather/season
-// system follows.
-function mistiness() {
-  return 0.5 + 0.5 * Math.sin(worldTime * 0.02) * Math.sin(worldTime * 0.0053 + 1.7);
-}
-
-// The sky gradient is prerendered so it can be dithered, and repainted
-// whenever the season shifts its colors
-const skyCanvas = document.createElement("canvas");
-skyCanvas.width = VIEW_W;
-skyCanvas.height = VIEW_H;
-const skyCtx = skyCanvas.getContext("2d", { willReadFrequently: true });
-
-export function paintSky() {
-  const g = skyCtx.createLinearGradient(0, 0, 0, VIEW_H);
-  g.addColorStop(0, shade(seasonHex(SKY_TOP_SEASONS), 1));
-  g.addColorStop(1, shade(seasonHex(SKY_BOTTOM_SEASONS), 1));
-  skyCtx.fillStyle = g;
-  skyCtx.fillRect(0, 0, VIEW_W, VIEW_H);
-  ditherRegion(skyCtx, 0, 0, VIEW_W, VIEW_H);
-}
-
-paintSky();
-
-function drawSun() {
-  ctx.fillStyle = "rgba(255,240,170,0.4)";
-  ctx.beginPath();
-  ctx.arc(56, 44, 20, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = "#ffe66b";
-  ctx.beginPath();
-  ctx.arc(56, 44, 13, 0, Math.PI * 2);
-  ctx.fill();
-}
-
-const CLOUDS = [];
-for (let i = 0; i < 9; i++) {
-  CLOUDS.push({
-    x: rand() * (VIEW_W + 240),
-    y: rand() * (VIEW_H + 200),
-    speed: 2 + rand() * 3,
-    scale: 0.7 + rand() * 0.9,
-    par: 0.15 + rand() * 0.25, // parallax: far clouds track the camera less
-  });
-}
-
-function drawClouds(camX, camY) {
-  const wrapX = VIEW_W + 240;
-  const wrapY = VIEW_H + 200;
-  // Greyer and a touch more solid on overcast days, paper-white on clear ones
-  const m = mistiness();
-  const grey = Math.round(252 - 40 * m);
-  ctx.fillStyle = `rgba(${grey},${grey - 2},${grey - 8},${(0.8 + 0.15 * m).toFixed(2)})`;
-  for (const c of CLOUDS) {
-    const sx = ((((c.x + worldTime * c.speed - camX * c.par) % wrapX) + wrapX) % wrapX) - 120;
-    const sy = ((((c.y - camY * c.par) % wrapY) + wrapY) % wrapY) - 100;
-    const s = c.scale * 1.4;
-    ctx.beginPath();
-    ctx.arc(sx, sy, 7 * s, 0, Math.PI * 2);
-    ctx.arc(sx - 8 * s, sy + 2 * s, 5 * s, 0, Math.PI * 2);
-    ctx.arc(sx + 8 * s, sy + 2 * s, 5 * s, 0, Math.PI * 2);
-    ctx.fill();
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Mist: a soft overcast haze that thickens and thins with mistiness(), plus
-// a light shower once it's properly socked in. Pure screen-space overlay
-// drawn straight to ctx, so it never touches the ink outline pipeline. Rain
-// streaks are laid out by golden-ratio hops instead of the seeded RNG, so
-// world generation stays byte-identical for a given seed.
-// ---------------------------------------------------------------------------
-
-const RAIN_STREAKS = [];
-for (let i = 0; i < 70; i++) {
-  RAIN_STREAKS.push({
-    x: ((i * 0.618034) % 1) * (VIEW_W + 40),
-    y: ((i * 0.381966) % 1) * VIEW_H,
-    speed: 14 + ((i * 7) % 13),
-    sway: (i * 2.399963) % (Math.PI * 2), // golden angle, in radians
-    size: i % 3 === 0 ? 2 : 1,
-  });
-}
-
-function drawMist(camX, camY) {
-  const m = mistiness();
-
-  // Haze: a pale gradient, thicker toward the top of the view (distance)
-  if (m > 0.02) {
-    const g = ctx.createLinearGradient(0, 0, 0, VIEW_H);
-    g.addColorStop(0, `rgba(206,216,220,${(0.4 * m).toFixed(2)})`);
-    g.addColorStop(1, `rgba(206,216,220,${(0.06 * m).toFixed(2)})`);
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, VIEW_W, VIEW_H);
-  }
-
-  // Rain only once it's properly overcast
-  const rain = Math.max(0, m - 0.55) / 0.45;
-  if (rain <= 0) return;
-  const n = Math.ceil(RAIN_STREAKS.length * Math.min(1, rain * 1.5));
-  ctx.strokeStyle = `rgba(205,218,226,${(0.3 + 0.35 * rain).toFixed(2)})`;
-  const wrapX = VIEW_W + 40;
-  for (let i = 0; i < n; i++) {
-    const f = RAIN_STREAKS[i];
-    const sx =
-      ((((f.x + Math.sin(worldTime * 2 + f.sway) * 3 - camX * 0.4) % wrapX) +
-        wrapX) %
-        wrapX) -
-      20;
-    const sy =
-      (((f.y + worldTime * f.speed * 2.4 - camY * 0.4) % VIEW_H) + VIEW_H) % VIEW_H;
-    ctx.beginPath();
-    ctx.moveTo(sx, sy);
-    ctx.lineTo(sx - 1, sy + 4);
-    ctx.stroke();
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Butterflies fluttering over the meadows
-// ---------------------------------------------------------------------------
-
-const BUTTERFLY_COLORS = ["#ff9ed2", "#ffd94f", "#ffffff", "#b8a6ff"];
-const butterflies = [];
-for (let i = 0; i < 40; i++) {
-  butterflies.push({
-    wx: rand() * MAP_SIZE,
-    wy: rand() * MAP_SIZE,
-    a: rand() * Math.PI * 2,
-    phase: rand() * 10,
-    color: BUTTERFLY_COLORS[i % BUTTERFLY_COLORS.length],
-  });
-}
-
-function updateButterflies(dt) {
-  for (const b of butterflies) {
-    b.a += (rand() - 0.5) * 4 * dt;
-    b.wx += Math.cos(b.a) * 7 * dt;
-    b.wy += Math.sin(b.a) * 7 * dt;
-    if (b.wx < 16 || b.wx > MAP_SIZE - 16 || b.wy < 16 || b.wy > MAP_SIZE - 16) {
-      b.wx = clamp(b.wx, 16, MAP_SIZE - 16);
-      b.wy = clamp(b.wy, 16, MAP_SIZE - 16);
-      b.a = Math.atan2(MAP_SIZE / 2 - b.wy, MAP_SIZE / 2 - b.wx);
-    }
-  }
-}
-
-function drawButterflies(camX, camY) {
-  for (const b of butterflies) {
-    const wz = terrainHeight(b.wx, b.wy) + 4 + Math.sin(worldTime * 3 + b.phase) * 1.5;
-    const x = Math.round(projX(b.wx, b.wy) - camX);
-    const y = Math.round(projY(b.wx, b.wy, wz) - camY);
-    if (x < -2 || x > VIEW_W + 2 || y < -2 || y > VIEW_H + 2) continue;
-    ctx.fillStyle = b.color;
-    if (Math.sin(worldTime * 14 + b.phase) > 0) {
-      ctx.fillRect(x - 1, y, 1, 1); // wings spread
-      ctx.fillRect(x + 1, y, 1, 1);
-    } else {
-      ctx.fillRect(x, y - 1, 1, 2); // wings folded
-    }
-  }
-}
-
-// ---------------------------------------------------------------------------
-// The ladybug: one tiny critter hides in the grass somewhere. Roll up to it
-// slowly and it pays a little luck money, buzzes off, and hides again.
-// ---------------------------------------------------------------------------
-
-const LADYBUG_BONUS = 10;
-
-const ladybug = { wx: 0, wy: 0, flee: 0, dir: 0 };
-let luckFlash = 0; // makes the CASH readout blink green on a find
-
-function placeLadybug() {
-  for (let tries = 0; tries < 200; tries++) {
-    const wx = 24 + rand() * (MAP_SIZE - 48);
-    const wy = 24 + rand() * (MAP_SIZE - 48);
-    if (tileTypeAt(wx, wy) !== 0) continue;
-    if (roadTiles.has(tileKey(wx, wy))) continue;
-    // Not in the farmyard, where every run starts
-    if (Math.hypot(wx - FARM.x, wy - FARM.y) < FARM_RADIUS + 20) continue;
-    ladybug.wx = wx;
-    ladybug.wy = wy;
-    return;
-  }
-}
-
-placeLadybug();
-
-function updateLadybug(dt) {
-  luckFlash = Math.max(0, luckFlash - dt);
-  if (ladybug.flee > 0) {
-    // Airborne: buzz away from the finder, then hide somewhere fresh
-    ladybug.flee -= dt;
-    ladybug.wx += Math.cos(ladybug.dir) * 26 * dt;
-    ladybug.wy += Math.sin(ladybug.dir) * 26 * dt;
-    if (ladybug.flee <= 0) placeLadybug();
-    return;
-  }
-  if (!gameStarted || gameOver) return;
-  // Only a slow, deliberate approach counts as finding it — half the
-  // work gear's top speed, expressed as such so it stays exactly half no
-  // matter how GEAR_SLOW gets retuned
-  const d = Math.hypot(tractor.x - ladybug.wx, tractor.y - ladybug.wy);
-  if (d < 8 && Math.abs(tractor.speed) < GEAR_SLOW / 2) {
-    cash += LADYBUG_BONUS;
-    luckFlash = 1.2;
-    playPickup();
-    ladybug.flee = 1.6;
-    ladybug.dir = Math.atan2(ladybug.wy - tractor.y, ladybug.wx - tractor.x);
-  }
-}
-
-function drawLadybug(camX, camY) {
-  const b = ladybug;
-  const lift = b.flee > 0 ? (1.6 - b.flee) * 14 : 0;
-  const x = Math.round(projX(b.wx, b.wy) - camX);
-  const y = Math.round(projY(b.wx, b.wy, terrainHeight(b.wx, b.wy) + 0.6 + lift) - camY);
-  if (x < -3 || x > VIEW_W + 3 || y < -3 || y > VIEW_H + 3) return;
-  ctx.fillStyle = shade("#d8291f", 1); // wing shells
-  ctx.fillRect(x - 1, y - 1, 2, 2);
-  ctx.fillStyle = INK;
-  ctx.fillRect(x + 1, y - 1, 1, 2); // head
-  ctx.fillRect(x - 1, y - 1, 1, 1); // spot
-  if (b.flee > 0 && Math.sin(worldTime * 16) > 0) {
-    ctx.fillStyle = "rgba(252,247,235,0.9)"; // wing blur while airborne
-    ctx.fillRect(x - 2, y - 2, 1, 1);
-    ctx.fillRect(x + 2, y - 2, 1, 1);
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Exhaust smoke & chaff particles
@@ -1489,6 +1258,11 @@ export function continueInSandbox() {
 // Starting capital by mode: survival a buffer against the first tax bill,
 // sandbox plenty
 let cash = modeStartCash(mode);
+// Only this module may reassign `cash` (ESM imports are read-only
+// bindings) - ladybug.js's find bonus calls this instead of `cash += x`.
+export function addCash(amount) {
+  cash += amount;
+}
 export let seeds = 0; // start empty: buy seeds at the farm
 let cargo = 0; // sacks on the trailer
 let sold = 0; // total sacks delivered to the city
@@ -1538,7 +1312,7 @@ export const tractor = {
 // after the road gear was judged right), both above the historical
 // figures on purpose.
 const GEAR_FAST = 28; // ~14mph, top (road) gear
-const GEAR_SLOW = 14; // ~7mph, working (plow) gear
+export const GEAR_SLOW = 14; // ~7mph, working (plow) gear
 // Every other speed-coupled constant below (and in update()) is an
 // expression in one of these two ratios, not a hand-rounded literal —
 // ACCEL/BRAKE/FRICTION/accelRate/the slope-gravity coefficient/the
