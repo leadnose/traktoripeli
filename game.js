@@ -2138,6 +2138,45 @@ function addStamp(x, y, r, color) {
 // can be redrawn identically over a repainted tile
 const yardPixels = [];
 
+// Blob-edge irregularity: a tile counts as "in the blob" only inside a
+// random fraction of the nominal radius (70%-130%), so lakes, forest
+// stands and meadow patches all come out ragged rather than as perfect
+// circles. Shared by every blob-growth loop in makeMap() below.
+const BLOB_EDGE_MIN = 0.7;
+const BLOB_EDGE_SPREAD = 0.6;
+
+// Grow ragged blobs of tiles into targetSet (forest stands, meadow
+// patches) until it holds targetCount tiles or too many attempts fail:
+// pick an open-ground center clear of the farm/city, then flood a
+// random-radius disc of tiles around it using the blob-edge formula
+// above. extraExclude(tx, ty), if given, is checked before the random
+// blob-edge roll (same as the built-in `tiles[ty][tx] === 0` check) so it
+// never perturbs the rand() call sequence — e.g. meadow patches use it to
+// dodge tiles forest already claimed, without forest needing to know
+// meadow exists.
+function growPatch(targetSet, targetCount, extraExclude) {
+  for (let tries = 0; targetSet.size < targetCount && tries < 600; tries++) {
+    const cx = 2 + ((rand() * (MAP_TILES - 4)) | 0);
+    const cy = 2 + ((rand() * (MAP_TILES - 4)) | 0);
+    if (tiles[cy][cx] !== 0 || (extraExclude && extraExclude(cx, cy))) continue;
+    if (Math.hypot((cx + 0.5) * TILE - FARM.x, (cy + 0.5) * TILE - FARM.y) < FARM_PASTURE_RADIUS)
+      continue;
+    if (Math.hypot((cx + 0.5) * TILE - CITY.x, (cy + 0.5) * TILE - CITY.y) < CITY_RADIUS + 40)
+      continue;
+    const r = 2.5 + rand() * 4;
+    for (let ty = Math.max(0, Math.floor(cy - r)); ty <= Math.min(MAP_TILES - 1, Math.ceil(cy + r)); ty++)
+      for (let tx = Math.max(0, Math.floor(cx - r)); tx <= Math.min(MAP_TILES - 1, Math.ceil(cx + r)); tx++)
+        if (
+          tiles[ty][tx] === 0 &&
+          !(extraExclude && extraExclude(tx, ty)) &&
+          Math.hypot(tx - cx, ty - cy) < r * (BLOB_EDGE_MIN + rand() * BLOB_EDGE_SPREAD) &&
+          Math.hypot((tx + 0.5) * TILE - FARM.x, (ty + 0.5) * TILE - FARM.y) > FARM_PASTURE_RADIUS &&
+          Math.hypot((tx + 0.5) * TILE - CITY.x, (ty + 0.5) * TILE - CITY.y) > CITY_RADIUS + 40
+        )
+          targetSet.add(ty * MAP_TILES + tx);
+  }
+}
+
 function makeMap() {
   for (let ty = 0; ty < MAP_TILES; ty++) {
     tiles.push(new Array(MAP_TILES).fill(0));
@@ -2194,7 +2233,7 @@ function makeMap() {
       const r = (big ? 3.5 : 2) + rand() * 2.5;
       for (let ty = Math.floor(by - r - 1); ty <= by + r + 1; ty++)
         for (let tx = Math.floor(bx - r - 1); tx <= bx + r + 1; tx++)
-          if (Math.hypot(tx - bx, ty - by) < r * (0.7 + rand() * 0.6) && lowEnough(tx, ty))
+          if (Math.hypot(tx - bx, ty - by) < r * (BLOB_EDGE_MIN + rand() * BLOB_EDGE_SPREAD) && lowEnough(tx, ty))
             setWater(tx, ty);
     }
     lakes++;
@@ -2264,7 +2303,7 @@ function makeMap() {
     const r = 2.5 + rand() * 3.5;
     for (let ty = Math.floor(cy - r - 1); ty <= cy + r + 1; ty++)
       for (let tx = Math.floor(cx - r - 1); tx <= cx + r + 1; tx++)
-        if (Math.hypot(tx - cx, ty - cy) < r * (0.7 + rand() * 0.6) && lowEnough(tx, ty, limit))
+        if (Math.hypot(tx - cx, ty - cy) < r * (BLOB_EDGE_MIN + rand() * BLOB_EDGE_SPREAD) && lowEnough(tx, ty, limit))
           setWater(tx, ty);
   }
 
@@ -2531,50 +2570,13 @@ function makeMap() {
   // planted after the map exists.
   const openLand = MAP_TILES * MAP_TILES - waterTiles - fieldTiles;
   const forestTarget = openLand * rollBand(PROFILE.forest);
-  for (let tries = 0; forestTiles.size < forestTarget && tries < 600; tries++) {
-    const cx = 2 + ((rand() * (MAP_TILES - 4)) | 0);
-    const cy = 2 + ((rand() * (MAP_TILES - 4)) | 0);
-    if (tiles[cy][cx] !== 0) continue;
-    if (Math.hypot((cx + 0.5) * TILE - FARM.x, (cy + 0.5) * TILE - FARM.y) < FARM_PASTURE_RADIUS)
-      continue;
-    if (Math.hypot((cx + 0.5) * TILE - CITY.x, (cy + 0.5) * TILE - CITY.y) < CITY_RADIUS + 40)
-      continue;
-    const r = 2.5 + rand() * 4;
-    for (let ty = Math.max(0, Math.floor(cy - r)); ty <= Math.min(MAP_TILES - 1, Math.ceil(cy + r)); ty++)
-      for (let tx = Math.max(0, Math.floor(cx - r)); tx <= Math.min(MAP_TILES - 1, Math.ceil(cx + r)); tx++)
-        if (
-          tiles[ty][tx] === 0 &&
-          Math.hypot(tx - cx, ty - cy) < r * (0.7 + rand() * 0.6) &&
-          Math.hypot((tx + 0.5) * TILE - FARM.x, (ty + 0.5) * TILE - FARM.y) > FARM_PASTURE_RADIUS &&
-          Math.hypot((tx + 0.5) * TILE - CITY.x, (ty + 0.5) * TILE - CITY.y) > CITY_RADIUS + 40
-        )
-          forestTiles.add(ty * MAP_TILES + tx);
-  }
+  growPatch(forestTiles, forestTarget);
 
   // Meadow patches: grown the same way as forest stands, but over whatever
   // free grass forest left behind — bright open wildflower ground instead
   // of tree cover. Share is of that remaining free land, from the profile.
   const meadowTarget = (openLand - forestTiles.size) * rollBand(PROFILE.meadow);
-  for (let tries = 0; meadowTiles.size < meadowTarget && tries < 600; tries++) {
-    const cx = 2 + ((rand() * (MAP_TILES - 4)) | 0);
-    const cy = 2 + ((rand() * (MAP_TILES - 4)) | 0);
-    if (tiles[cy][cx] !== 0 || forestTiles.has(cy * MAP_TILES + cx)) continue;
-    if (Math.hypot((cx + 0.5) * TILE - FARM.x, (cy + 0.5) * TILE - FARM.y) < FARM_PASTURE_RADIUS)
-      continue;
-    if (Math.hypot((cx + 0.5) * TILE - CITY.x, (cy + 0.5) * TILE - CITY.y) < CITY_RADIUS + 40)
-      continue;
-    const r = 2.5 + rand() * 4;
-    for (let ty = Math.max(0, Math.floor(cy - r)); ty <= Math.min(MAP_TILES - 1, Math.ceil(cy + r)); ty++)
-      for (let tx = Math.max(0, Math.floor(cx - r)); tx <= Math.min(MAP_TILES - 1, Math.ceil(cx + r)); tx++)
-        if (
-          tiles[ty][tx] === 0 &&
-          !forestTiles.has(ty * MAP_TILES + tx) &&
-          Math.hypot(tx - cx, ty - cy) < r * (0.7 + rand() * 0.6) &&
-          Math.hypot((tx + 0.5) * TILE - FARM.x, (ty + 0.5) * TILE - FARM.y) > FARM_PASTURE_RADIUS &&
-          Math.hypot((tx + 0.5) * TILE - CITY.x, (ty + 0.5) * TILE - CITY.y) > CITY_RADIUS + 40
-        )
-          meadowTiles.add(ty * MAP_TILES + tx);
-  }
+  growPatch(meadowTiles, meadowTarget, (tx, ty) => forestTiles.has(ty * MAP_TILES + tx));
 
   // Back-to-front so nearer hills paint over the ones behind them. paintTile
   // skips the per-tile dithering: the whole canvas gets one pass at the end.
