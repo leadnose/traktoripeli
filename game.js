@@ -3615,7 +3615,11 @@ function updateAnimals(dt) {
       const side = tdx * -hy + tdy * hx >= 0 ? 1 : -1;
       const fx = -hy * side + (tdx / (spookDist || 1)) * 0.5;
       const fy = hx * side + (tdy / (spookDist || 1)) * 0.5;
-      const want = spookSpeed > 3 ? Math.atan2(fy, fx) : Math.atan2(tdy, tdx);
+      // Threshold scales with GEAR_SLOW_RATIO like the tractor's own
+      // "meaningfully moving" checks — this reads tractor.speed too (or
+      // cart.moving, fixed and unrelated to tractor gearing) and was
+      // missed by the original tractor-speed rescale
+      const want = spookSpeed > 3 * GEAR_SLOW_RATIO ? Math.atan2(fy, fx) : Math.atan2(tdy, tdx);
       const d = Math.atan2(Math.sin(want - a.angle), Math.cos(want - a.angle));
       a.angle += Math.max(-spec.fleeTurn * dt, Math.min(spec.fleeTurn * dt, d));
       const nx = a.wx + Math.cos(a.angle) * spec.flee * dt;
@@ -4570,7 +4574,7 @@ function drawScene(camX, camY) {
   makeRoundItems(items, TRACTOR_SHAPES, tractor.x, tractor.y, tractor.angle, 0, camX, camY);
   // The driver bounces gently in the seat while rolling; the whole stack
   // shares one offset so its internal ordering never changes
-  const bob = Math.abs(tractor.speed) > MOVING_THRESHOLD ? Math.sin(worldTime * 11) * 0.22 : 0;
+  const bob = Math.abs(tractor.speed) > ROLLING_THRESHOLD ? Math.sin(worldTime * 11) * 0.22 : 0;
   for (const s of DRIVER_SHAPES) s.z = s.rest + bob;
   makeRoundItems(items, DRIVER_SHAPES, tractor.x, tractor.y, tractor.angle, 0, camX, camY);
   makeItems(items, impBoxes, pose.x, pose.y, pose.angle, liftZ, camX, camY);
@@ -5139,10 +5143,11 @@ function updateLadybug(dt) {
     return;
   }
   if (!gameStarted || gameOver) return;
-  // Only a slow, deliberate approach counts as finding it (half the work
-  // gear's top speed, same proportion as before GEAR_SLOW was rescaled)
+  // Only a slow, deliberate approach counts as finding it — half the
+  // work gear's top speed, expressed as such so it stays exactly half no
+  // matter how GEAR_SLOW gets retuned
   const d = Math.hypot(tractor.x - ladybug.wx, tractor.y - ladybug.wy);
-  if (d < 8 && Math.abs(tractor.speed) < 7) {
+  if (d < 8 && Math.abs(tractor.speed) < GEAR_SLOW / 2) {
     cash += LADYBUG_BONUS;
     luckFlash = 1.2;
     playPickup();
@@ -5179,7 +5184,7 @@ let smokeTimer = 0;
 function updateSmoke(dt) {
   const onGas =
     keys.ArrowUp || autoThrottling() || (touchDrive.throttleActive && touchDrive.throttle > 0.05);
-  if (!gameOver && (onGas || Math.abs(tractor.speed) > 3.3)) {
+  if (!gameOver && (onGas || Math.abs(tractor.speed) > 5 * GEAR_FAST_RATIO)) {
     smokeTimer -= dt;
     if (smokeTimer <= 0) {
       smokeTimer = onGas ? 0.07 : 0.18;
@@ -5547,6 +5552,7 @@ document.addEventListener("visibilitychange", () => {
 function endSurvival() {
   gameOver = true;
   tractor.speed = 0;
+  tractor.angVel = 0;
   clearSave(); // a finished run must not resurrect on reload
   const entry = { years: year, cash, map: MAP_INDEX, date: Date.now() };
   let scores;
@@ -5614,31 +5620,48 @@ const tractor = {
 // the way back from that historical pace toward the original arcade-y
 // numbers (GEAR_FAST 42, GEAR_SLOW 16) — still noticeably more sedate
 // than a modern tractor, just not a literal simulation. World-unit/mph
-// conversion (for whoever retunes
-// this again): derived from the tractor model's own proportions
-// (TRACTOR_WHEELS' 3.0-unit rear wheel radius vs a real period wheel's
-// ~0.68m, and the 9.5-unit wheelbase vs a real Fordson's ~2.03m, both
-// agreeing on ~0.23m/unit, i.e. ~1.96 world units/s per mph) — so
-// GEAR_FAST≈28 is ~14mph; GEAR_SLOW≈14 is ~7mph (nudged up from an
-// initial ~5mph — felt too slow for fieldwork even after the road gear
-// was judged right), both above the historical figures on purpose.
-// ACCEL/BRAKE/FRICTION/accelRate/gravity (below, and in update()) scale
-// with GEAR_FAST's ratio to the original 42 (28/42 ≈ 0.67), so the
-// tractor still reaches its top speed and coasts to a stop over roughly
-// the same relative time as the original — only the ceiling moved, not
-// how "heavy" it feels getting there.
-const ACCEL = 37;
-const BRAKE = 53;
-const FRICTION = 19;
+// conversion (for whoever retunes this again): derived from the tractor
+// model's own proportions (TRACTOR_WHEELS' 3.0-unit rear wheel radius vs
+// a real period wheel's ~0.68m, and the 9.5-unit wheelbase vs a real
+// Fordson's ~2.03m, both agreeing on ~0.23m/unit, i.e. ~1.96 world
+// units/s per mph) — so GEAR_FAST≈28 is ~14mph; GEAR_SLOW≈14 is ~7mph
+// (nudged up from an initial ~5mph — felt too slow for fieldwork even
+// after the road gear was judged right), both above the historical
+// figures on purpose.
 const GEAR_FAST = 28; // ~14mph, top (road) gear
 const GEAR_SLOW = 14; // ~7mph, working (plow) gear
+// Every other speed-coupled constant below (and in update()) is an
+// expression in one of these two ratios, not a hand-rounded literal —
+// ACCEL/BRAKE/FRICTION/accelRate/the slope-gravity coefficient/the
+// exhaust-smoke threshold move with GEAR_FAST_RATIO; MOVING_THRESHOLD/
+// the bogged-down cap/the crawl-stop threshold/the ladybug threshold/the
+// animal spook-flee threshold move with GEAR_SLOW_RATIO. That way a
+// future GEAR_FAST/GEAR_SLOW retune (this session did it three times)
+// carries all of them along automatically instead of needing each one
+// hand-recomputed and its "scaled by such-and-such ratio" comment
+// re-verified — which is exactly how one of these already drifted once:
+// an earlier pass's crawl-stop comment claimed an exact ratio that its
+// hardcoded literal didn't actually match.
+const GEAR_FAST_RATIO = GEAR_FAST / 42; // 42 was the original GEAR_FAST
+const GEAR_SLOW_RATIO = GEAR_SLOW / 16; // 16 was the original GEAR_SLOW
+const ACCEL = 55 * GEAR_FAST_RATIO;
+const BRAKE = 80 * GEAR_FAST_RATIO;
+const FRICTION = 28 * GEAR_FAST_RATIO;
 const MAX_REVERSE = -GEAR_SLOW; // backing up is never faster than the work gear
 // Shared "is the tractor meaningfully moving" gate — field work, the
-// ground-work engine noise, the driver's seat bounce, and a couple of HUD
-// warnings all use this rather than a bare 0 so a stopped-but-twitching
-// tractor doesn't flicker them on and off. Scaled with GEAR_SLOW's ratio
-// to the original 16 (was a bare 2 there).
-const MOVING_THRESHOLD = 1.75;
+// ground-work engine noise, and a couple of HUD warnings all use this
+// rather than a bare 0 so a stopped-but-twitching tractor doesn't flicker
+// them on and off. Gear-gated (all four call sites only apply while a
+// lowered implement is engaged in work gear), so this tracks GEAR_SLOW —
+// see ROLLING_THRESHOLD below for the one gear-agnostic "is it rolling at
+// all" case that doesn't belong on this constant.
+const MOVING_THRESHOLD = 2 * GEAR_SLOW_RATIO;
+// The driver's seat-bounce animation: unlike MOVING_THRESHOLD's four
+// sites, this one isn't gated to work gear — it fires at any speed in
+// either gear — so it tracks the gear-agnostic GEAR_FAST_RATIO instead of
+// being lumped in with MOVING_THRESHOLD just because the two started out
+// as the same bare number.
+const ROLLING_THRESHOLD = 2 * GEAR_FAST_RATIO;
 // Fuel burn only applies while actually on the gas; coasting or sitting
 // still is free. Road gear burns faster than a work-gear pass, giving the
 // work-mode auto-throttle choice real stakes.
@@ -5669,8 +5692,12 @@ const MAX_TURN_RATE = 2.5; // rad/s cap so the fast gear doesn't spin wildly
 // the *approach* to a turn; once angVel catches up to the target it holds
 // steady there, so the sustained-turn radius stays ~TURN_RADIUS exactly
 // as before (see steering below, in update()) — only the entry/exit of a
-// turn gets slower, not the circle itself.
-const STEER_RESPONSE = 5; // rad/s²
+// turn gets slower, not the circle itself. Expressed as "reach full lock
+// in about half a second" rather than a bare rad/s² figure so it stays
+// sensible on its own if MAX_TURN_RATE (the ceiling it's ramping toward)
+// ever changes — unlike the constants above, this one was never tied to
+// GEAR_FAST/GEAR_SLOW in the first place, so it doesn't move with them.
+const STEER_RESPONSE = MAX_TURN_RATE / 0.5; // rad/s²
 
 // Towed implements pivot at the drawbar pin and trail behind the tractor
 const HITCH_X = -7; // hitch pin position in tractor-local coords
@@ -5723,6 +5750,16 @@ function autoThrottling() {
     !keys.ArrowDown &&
     !(touchDrive.throttleActive && touchDrive.throttle < -0.05)
   );
+}
+
+// Moves `current` toward `target`, capped at `maxDelta` per call — the
+// "ramp toward a limit instead of snapping to it" shape both the tractor's
+// speed-vs-gear-ceiling clamp and its steering ramp need (see update()).
+// One expression handles both directions, so there's no if/else pair per
+// call site that could drift out of sync with each other.
+function approach(current, target, maxDelta) {
+  if (current < target) return Math.min(target, current + maxDelta);
+  return Math.max(target, current - maxDelta);
 }
 
 function update(dt) {
@@ -5787,12 +5824,11 @@ function update(dt) {
     (terrainHeight(tractor.x + cos * 4, tractor.y + sin * 4) -
       terrainHeight(tractor.x - cos * 4, tractor.y - sin * 4)) /
     8;
-  tractor.speed -= grade * 40 * dt;
+  tractor.speed -= grade * 60 * GEAR_FAST_RATIO * dt;
 
   // At a crawl with no throttle the tractor simply stops — otherwise slope
   // gravity keeps it creeping forever and the camera never settles
-  // (scaled with GEAR_SLOW's ratio to the original 16, was a bare 1.5)
-  if (throttleInput === 0 && brakeInput === 0 && Math.abs(tractor.speed) < 1.3) {
+  if (throttleInput === 0 && brakeInput === 0 && Math.abs(tractor.speed) < 1.5 * GEAR_SLOW_RATIO) {
     tractor.speed = 0;
   }
 
@@ -5824,18 +5860,16 @@ function update(dt) {
   const wd = winterDepth();
   maxForward *= 1 - WINTER_MAX_SPEED_PENALTY * wd;
   maxReverse *= 1 - WINTER_MAX_SPEED_PENALTY * wd;
-  const accelRate = 80 * (1 - WINTER_ACCEL_PENALTY * wd); // scaled with GEAR_FAST, see its comment
+  const accelRate = 120 * GEAR_FAST_RATIO * (1 - WINTER_ACCEL_PENALTY * wd);
 
   // A lowered implement digging into unbroken ground bogs the tractor down
   if (imp.liftable && tractor.implLift < 0.5 && !implementOverField()) {
-    maxForward = 2.6;
-    maxReverse = -2.6;
+    maxForward = 3 * GEAR_SLOW_RATIO;
+    maxReverse = -3 * GEAR_SLOW_RATIO;
   }
 
-  if (tractor.speed > maxForward)
-    tractor.speed = Math.max(maxForward, tractor.speed - accelRate * dt);
-  if (tractor.speed < maxReverse)
-    tractor.speed = Math.min(maxReverse, tractor.speed + accelRate * dt);
+  if (tractor.speed > maxForward) tractor.speed = approach(tractor.speed, maxForward, accelRate * dt);
+  if (tractor.speed < maxReverse) tractor.speed = approach(tractor.speed, maxReverse, accelRate * dt);
 
   // Steering only has effect while moving; reversing flips it like a real vehicle
   const turnRate =
@@ -5848,10 +5882,7 @@ function update(dt) {
   // STEER_RESPONSE) — the sustained-turn radius is unchanged, only how
   // briskly the tractor winds up to and out of it.
   const targetAngVel = turnRate * steeringInput;
-  const maxAngVelStep = STEER_RESPONSE * dt;
-  if (tractor.angVel < targetAngVel)
-    tractor.angVel = Math.min(targetAngVel, tractor.angVel + maxAngVelStep);
-  else tractor.angVel = Math.max(targetAngVel, tractor.angVel - maxAngVelStep);
+  tractor.angVel = approach(tractor.angVel, targetAngVel, STEER_RESPONSE * dt);
   tractor.angle += tractor.angVel * dt;
 
   // Move on the ground plane
@@ -5873,6 +5904,7 @@ function update(dt) {
     tractor.x = prevX;
     tractor.y = prevY;
     tractor.speed = 0;
+    tractor.angVel = 0; // a hard stop, not a coast — don't leave it spinning in place
   }
 
   // Trees are solid trunks: driving into one stops the tractor dead, same
@@ -5890,6 +5922,7 @@ function update(dt) {
           tractor.x = prevX;
           tractor.y = prevY;
           tractor.speed = 0;
+          tractor.angVel = 0;
           break outer;
         }
       }
@@ -5910,6 +5943,7 @@ function update(dt) {
       tractor.x = prevX;
       tractor.y = prevY;
       tractor.speed = 0;
+      tractor.angVel = 0;
       break;
     }
   }
@@ -5922,6 +5956,7 @@ function update(dt) {
       tractor.x = prevX;
       tractor.y = prevY;
       tractor.speed = 0;
+      tractor.angVel = 0;
       break;
     }
   }
@@ -5936,6 +5971,7 @@ function update(dt) {
       tractor.x = prevX;
       tractor.y = prevY;
       tractor.speed = 0;
+      tractor.angVel = 0;
       break;
     }
   }
