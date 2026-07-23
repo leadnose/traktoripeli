@@ -3609,6 +3609,20 @@ else addSign("FARM", FARM.x + 24, FARM.y + 24);
   }
 }
 
+// Step the animal forward along its current heading if the destination is
+// walkable; otherwise pivot smoothly in place (an instant turn every frame
+// strobes the model) rather than snapping toward some other heading.
+function moveOrPivot(a, walkable, speed, pivotRate, dt) {
+  const nx = a.wx + Math.cos(a.angle) * speed * dt;
+  const ny = a.wy + Math.sin(a.angle) * speed * dt;
+  if (walkable(nx, ny)) {
+    a.wx = nx;
+    a.wy = ny;
+  } else {
+    a.angle += pivotRate * dt;
+  }
+}
+
 function updateAnimals(dt) {
   for (const a of animals) {
     const spec = ANIMAL_SPECS[a.species];
@@ -3682,14 +3696,8 @@ function updateAnimals(dt) {
       const want = spookSpeed > 3 * GEAR_SLOW_RATIO ? Math.atan2(fy, fx) : Math.atan2(tdy, tdx);
       const d = Math.atan2(Math.sin(want - a.angle), Math.cos(want - a.angle));
       a.angle += clamp(d, -spec.fleeTurn * dt, spec.fleeTurn * dt);
-      const nx = a.wx + Math.cos(a.angle) * spec.flee * dt;
-      const ny = a.wy + Math.sin(a.angle) * spec.flee * dt;
-      if (walkable(nx, ny)) {
-        a.wx = nx;
-        a.wy = ny;
-      } else {
-        a.angle += 3 * dt; // cornered against water or a field: sidle along
-      }
+      // cornered against water or a field: sidle along the obstacle
+      moveOrPivot(a, walkable, spec.flee, 3, dt);
       continue; // fleeing overrides grazing and homing
     }
     if (a.pause > 0) {
@@ -3707,16 +3715,9 @@ function updateAnimals(dt) {
       const d = Math.atan2(Math.sin(want - a.angle), Math.cos(want - a.angle));
       a.angle += clamp(d, -2.5 * dt, 2.5 * dt);
     }
-    const nx = a.wx + Math.cos(a.angle) * spec.speed * dt;
-    const ny = a.wy + Math.sin(a.angle) * spec.speed * dt;
-    if (walkable(nx, ny)) {
-      a.wx = nx;
-      a.wy = ny;
-    } else {
-      // Blocked by water, a field or a road: pivot smoothly until a clear
-      // direction opens up (an instant turn every frame strobes the model)
-      a.angle += 2.5 * dt;
-    }
+    // Blocked by water, a field or a road: pivot smoothly until a clear
+    // direction opens up
+    moveOrPivot(a, walkable, spec.speed, 2.5, dt);
     if (rand() < spec.pauseChance) {
       a.pause = spec.pauseDur[0] + rand() * spec.pauseDur[1];
     }
