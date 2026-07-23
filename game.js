@@ -25,6 +25,12 @@ function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
 }
 
+// Is (px, py) within radius r of (x, y)? Shared by every "am I standing at
+// this landmark" proximity check (farm, fuel tank, city).
+function nearPoint(px, py, x, y, r) {
+  return Math.hypot(px - x, py - y) < r;
+}
+
 // ---------------------------------------------------------------------------
 // Map profiles: the world is always one of exactly 10 fixed archetypes,
 // each with its own RNG seed (so it's exactly as reproducible as a free
@@ -963,7 +969,7 @@ const FARM = {
 const FARM_RADIUS = 50; // within this distance farm services are available
 
 function nearFarm() {
-  return Math.hypot(tractor.x - FARM.x, tractor.y - FARM.y) < FARM_RADIUS;
+  return nearPoint(tractor.x, tractor.y, FARM.x, FARM.y, FARM_RADIUS);
 }
 
 // Cow and pig paddocks: unlike the other grazing species, these two stay
@@ -1031,7 +1037,7 @@ function fuelTankPos() {
 }
 function nearFuelTank() {
   const p = fuelTankPos();
-  return Math.hypot(tractor.x - p.x, tractor.y - p.y) < FUEL_TANK_RADIUS;
+  return nearPoint(tractor.x, tractor.y, p.x, p.y, FUEL_TANK_RADIUS);
 }
 
 // ---------------------------------------------------------------------------
@@ -1084,7 +1090,7 @@ const CITY = { ...pickCityPos(), angle: cityHash(500) * Math.PI * 2 };
 const CITY_RADIUS = 30; // within this distance the depot buys grain
 
 function nearCity() {
-  return Math.hypot(tractor.x - CITY.x, tractor.y - CITY.y) < CITY_RADIUS;
+  return nearPoint(tractor.x, tractor.y, CITY.x, CITY.y, CITY_RADIUS);
 }
 
 // The trodden yard isn't a perfect ellipse: each map bends its rim in and
