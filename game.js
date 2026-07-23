@@ -2995,6 +2995,99 @@ const TREE_BLOBS = [
   { blob: true, x: 1.5, y: -1.5, z: 9.6, r: 2.7, color: tint(PROFILE.palette.canopy[0], 0.1), bias: 0.05 },
   { blob: true, x: -1.3, y: 1.3, z: 10.2, r: 2.1, color: tint(PROFILE.palette.canopy[0], 0.22), bias: 0.1 },
 ];
+// Canopy blobs shrink toward bare wood as winter deepens (see updateSeason);
+// these are the resting radii that shrink is relative to.
+const TREE_BLOB_BASE_R = TREE_BLOBS.map((b) => b.r);
+
+// The crown deciduous trees are left with once their leaves have dropped.
+// Every box grows from BRANCH_ANCHOR (the trunk top) out to its resting
+// shape below, so scaleBranchBox(box, s) can sprout or wilt the whole crown
+// as one unit by lerping each box's corners in from that shared point —
+// no per-twig popping, and it collapses to nothing (degenerate, zero-area
+// faces the draw loop already skips) rather than needing a visibility flag.
+const BRANCH_ANCHOR = { x: 0, y: 0, z: 4.5 };
+const BARE_BRANCH_COLOR = tint("#8a5a36", -0.12);
+
+// A straight box can't be thin along its own length once that length runs
+// diagonally through x, y AND z at once — it just becomes a slab sized to
+// the full reach. addStick fakes a thin rod by chopping the segment into
+// enough short pieces that each one's own horizontal footprint is close to
+// its thickness, so the chain reads as a stick with sky around it rather
+// than a solid wedge.
+function addStick(list, ax, ay, az, bx, by, bz, ht, color) {
+  const steps = Math.max(1, Math.min(4, Math.ceil(Math.hypot(bx - ax, by - ay) / (ht * 1.6))));
+  for (let i = 0; i < steps; i++) {
+    const t0 = i / steps, t1 = (i + 1) / steps;
+    const x0 = ax + (bx - ax) * t0, x1 = ax + (bx - ax) * t1;
+    const y0 = ay + (by - ay) * t0, y1 = ay + (by - ay) * t1;
+    const z0 = az + (bz - az) * t0, z1 = az + (bz - az) * t1;
+    list.push({
+      x0: Math.min(x0, x1) - ht, x1: Math.max(x0, x1) + ht,
+      y0: Math.min(y0, y1) - ht, y1: Math.max(y0, y1) + ht,
+      z0: Math.min(z0, z1) - ht * 0.6, z1: Math.max(z0, z1) + ht * 0.6,
+      color,
+    });
+  }
+}
+
+// World units and native draw-buffer pixels are roughly 1:1 here (see
+// projX/projY), and makeItems' local() rounds every box vertex to a whole
+// pixel — so anything much thinner than ~1 unit is a coin-flip away from
+// both its edges rounding to the same pixel and vanishing as a zero-area
+// face. A fine multi-generation L-system reads as sticks in the data and as
+// nothing on screen. So: few limbs, bold (ht well over 0.5), one fork near
+// the tip rather than three generations of ever-thinner ones — and bases
+// staggered around the trunk (not all at one point) so the limbs read as
+// separate shapes instead of fusing into a single clump at the root.
+function genLimb(list, bx, by, bz, azimuth, elevation, length, ht) {
+  const ux = Math.cos(azimuth) * Math.cos(elevation);
+  const uy = Math.sin(azimuth) * Math.cos(elevation);
+  const uz = Math.sin(elevation);
+  const mx = bx + ux * length, my = by + uy * length, mz = bz + uz * length;
+  addStick(list, bx, by, bz, mx, my, mz, ht, BARE_BRANCH_COLOR);
+  for (const side of [-1, 1]) {
+    const az2 = azimuth + side * 0.55;
+    const el2 = elevation + 0.4;
+    const ux2 = Math.cos(az2) * Math.cos(el2), uy2 = Math.sin(az2) * Math.cos(el2), uz2 = Math.sin(el2);
+    const tipLen = length * 0.5;
+    // Floored, not just scaled down: below ~0.4 half-thickness a stick is a
+    // coin-flip from rounding to nothing (see note above genLimb).
+    addStick(
+      list, mx, my, mz,
+      mx + ux2 * tipLen, my + uy2 * tipLen, mz + uz2 * tipLen,
+      Math.max(ht * 0.65, 0.4), BARE_BRANCH_COLOR
+    );
+  }
+}
+const BARE_BRANCH_BOXES = [];
+const LIMB_COUNT = 5;
+for (let i = 0; i < LIMB_COUNT; i++) {
+  const az = ((Math.PI * 2) / LIMB_COUNT) * i + 0.3;
+  const baseR = 1.0;
+  const baseZ = 3.6 + (i % 3) * 0.4; // staggered attachment height along the trunk
+  const elevation = 0.6 + 0.15 * (i % 3);
+  genLimb(
+    BARE_BRANCH_BOXES,
+    Math.cos(az) * baseR, Math.sin(az) * baseR, baseZ,
+    az, elevation, 3.2, 0.45
+  );
+}
+genLimb(BARE_BRANCH_BOXES, 0, 0, 4.5, 0, 1.15, 3.6, 0.4); // central leader, steep up
+function scaleBranchBox(b, s) {
+  return {
+    x0: BRANCH_ANCHOR.x + (b.x0 - BRANCH_ANCHOR.x) * s,
+    x1: BRANCH_ANCHOR.x + (b.x1 - BRANCH_ANCHOR.x) * s,
+    y0: BRANCH_ANCHOR.y + (b.y0 - BRANCH_ANCHOR.y) * s,
+    y1: BRANCH_ANCHOR.y + (b.y1 - BRANCH_ANCHOR.y) * s,
+    z0: BRANCH_ANCHOR.z + (b.z0 - BRANCH_ANCHOR.z) * s,
+    z1: BRANCH_ANCHOR.z + (b.z1 - BRANCH_ANCHOR.z) * s,
+    color: b.color,
+  };
+}
+const EMPTY_BRANCHES = [];
+// Recomputed every tick in updateSeason() from winterDepth(); the tree draw
+// loop just reads whatever's here, same as it reads TREE_BLOBS' live colors.
+let treeBranchBoxes = EMPTY_BRANCHES;
 
 // Conifers are evergreen: their colors stay put through the seasons, so
 // they're set once from this map's palette rather than going through
@@ -4611,6 +4704,8 @@ function drawScene(camX, camY) {
     const kind = TREE_KINDS[t.kind];
     makeItems(items, kind.boxes, t.wx, t.wy, t.angle, 0, camX, camY);
     makeRoundItems(items, kind.blobs, t.wx, t.wy, t.angle, 0, camX, camY);
+    if (t.kind === 0 && treeBranchBoxes.length)
+      makeItems(items, treeBranchBoxes, t.wx, t.wy, t.angle, 0, camX, camY);
   }
   for (const b of bushes) {
     if (!onScreen(b.wx, b.wy, camX, camY)) continue;
@@ -4883,6 +4978,15 @@ function updateSeason() {
   for (let i = 0; i < STUBBLE_DOTS.length; i++) STUBBLE_DOTS[i] = sDots[i];
   for (let i = 0; i < TREE_BLOBS.length; i++)
     TREE_BLOBS[i].color = seasonHex(TREE_BLOB_SEASONS[i]);
+  // Deciduous trees drop their leaves for winter: the canopy shrinks toward
+  // nothing and the bare crown grows in to take its place, both driven off
+  // the same winterDepth() curve the canopy's color wheel already peaks
+  // pale/white on, so the two read as one transition rather than two.
+  const bare = winterDepth();
+  for (let i = 0; i < TREE_BLOBS.length; i++)
+    TREE_BLOBS[i].r = TREE_BLOB_BASE_R[i] * (1 - bare);
+  treeBranchBoxes =
+    bare > 0.02 ? BARE_BRANCH_BOXES.map((b) => scaleBranchBox(b, bare)) : EMPTY_BRANCHES;
   // The sky is a full-canvas dithered repaint, so it only redraws on a
   // step grid — fine enough that each redraw is an invisible nudge even
   // at winter's pace
