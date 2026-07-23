@@ -2917,12 +2917,18 @@ makeMap();
 // meadow patches don't need this: they're generated earlier, inside
 // makeMap(), and already avoid the whole FARM_PASTURE_RADIUS circle,
 // which covers any possible paddock placement by construction.
-function insideAnyPaddock(wx, wy) {
+// Is world point (wx, wy) within margin of any paddock's rectangle?
+function paddockHit(wx, wy, margin) {
   for (const species of Object.keys(PADDOCKS_WORLD)) {
     const p = PADDOCKS_WORLD[species];
-    if (wx > p.x0 && wx < p.x1 && wy > p.y0 && wy < p.y1) return true;
+    if (wx > p.x0 - margin && wx < p.x1 + margin && wy > p.y0 - margin && wy < p.y1 + margin)
+      return true;
   }
   return false;
+}
+
+function insideAnyPaddock(wx, wy) {
+  return paddockHit(wx, wy, 0);
 }
 
 // True if a repainted tile needs its paddock ground restored afterward
@@ -2930,13 +2936,7 @@ function insideAnyPaddock(wx, wy) {
 // slop so the fence-hugging worn path along the rim doesn't go missing
 // when the tile just outside the rail repaints.
 function nearAnyPaddock(tx, ty) {
-  const wx = (tx + 0.5) * TILE;
-  const wy = (ty + 0.5) * TILE;
-  for (const species of Object.keys(PADDOCKS_WORLD)) {
-    const p = PADDOCKS_WORLD[species];
-    if (wx > p.x0 - TILE && wx < p.x1 + TILE && wy > p.y0 - TILE && wy < p.y1 + TILE) return true;
-  }
-  return false;
+  return paddockHit((tx + 0.5) * TILE, (ty + 0.5) * TILE, TILE);
 }
 
 // Paddock ground: grazed pasture rather than plain untouched grass — a
