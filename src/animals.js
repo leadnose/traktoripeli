@@ -4,10 +4,12 @@ import { TILE, MAP_TILES, MAP_SIZE, projX, projY } from "./projection.js";
 import { FARM, FARM_RADIUS, PADDOCKS_WORLD, PENNED_SPECIES, insideAnyPaddock } from "./farmyard.js";
 import { tiles, tileTypeAt, roadTiles, forestTiles, tileKey, isWater } from "./ground.js";
 import { terrainHeight } from "./terrain.js";
-// tractor/cart/worldTime/GEAR_SLOW_RATIO/FENCE_SOLID_WORLD aren't split out
-// yet - genuine circular imports, safe because they're only read inside
-// per-frame update/draw functions.
-import { tractor, cart, worldTime, GEAR_SLOW_RATIO, FENCE_SOLID_WORLD } from "./legacy.js";
+import { FENCE_SOLID_WORLD } from "./box-models.js";
+import { cart } from "./cart.js";
+// tractor/worldTime/GEAR_SLOW_RATIO aren't split out yet - genuine
+// circular imports, safe because they're only read inside per-frame
+// update/draw functions.
+import { tractor, worldTime, GEAR_SLOW_RATIO } from "./legacy.js";
 
 // ---------------------------------------------------------------------------
 // Animals: cows, sheep, pigs and goats graze in small herds on the meadows,
