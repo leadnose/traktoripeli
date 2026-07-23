@@ -1810,6 +1810,47 @@ function tileRand(tx, ty) {
   };
 }
 
+// Round the corners of the tile at (tx, ty) that face a differently-typed
+// neighbor (per sameFn, passed straight through to tileGeometry) by cutting
+// a crescent back to colorFn(i)'s color for that corner index — the shared
+// quadratic-curve crescent trick used to soften every grass/water/field
+// boundary instead of leaving a hard tile-grid edge. Returns tileGeometry's
+// {P, rounded} since the field-tile caller needs them again afterward to
+// clip furrows/crops to the same rounded outline.
+function paintCornerCrescents(tx, ty, sameFn, colorFn) {
+  const { P, rounded } = tileGeometry(tx, ty, sameFn);
+  for (let i = 0; i < 4; i++) {
+    if (!rounded[i]) continue;
+    const cur = P[i];
+    const prev = P[(i + 3) % 4];
+    const next = P[(i + 1) % 4];
+    const ax = cur.x + (prev.x - cur.x) * CORNER_T;
+    const ay = cur.y + (prev.y - cur.y) * CORNER_T;
+    const bx = cur.x + (next.x - cur.x) * CORNER_T;
+    const by = cur.y + (next.y - cur.y) * CORNER_T;
+    mapCtx.fillStyle = colorFn(i);
+    mapCtx.beginPath();
+    mapCtx.moveTo(ax, ay);
+    mapCtx.quadraticCurveTo(cur.x, cur.y, bx, by);
+    mapCtx.lineTo(cur.x, cur.y);
+    mapCtx.closePath();
+    mapCtx.fill();
+    mapCtx.strokeStyle = mapCtx.fillStyle;
+    mapCtx.lineWidth = 1;
+    mapCtx.stroke();
+  }
+  return { P, rounded };
+}
+
+// The color a rounded corner cuts back to when the neighboring tile is
+// grass: shaded per-corner from that corner's own terrain normal, since a
+// crescent can span a slope where shading legitimately differs corner to
+// corner.
+function grassCornerColor(tx, ty) {
+  const cornerTile = [[tx, ty], [tx + 1, ty], [tx + 1, ty + 1], [tx, ty + 1]];
+  return (i) => shade(GRASS, groundShade(cornerTile[i][0] * TILE, cornerTile[i][1] * TILE));
+}
+
 function paintTile(tx, ty) {
   const type = tiles[ty][tx];
   const kc = groundShade((tx + 0.5) * TILE, (ty + 0.5) * TILE);
@@ -1885,29 +1926,7 @@ function paintTile(tx, ty) {
     // mirrored here so grass's corners get cut back too — otherwise only
     // the water side ever rounded and the shore read as sharp wherever land
     // poked the other way (which, along a jagged coast, is most corners)
-    {
-      const { P, rounded } = tileGeometry(tx, ty, (ax, ay) => !isWater(ax, ay));
-      for (let i = 0; i < 4; i++) {
-        if (!rounded[i]) continue;
-        const cur = P[i];
-        const prev = P[(i + 3) % 4];
-        const next = P[(i + 1) % 4];
-        const ax = cur.x + (prev.x - cur.x) * CORNER_T;
-        const ay = cur.y + (prev.y - cur.y) * CORNER_T;
-        const bx = cur.x + (next.x - cur.x) * CORNER_T;
-        const by = cur.y + (next.y - cur.y) * CORNER_T;
-        mapCtx.fillStyle = shade(WATER_COLOR, 1); // matches the water fill
-        mapCtx.beginPath();
-        mapCtx.moveTo(ax, ay);
-        mapCtx.quadraticCurveTo(cur.x, cur.y, bx, by);
-        mapCtx.lineTo(cur.x, cur.y);
-        mapCtx.closePath();
-        mapCtx.fill();
-        mapCtx.strokeStyle = mapCtx.fillStyle;
-        mapCtx.lineWidth = 1;
-        mapCtx.stroke();
-      }
-    }
+    paintCornerCrescents(tx, ty, (ax, ay) => !isWater(ax, ay), () => shade(WATER_COLOR, 1));
     return;
   }
 
@@ -1937,31 +1956,7 @@ function paintTile(tx, ty) {
       mapCtx.fillRect(Math.round(p.x), Math.round(p.y), 2, 1);
     }
 
-    const { P, rounded } = tileGeometry(tx, ty, isWater);
-    const cornerTile = [[tx, ty], [tx + 1, ty], [tx + 1, ty + 1], [tx, ty + 1]];
-    for (let i = 0; i < 4; i++) {
-      if (!rounded[i]) continue;
-      const cur = P[i];
-      const prev = P[(i + 3) % 4];
-      const next = P[(i + 1) % 4];
-      const ax = cur.x + (prev.x - cur.x) * CORNER_T;
-      const ay = cur.y + (prev.y - cur.y) * CORNER_T;
-      const bx = cur.x + (next.x - cur.x) * CORNER_T;
-      const by = cur.y + (next.y - cur.y) * CORNER_T;
-      mapCtx.fillStyle = shade(
-        GRASS,
-        groundShade(cornerTile[i][0] * TILE, cornerTile[i][1] * TILE)
-      );
-      mapCtx.beginPath();
-      mapCtx.moveTo(ax, ay);
-      mapCtx.quadraticCurveTo(cur.x, cur.y, bx, by);
-      mapCtx.lineTo(cur.x, cur.y);
-      mapCtx.closePath();
-      mapCtx.fill();
-      mapCtx.strokeStyle = mapCtx.fillStyle;
-      mapCtx.lineWidth = 1;
-      mapCtx.stroke();
-    }
+    paintCornerCrescents(tx, ty, isWater, grassCornerColor(tx, ty));
     return;
   }
 
@@ -1974,31 +1969,7 @@ function paintTile(tx, ty) {
   // Round the patch's outer corners by painting the cut crescents back to
   // grass; their outer edges only ever border grass tiles, so the overdraw
   // never bleeds onto dirt
-  const { P, rounded } = tileGeometry(tx, ty, isField);
-  const cornerTile = [[tx, ty], [tx + 1, ty], [tx + 1, ty + 1], [tx, ty + 1]];
-  for (let i = 0; i < 4; i++) {
-    if (!rounded[i]) continue;
-    const cur = P[i];
-    const prev = P[(i + 3) % 4];
-    const next = P[(i + 1) % 4];
-    const ax = cur.x + (prev.x - cur.x) * CORNER_T;
-    const ay = cur.y + (prev.y - cur.y) * CORNER_T;
-    const bx = cur.x + (next.x - cur.x) * CORNER_T;
-    const by = cur.y + (next.y - cur.y) * CORNER_T;
-    mapCtx.fillStyle = shade(
-      GRASS,
-      groundShade(cornerTile[i][0] * TILE, cornerTile[i][1] * TILE)
-    );
-    mapCtx.beginPath();
-    mapCtx.moveTo(ax, ay);
-    mapCtx.quadraticCurveTo(cur.x, cur.y, bx, by);
-    mapCtx.lineTo(cur.x, cur.y);
-    mapCtx.closePath();
-    mapCtx.fill();
-    mapCtx.strokeStyle = mapCtx.fillStyle;
-    mapCtx.lineWidth = 1;
-    mapCtx.stroke();
-  }
+  const { P, rounded } = paintCornerCrescents(tx, ty, isField, grassCornerColor(tx, ty));
 
   // Furrows, crops and clods stay inside the rounded outline
   mapCtx.save();
