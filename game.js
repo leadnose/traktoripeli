@@ -6264,13 +6264,20 @@ function draw() {
     screenCtx.fillText(str, x, y);
   };
 
+  // A HUD line writer: stamps left-to-right along one baseline, advancing
+  // its own cursor past each segment's measured width. Bottom and top bars
+  // each get one, independent cursors starting at the same left margin.
+  const makeSegWriter = (y, startX) => {
+    let x = startX;
+    return (text, color) => {
+      label(text, x, y, color || "#f5e9c8");
+      x += screenCtx.measureText(text).width;
+    };
+  };
+
   screenCtx.font = "bold 13px monospace";
   const hudY = screenCanvas.height - 10;
-  let hudX = 12;
-  const seg = (text, color) => {
-    label(text, hudX, hudY, color || "#f5e9c8");
-    hudX += screenCtx.measureText(text).width;
-  };
+  const seg = makeSegWriter(hudY, 12);
   const RED = "#ff5040";
   const flashImpl = tractor.implFlash > 0 && ((tractor.implFlash * 8) | 0) % 2 === 0;
   // Gear and implement move as one: road mode is fast with the implement
@@ -6336,11 +6343,7 @@ function draw() {
   const topY = 18; // shared text baseline in the bar
 
   // Left: mode, map, and the pause/menu hint
-  let topX = 12;
-  const topSeg = (text, color) => {
-    label(text, topX, topY, color || "#f5e9c8");
-    topX += screenCtx.measureText(text).width;
-  };
+  const topSeg = makeSegWriter(topY, 12);
   topSeg(`#${MAP_INDEX} ${PROFILE.name.toUpperCase()}  `);
   topSeg(`${mode.toUpperCase()}   `, "#ffd94f");
 
