@@ -626,9 +626,20 @@ window.addEventListener("keydown", (e) => {
     return;
   }
   if (menuOpen) {
-    // The menu swallows all input: left/right pick the map, up/down pick
-    // the mode, digits jump straight to a map, R rolls a random one, Enter
-    // starts, Esc closes (once a game is running)
+    handleMenuKey(e);
+    return;
+  }
+  if (dateJump !== null) {
+    handleDateJumpKey(e);
+    return;
+  }
+  handleGameplayKey(e);
+});
+
+// The menu swallows all input: left/right pick the map, up/down pick
+// the mode, digits jump straight to a map, R rolls a random one, Enter
+// starts, Esc closes (once a game is running)
+function handleMenuKey(e) {
     e.preventDefault();
     if (e.key === "Enter") {
       clearSave(); // Enter always begins a fresh run
@@ -671,11 +682,11 @@ window.addEventListener("keydown", (e) => {
       const n = e.key === "0" ? 10 : parseInt(e.key, 10);
       if (n <= MAP_PROFILES.length) menuMap = n;
     }
-    return;
-  }
-  // The date-jump field swallows all input while it is open: type the
-  // digits of MMDD, Enter jumps, Esc (or D again) closes
-  if (dateJump !== null) {
+}
+
+// The date-jump field swallows all input while it is open: type the
+// digits of MMDD, Enter jumps, Esc (or D again) closes
+function handleDateJumpKey(e) {
     e.preventDefault();
     if (e.key === "Enter") {
       tryDateJump();
@@ -688,8 +699,9 @@ window.addEventListener("keydown", (e) => {
       dateJump += e.key;
       dateJumpError = false;
     }
-    return;
-  }
+}
+
+function handleGameplayKey(e) {
   if (e.key.startsWith("Arrow")) e.preventDefault();
   keys[e.key] = true;
   if ((e.key === "m" || e.key === "M") && !e.repeat) toggleMusic();
@@ -745,7 +757,7 @@ window.addEventListener("keydown", (e) => {
       tractor.implFlash = 0.9;
     }
   }
-});
+}
 
 window.addEventListener("keyup", (e) => {
   keys[e.key] = false;
