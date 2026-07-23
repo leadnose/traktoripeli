@@ -5,7 +5,7 @@ import { ditherRegion } from "./dithering.js";
 import { seasonHex, SKY_TOP_SEASONS, SKY_BOTTOM_SEASONS } from "./seasons.js";
 // worldTime isn't split out yet (Tractor section) - a genuine circular
 // import, safe because drawClouds() only reads it at runtime.
-import { worldTime } from "./legacy.js";
+import { worldTime } from "./tractor.js";
 import { mistiness } from "./mist.js";
 
 // ---------------------------------------------------------------------------

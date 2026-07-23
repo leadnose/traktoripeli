@@ -4,7 +4,7 @@ import { MAP_SIZE, projX, projY } from "./projection.js";
 import { terrainHeight } from "./terrain.js";
 // worldTime isn't split out yet (Tractor section) - a genuine circular
 // import, safe because drawButterflies() only reads it at runtime.
-import { worldTime } from "./legacy.js";
+import { worldTime } from "./tractor.js";
 
 // ---------------------------------------------------------------------------
 // Butterflies fluttering over the meadows

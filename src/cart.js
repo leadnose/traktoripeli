@@ -3,7 +3,7 @@ import { rand } from "./rng.js";
 import { roads } from "./ground.js";
 // tractor isn't split out yet (Tractor section) - a genuine circular
 // import, safe because updateCart() only reads tractor.x/y at runtime.
-import { tractor } from "./legacy.js";
+import { tractor } from "./tractor.js";
 
 // ---------------------------------------------------------------------------
 // The delivery cart: a horse pulling a flat-bed wagon, putters around the

@@ -22,12 +22,12 @@ import { minimapTile } from "./minimap.js";
 import { restampTracks } from "./wheel-tracks.js";
 import { GRASS, MEADOW, DIRT, STUBBLE } from "./seasons.js";
 import { spawnChaff } from "./smoke.js";
-// Still only defined in legacy.js at this point in the module split -
-// paintPaddockFills/paddockDabs (Minimap section), and the seed/sack
-// economy state (Tractor section). Genuine circular imports, safe because
-// every one is only read inside a function body called at runtime, never
-// during either module's own top-level evaluation.
-import { paintPaddockFills, paddockDabs, seeds, consumeSeed, sacks } from "./legacy.js";
+import { seeds, consumeSeed, sacks } from "./tractor.js";
+// paintPaddockFills/paddockDabs are still only defined in legacy.js
+// (Minimap section) at this point in the module split - a genuine
+// circular import, safe because drawTile() only calls them at runtime,
+// never during either module's own top-level evaluation.
+import { paintPaddockFills, paddockDabs } from "./legacy.js";
 
 // ---------------------------------------------------------------------------
 // Ground map (prerendered once)

@@ -3,23 +3,14 @@ import { MAP_PROFILES } from "./map-profiles.js";
 import { audio, initAudio, toggleMusic, toggleSound, playHydraulic, playClunk } from "./sound.js";
 import { nearFarm } from "./farmyard.js";
 import { IMPLEMENTS } from "./box-models.js";
-// loadSave/clearSave (Save games), startGame/continueInSandbox/tryDateJump/
-// gameOver/implementOverField (Tractor section), savingDisabled (Save
-// games) and fpsShown (Main loop) aren't split out yet - genuine circular
-// imports, safe because they're only read/called inside the keydown
-// handlers, never at this module's own top level.
+import { loadSave, clearSave, setSavingDisabled } from "./save.js";
+import { startGame, continueInSandbox, tryDateJump, gameOver, implementOverField, tractor } from "./tractor.js";
+// fpsShown (Main loop) isn't split out yet - a genuine circular import,
+// safe because it's only read/reassigned inside the keydown handler,
+// never at this module's own top level.
 import {
-  loadSave,
-  clearSave,
-  startGame,
-  continueInSandbox,
-  tryDateJump,
-  gameOver,
-  implementOverField,
-  setSavingDisabled,
   fpsShown,
   setFpsShown,
-  tractor,
 } from "./legacy.js";
 
 // ---------------------------------------------------------------------------

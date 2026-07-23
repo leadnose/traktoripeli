@@ -9,7 +9,7 @@ import { playPickup } from "./sound.js";
 // tractor/GEAR_SLOW/gameOver/worldTime/addCash aren't split out yet
 // (Tractor section) - genuine circular imports, safe because they're only
 // read/called inside update/draw functions.
-import { tractor, GEAR_SLOW, gameOver, worldTime, addCash } from "./legacy.js";
+import { tractor, GEAR_SLOW, gameOver, worldTime, addCash } from "./tractor.js";
 
 // ---------------------------------------------------------------------------
 // The ladybug: one tiny critter hides in the grass somewhere. Roll up to it

@@ -1,7 +1,7 @@
 import { VIEW_W, VIEW_H, ctx } from "./setup.js";
 // worldTime isn't split out yet (Tractor section) - a genuine circular
 // import, safe because these only read it at runtime.
-import { worldTime } from "./legacy.js";
+import { worldTime } from "./tractor.js";
 
 // ---------------------------------------------------------------------------
 // Mist: a soft overcast haze that thickens and thins with mistiness(), plus

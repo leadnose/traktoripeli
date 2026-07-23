@@ -9,7 +9,7 @@ import { cart } from "./cart.js";
 // tractor/worldTime/GEAR_SLOW_RATIO aren't split out yet - genuine
 // circular imports, safe because they're only read inside per-frame
 // update/draw functions.
-import { tractor, worldTime, GEAR_SLOW_RATIO } from "./legacy.js";
+import { tractor, worldTime, GEAR_SLOW_RATIO } from "./tractor.js";
 
 // ---------------------------------------------------------------------------
 // Animals: cows, sheep, pigs and goats graze in small herds on the meadows,

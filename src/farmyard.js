@@ -6,7 +6,7 @@ import { nearPoint } from "./setup.js";
 // runtime function-call/property-read, not a circular value read at
 // module-init time, so importing `tractor` here back from legacy.js is
 // safe - see the plan's note on this for the full reasoning.
-import { tractor } from "./legacy.js";
+import { tractor } from "./tractor.js";
 
 // ---------------------------------------------------------------------------
 // Farmyard location (needed by the terrain: the yard sits on a flat pad)

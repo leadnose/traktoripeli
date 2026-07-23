@@ -7,7 +7,7 @@ import { touchDrive } from "./touch.js";
 // tractor/GEAR_FAST_RATIO/gameOver/autoThrottling aren't split out yet
 // (Tractor section) - genuine circular imports, safe because they're only
 // read/called inside update/draw functions.
-import { tractor, GEAR_FAST_RATIO, gameOver, autoThrottling } from "./legacy.js";
+import { tractor, GEAR_FAST_RATIO, gameOver, autoThrottling } from "./tractor.js";
 
 // ---------------------------------------------------------------------------
 // Exhaust smoke & chaff particles

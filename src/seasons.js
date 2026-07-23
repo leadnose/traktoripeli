@@ -8,7 +8,7 @@ import { paintSky } from "./sky.js";
 // timeLeft/ROUND_TIME aren't split out yet (Tractor section) - a genuine
 // circular import, safe because they're only read inside updateSeason(),
 // never at this module's own top level.
-import { timeLeft, ROUND_TIME } from "./legacy.js";
+import { timeLeft, ROUND_TIME } from "./tractor.js";
 
 // ---------------------------------------------------------------------------
 // Seasons: the round runs from spring through summer into autumn and back

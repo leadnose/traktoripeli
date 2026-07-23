@@ -5,7 +5,7 @@ import { menuOpen, dateJump, autoThrottleOn } from "./input.js";
 // tractor isn't split out yet (Tractor section) - a genuine circular
 // import, safe because syncVisibility() only reads it once per animation
 // frame, never at this module's own top level.
-import { tractor } from "./legacy.js";
+import { tractor } from "./tractor.js";
 
 // ---------------------------------------------------------------------------
 // Touch controls: on-screen buttons for phones/tablets (CSS shows them only

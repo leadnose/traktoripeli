@@ -12,7 +12,7 @@ import {
 // circular import, safe because trailerBoxes() only reads them when
 // called at runtime (from drawScene, once per frame), never at this
 // module's own top level.
-import { cargo, TRAILER_CAP } from "./legacy.js";
+import { cargo, TRAILER_CAP } from "./tractor.js";
 
 // ---------------------------------------------------------------------------
 // Box models: everything solid is axis-aligned boxes in local space

@@ -2,7 +2,7 @@ import { SEED } from "./rng.js";
 import { MAP_SIZE } from "./projection.js";
 import { nearPoint } from "./setup.js";
 import { FARM } from "./farmyard.js";
-import { tractor } from "./legacy.js";
+import { tractor } from "./tractor.js";
 
 // ---------------------------------------------------------------------------
 // City location: where grain actually gets sold. Placed a real drive away

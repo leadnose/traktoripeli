@@ -5,7 +5,7 @@ import { tileTypeAt, tiles, tileKey, mapCanvas, mapCtx, MAP_OFFSET_X, MAP_OFFSET
 // tractor isn't split out yet (Tractor section) - a genuine circular
 // import, safe because updateTracks() only reads tractor.x/y/angle/speed
 // at runtime, never at this module's own top level.
-import { tractor } from "./legacy.js";
+import { tractor } from "./tractor.js";
 
 // ---------------------------------------------------------------------------
 // Wheel tracks: stamped into the prerendered map canvas while driving over
