@@ -6274,27 +6274,27 @@ function drawSpeakerIcon(x, y, on) {
 }
 
 function draw() {
-  const camX = Math.round(cam.x);
-  const camY = Math.round(cam.y);
+  // Scene, sky and weather compositing: everything that isn't HUD/overlay
+  function drawWorldAndWeather() {
+    const camX = Math.round(cam.x);
+    const camY = Math.round(cam.y);
 
-  // Sky beyond the map edges: the farm floats like a little island
-  ctx.drawImage(skyCanvas, 0, 0);
-  drawSun();
-  drawClouds(camX, camY);
+    // Sky beyond the map edges: the farm floats like a little island
+    ctx.drawImage(skyCanvas, 0, 0);
+    drawSun();
+    drawClouds(camX, camY);
 
-  ctx.drawImage(mapCanvas, -MAP_OFFSET_X - camX, -MAP_OFFSET_Y - camY);
-  drawScene(camX, camY);
-  drawSmoke(camX, camY);
-  drawButterflies(camX, camY);
-  drawLadybug(camX, camY);
-  drawBirds(camX, camY);
-  drawMist(camX, camY);
+    ctx.drawImage(mapCanvas, -MAP_OFFSET_X - camX, -MAP_OFFSET_Y - camY);
+    drawScene(camX, camY);
+    drawSmoke(camX, camY);
+    drawButterflies(camX, camY);
+    drawLadybug(camX, camY);
+    drawBirds(camX, camY);
+    drawMist(camX, camY);
 
-  screenCtx.drawImage(view, 0, 0, screenCanvas.width, screenCanvas.height);
-
-  // HUD: a worn wooden plank bar along the bottom (prerendered)
-  const imp = IMPLEMENTS[tractor.implement];
-  screenCtx.drawImage(hudBottomCanvas, 0, barY - 3);
+    screenCtx.drawImage(view, 0, 0, screenCanvas.width, screenCanvas.height);
+  }
+  drawWorldAndWeather();
 
   // Text is stamped: a dark offset shadow under warm cream
   const label = (str, x, y, color) => {
@@ -6315,6 +6315,10 @@ function draw() {
     };
   };
 
+  // HUD: a worn wooden plank bar along the bottom (prerendered)
+  function drawBottomHud() {
+  const imp = IMPLEMENTS[tractor.implement];
+  screenCtx.drawImage(hudBottomCanvas, 0, barY - 3);
   screenCtx.font = "bold 13px monospace";
   const hudY = screenCanvas.height - 10;
   const seg = makeSegWriter(hudY, 12);
@@ -6372,11 +6376,14 @@ function draw() {
       tractor.implement === impName ? "#ffd94f" : "#d8c49a"
     );
   }
+  }
+  drawBottomHud();
 
   // The top HUD is a single-line plank bar matching the bottom one, trim
   // mirrored: mode, map and the pause/menu hint on the left, the season
   // calendar in the middle with the year folded into its date label, and
   // the mute icons and FPS on the right
+  function drawTopHud() {
   screenCtx.drawImage(hudTopCanvas, 0, 0);
 
   screenCtx.font = "11px monospace";
@@ -6435,9 +6442,13 @@ function draw() {
   screenCtx.textAlign = "right";
   label(`[P] PAUSE  [F1] MENU`, rx, topY, "#d8c49a");
   screenCtx.textAlign = "left";
+  }
+  drawTopHud();
 
   // Game over: final score and the all-time best list
-  if (gameOver) {
+  function drawGameOverOverlay() {
+  if (!gameOver) return;
+  {
     const w = 460;
     const h = 260;
     const x = (screenCanvas.width - w) / 2;
@@ -6480,10 +6491,13 @@ function draw() {
     );
     screenCtx.textAlign = "left";
   }
+  }
+  drawGameOverOverlay();
 
   // Minimap: a wooden panel hanging off the right end of the top bar,
   // flush with the screen edge. Its dark rim starts at the bar's trim in
   // the same color, so the two read as one piece of carpentry.
+  function drawMinimapPanel() {
   screenCtx.drawImage(minimapPanelCanvas, mmX - 8, topH);
   screenCtx.drawImage(minimapCanvas, mmX, mmY, mmW, mmH);
   screenCtx.save();
@@ -6508,11 +6522,14 @@ function draw() {
   screenCtx.fillStyle = TRACTOR_BODY;
   screenCtx.fillRect(tmx - 1, tmy - 1, 2, 2);
   screenCtx.restore();
+  }
+  drawMinimapPanel();
 
   // Field ledger strip under the minimap: a count per working state
   // (stubble, plowed, sown, ripe) with the total at the right end. Each
   // swatch is the state's minimap tile color, so the strip doubles as the
   // minimap's legend.
+  function drawFieldLedger() {
   screenCtx.drawImage(fieldTallyPanelCanvas, mmX - 8, tallyY);
   const tally = countFieldTiles();
   screenCtx.font = "11px monospace";
@@ -6538,10 +6555,14 @@ function draw() {
     "#ffd94f"
   );
   screenCtx.textAlign = "left";
+  }
+  drawFieldLedger();
 
   // Paused: dusk settles over the farm and a small sign waits for P.
   // The F1 menu draws after this, so it stays readable on top.
-  if (paused && !menuOpen) {
+  function drawPauseOverlay() {
+  if (!paused || menuOpen) return;
+  {
     const w = 260;
     const h = 74;
     const x = (screenCanvas.width - w) / 2;
@@ -6562,11 +6583,15 @@ function draw() {
     screenCtx.textAlign = "left";
     screenCtx.font = "11px monospace";
   }
+  }
+  drawPauseOverlay();
 
   // Date-jump field: shows the typed digits in an MM-DD mask; Enter
   // fast-forwards the calendar to that date. Red digits mean the last
   // attempt didn't parse as a reachable date.
-  if (dateJump !== null && !menuOpen) {
+  function drawDateJumpOverlay() {
+  if (dateJump === null || menuOpen) return;
+  {
     const w = 280;
     const h = 96;
     const x = (screenCanvas.width - w) / 2;
@@ -6595,10 +6620,14 @@ function draw() {
     screenCtx.textAlign = "left";
     screenCtx.font = "11px monospace";
   }
+  }
+  drawDateJumpOverlay();
 
   // Start / F1 menu: map and mode on a little wooden sign. A fresh visit
   // opens it before the clock starts; F1 brings it back later.
-  if (menuOpen) {
+  function drawStartMenuOverlay() {
+  if (!menuOpen) return;
+  {
     const w = 420;
     const h = 256;
     const x = (screenCanvas.width - w) / 2;
@@ -6666,8 +6695,12 @@ function draw() {
     );
     screenCtx.textAlign = "left";
   }
+  }
+  drawStartMenuOverlay();
 
-  if (fpsShown) {
+  function drawFpsReadout() {
+  if (!fpsShown) return;
+  {
     // Debug readout sits over the open world, so it gets its own dark
     // plate for contrast instead of relying on the stamped shadow alone
     screenCtx.font = "bold 11px monospace";
@@ -6679,6 +6712,8 @@ function draw() {
     screenCtx.fillRect(4, topH + 6, textW + 9, 15);
     label(text, 8, topH + 17, "#ffe89a");
   }
+  }
+  drawFpsReadout();
 }
 
 // ---------------------------------------------------------------------------
