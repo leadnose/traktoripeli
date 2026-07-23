@@ -4907,14 +4907,15 @@ function updateSeason() {
   MEADOW = seasonHex(MEADOW_SEASONS);
   DIRT = seasonHex(DIRT_SEASONS);
   STUBBLE = seasonHex(STUBBLE_SEASONS);
-  const gDots = grassDotShades(GRASS);
-  for (let i = 0; i < GRASS_DOTS.length; i++) GRASS_DOTS[i] = gDots[i];
-  const mDots = grassDotShades(MEADOW);
-  for (let i = 0; i < MEADOW_DOTS.length; i++) MEADOW_DOTS[i] = mDots[i];
-  const dDots = dirtDotShades(DIRT);
-  for (let i = 0; i < DIRT_DOTS.length; i++) DIRT_DOTS[i] = dDots[i];
-  const sDots = dirtDotShades(STUBBLE);
-  for (let i = 0; i < STUBBLE_DOTS.length; i++) STUBBLE_DOTS[i] = sDots[i];
+  // Dot-shade arrays are const, so each season's colors are copied into
+  // the existing array in place rather than the binding being reassigned
+  for (const [dest, src] of [
+    [GRASS_DOTS, grassDotShades(GRASS)],
+    [MEADOW_DOTS, grassDotShades(MEADOW)],
+    [DIRT_DOTS, dirtDotShades(DIRT)],
+    [STUBBLE_DOTS, dirtDotShades(STUBBLE)],
+  ])
+    for (let i = 0; i < dest.length; i++) dest[i] = src[i];
   for (let i = 0; i < TREE_BLOBS.length; i++)
     TREE_BLOBS[i].color = seasonHex(TREE_BLOB_SEASONS[i]);
   // The sky is a full-canvas dithered repaint, so it only redraws on a
