@@ -374,18 +374,36 @@ const MUSIC_SEASONS = [
   },
 ];
 
-function musicNote(freq, at, dur, vol) {
+// Schedule one Web Audio tone: an oscillator through a gain into destGain,
+// with an optional frequency ramp and a gain envelope that either eases in
+// (attack > 0: silent -> gainPeak -> silent) or starts at gainPeak and
+// decays straight away (attack 0, e.g. a percussive thud). Shared by every
+// synthesized sound effect and each background-music note below — they
+// only ever differ in these parameters, never in the oscillator/gain wiring.
+function scheduleTone(destGain, at, { type, freq, freqRamp, gainPeak, attack = 0, decay, stopPad }) {
   const o = audio.ac.createOscillator();
-  o.type = "triangle";
+  o.type = type;
   const g = audio.ac.createGain();
   o.connect(g);
-  g.connect(audio.musicGain);
+  g.connect(destGain);
   o.frequency.setValueAtTime(freq, at);
-  g.gain.setValueAtTime(0.0001, at);
-  g.gain.linearRampToValueAtTime(vol, at + 0.015);
-  g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+  if (freqRamp) {
+    if (freqRamp.exp) o.frequency.exponentialRampToValueAtTime(freqRamp.to, at + freqRamp.time);
+    else o.frequency.linearRampToValueAtTime(freqRamp.to, at + freqRamp.time);
+  }
+  if (attack > 0) {
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.linearRampToValueAtTime(gainPeak, at + attack);
+  } else {
+    g.gain.setValueAtTime(gainPeak, at);
+  }
+  g.gain.exponentialRampToValueAtTime(0.0001, at + decay);
   o.start(at);
-  o.stop(at + dur + 0.02);
+  o.stop(at + decay + stopPad);
+}
+
+function musicNote(freq, at, dur, vol) {
+  scheduleTone(audio.musicGain, at, { type: "triangle", freq, gainPeak: vol, attack: 0.015, decay: dur, stopPad: 0.02 });
 }
 
 function scheduleMusic() {
@@ -454,52 +472,43 @@ function updateAudio() {
 function playHydraulic(downward) {
   if (!audio) return;
   const t = audio.ac.currentTime;
-  const o = audio.ac.createOscillator();
-  o.type = "triangle";
-  const g = audio.ac.createGain();
-  o.connect(g);
-  g.connect(audio.master);
-  o.frequency.setValueAtTime(downward ? 900 : 500, t);
-  o.frequency.linearRampToValueAtTime(downward ? 500 : 900, t + 0.25);
-  g.gain.setValueAtTime(0.0001, t);
-  g.gain.linearRampToValueAtTime(0.12, t + 0.03);
-  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
-  o.start(t);
-  o.stop(t + 0.32);
+  scheduleTone(audio.master, t, {
+    type: "triangle",
+    freq: downward ? 900 : 500,
+    freqRamp: { to: downward ? 500 : 900, time: 0.25 },
+    gainPeak: 0.12,
+    attack: 0.03,
+    decay: 0.3,
+    stopPad: 0.02,
+  });
 }
 
 // Dull metallic thud when an implement is hitched on
 function playClunk() {
   if (!audio) return;
   const t = audio.ac.currentTime;
-  const o = audio.ac.createOscillator();
-  o.type = "sine";
-  const g = audio.ac.createGain();
-  o.connect(g);
-  g.connect(audio.master);
-  o.frequency.setValueAtTime(160, t);
-  o.frequency.exponentialRampToValueAtTime(50, t + 0.12);
-  g.gain.setValueAtTime(0.25, t);
-  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
-  o.start(t);
-  o.stop(t + 0.16);
+  scheduleTone(audio.master, t, {
+    type: "sine",
+    freq: 160,
+    freqRamp: { to: 50, time: 0.12, exp: true },
+    gainPeak: 0.25,
+    decay: 0.15,
+    stopPad: 0.01,
+  });
 }
 
 // Soft thump when the trailer scoops up a grain sack
 function playPickup() {
   if (!audio) return;
   const t = audio.ac.currentTime;
-  const o = audio.ac.createOscillator();
-  o.type = "sine";
-  const g = audio.ac.createGain();
-  o.connect(g);
-  g.connect(audio.master);
-  o.frequency.setValueAtTime(300, t);
-  o.frequency.exponentialRampToValueAtTime(90, t + 0.09);
-  g.gain.setValueAtTime(0.18, t);
-  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
-  o.start(t);
-  o.stop(t + 0.13);
+  scheduleTone(audio.master, t, {
+    type: "sine",
+    freq: 300,
+    freqRamp: { to: 90, time: 0.09, exp: true },
+    gainPeak: 0.18,
+    decay: 0.12,
+    stopPad: 0.01,
+  });
 }
 
 // Rising three-note chime when grain is sold at the farm
@@ -507,18 +516,14 @@ function playSell() {
   if (!audio) return;
   const t = audio.ac.currentTime;
   [880, 1109, 1319].forEach((freq, i) => {
-    const o = audio.ac.createOscillator();
-    o.type = "triangle";
-    const g = audio.ac.createGain();
-    o.connect(g);
-    g.connect(audio.master);
-    const at = t + i * 0.09;
-    o.frequency.setValueAtTime(freq, at);
-    g.gain.setValueAtTime(0.0001, at);
-    g.gain.linearRampToValueAtTime(0.14, at + 0.02);
-    g.gain.exponentialRampToValueAtTime(0.0001, at + 0.25);
-    o.start(at);
-    o.stop(at + 0.26);
+    scheduleTone(audio.master, t + i * 0.09, {
+      type: "triangle",
+      freq,
+      gainPeak: 0.14,
+      attack: 0.02,
+      decay: 0.25,
+      stopPad: 0.01,
+    });
   });
 }
 
@@ -527,18 +532,14 @@ function playTax() {
   if (!audio) return;
   const t = audio.ac.currentTime;
   [523, 349].forEach((freq, i) => {
-    const o = audio.ac.createOscillator();
-    o.type = "triangle";
-    const g = audio.ac.createGain();
-    o.connect(g);
-    g.connect(audio.master);
-    const at = t + i * 0.16;
-    o.frequency.setValueAtTime(freq, at);
-    g.gain.setValueAtTime(0.0001, at);
-    g.gain.linearRampToValueAtTime(0.16, at + 0.02);
-    g.gain.exponentialRampToValueAtTime(0.0001, at + 0.4);
-    o.start(at);
-    o.stop(at + 0.42);
+    scheduleTone(audio.master, t + i * 0.16, {
+      type: "triangle",
+      freq,
+      gainPeak: 0.16,
+      attack: 0.02,
+      decay: 0.4,
+      stopPad: 0.02,
+    });
   });
 }
 
