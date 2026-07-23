@@ -1,5 +1,5 @@
 import { audio, scheduleTone } from "./sound.js";
-import { seasonQ } from "./legacy.js";
+import { seasonQ } from "./seasons.js";
 
 // ---------------------------------------------------------------------------
 // Background music: a gentle music-box arpeggio over an A / F#m / D / E

@@ -192,6 +192,19 @@ import {
 } from "./input.js";
 import { touchDrive } from "./touch.js";
 import { updateTracks } from "./wheel-tracks.js";
+import {
+  GRASS,
+  MEADOW,
+  DIRT,
+  STUBBLE,
+  MONTH_NAMES,
+  SEASON_DAYS,
+  SEASON_BAR_COLORS,
+  SKY_TOP_SEASONS,
+  SKY_BOTTOM_SEASONS,
+  seasonHex,
+  updateSeason,
+} from "./seasons.js";
 
 const WORK_NOISE = { plow: [220, 0.16], seeder: [480, 0.14], harvester: [1100, 0.22] };
 
@@ -832,81 +845,6 @@ function drawScene(camX, camY) {
 }
 
 // ---------------------------------------------------------------------------
-// Seasons: the round runs from spring through summer into autumn and back
-// into spring again, year-round — nothing ever stops growth. Colors
-// interpolate around three keyframes, and the ground takes the new colors
-// gradually as a few random tiles repaint every frame.
-// ---------------------------------------------------------------------------
-
-// The map's own palette (see MAP_PROFILES) supplies the three season
-// keyframes for grass/dirt/sky/canopy; dot speckles, canopy tiers and the
-// meadow's warmer take on grass are all derived from those via tint()/
-// meadowTint() rather than hand-authored per map, so a new theme only needs
-// to specify its handful of base tones.
-const GRASS_SEASONS = PROFILE.palette.grass;
-// Meadows run warmer/yellower than plain grass and turn properly golden
-// (dried hay) in autumn rather than just tanning like the grass does
-const MEADOW_SEASONS = GRASS_SEASONS.map(meadowTint);
-const DIRT_SEASONS = PROFILE.palette.dirt;
-const STUBBLE_SEASONS = DIRT_SEASONS.map(stubbleTint);
-const TREE_BLOB_SEASONS = [
-  PROFILE.palette.canopy,
-  PROFILE.palette.canopy.map((c) => tint(c, 0.1)),
-  PROFILE.palette.canopy.map((c) => tint(c, 0.22)),
-];
-const SKY_TOP_SEASONS = PROFILE.palette.skyTop;
-const SKY_BOTTOM_SEASONS = PROFILE.palette.skyBottom;
-
-// The round is presented as a calendar running continuously Jan 1st through
-// Dec 31st — one long growing season, with the farm workable every day of
-// the year.
-const MONTH_NAMES = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
-const SEASON_DAYS = 365; // days in the year, Jan 1 through Dec 31
-const SEASON_BAR_COLORS = ["#6fce58", "#4fae4a", "#d99a33"];
-
-function seasonHex(colors) {
-  const seg = Math.min(2, (seasonQ * 3) | 0);
-  return mixHex(colors[seg], colors[(seg + 1) % 3], seasonQ * 3 - seg);
-}
-
-function updateSeason() {
-  // The color wheel runs 0→1 spring to summer to autumn and wraps back onto
-  // spring green over the whole year. It moves continuously every frame; the
-  // blends themselves are quantized by mixHex's cache, so trees, bushes and
-  // sky glide instead of ticking.
-  seasonQ = clamp(1 - timeLeft / ROUND_TIME, 0, 1);
-  setGrass(seasonHex(GRASS_SEASONS));
-  setMeadow(seasonHex(MEADOW_SEASONS));
-  setDirt(seasonHex(DIRT_SEASONS));
-  setStubble(seasonHex(STUBBLE_SEASONS));
-  // Dot-shade arrays are const, so each season's colors are copied into
-  // the existing array in place rather than the binding being reassigned
-  for (const [dest, src] of [
-    [GRASS_DOTS, grassDotShades(GRASS)],
-    [MEADOW_DOTS, grassDotShades(MEADOW)],
-    [DIRT_DOTS, dirtDotShades(DIRT)],
-    [STUBBLE_DOTS, dirtDotShades(STUBBLE)],
-  ])
-    for (let i = 0; i < dest.length; i++) dest[i] = src[i];
-  for (let i = 0; i < TREE_BLOBS.length; i++)
-    TREE_BLOBS[i].color = seasonHex(TREE_BLOB_SEASONS[i]);
-  // The sky is a full-canvas dithered repaint, so it only redraws on a
-  // step grid — fine enough that each redraw is an invisible nudge
-  const step = Math.round(seasonQ * 128);
-  if (step !== seasonStep) {
-    setSeasonStep(step);
-    paintSky();
-  }
-  // The ground turns gradually: random tiles repaint each frame with the
-  // current colors (wheel marks survive: drawTile restamps them), spread
-  // evenly across the whole year.
-  const repaints = 8;
-  for (let i = 0; i < repaints; i++) {
-    drawTile((rand() * MAP_TILES) | 0, (rand() * MAP_TILES) | 0);
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Sky: gradient, a friendly sun, and puffy clouds drifting past the island
 // ---------------------------------------------------------------------------
 
@@ -928,7 +866,7 @@ skyCanvas.width = VIEW_W;
 skyCanvas.height = VIEW_H;
 const skyCtx = skyCanvas.getContext("2d", { willReadFrequently: true });
 
-function paintSky() {
+export function paintSky() {
   const g = skyCtx.createLinearGradient(0, 0, 0, VIEW_H);
   g.addColorStop(0, shade(seasonHex(SKY_TOP_SEASONS), 1));
   g.addColorStop(1, shade(seasonHex(SKY_BOTTOM_SEASONS), 1));
@@ -1228,8 +1166,8 @@ const FUEL_PRICE = 1; // £ per unit, bought automatically at the farm
 
 // seconds — one Jan 1 - Dec 31 year, at the same real-seconds-per-day pace
 // the old Apr-Oct growing season ran at (300s / 213 days)
-const ROUND_TIME = Math.round((300 * SEASON_DAYS) / 213);
-let timeLeft = ROUND_TIME;
+export const ROUND_TIME = Math.round((300 * SEASON_DAYS) / 213);
+export let timeLeft = ROUND_TIME;
 export let gameOver = false;
 let bestScores = [];
 let finalRank = -1; // this round's place in the best list, -1 if none

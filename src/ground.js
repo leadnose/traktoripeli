@@ -20,6 +20,7 @@ import { FARM, FARM_RADIUS, FARM_PASTURE_RADIUS, nearAnyPaddock, farmYardPath, y
 import { CITY, CITY_RADIUS } from "./city.js";
 import { minimapTile } from "./minimap.js";
 import { restampTracks } from "./wheel-tracks.js";
+import { GRASS, MEADOW, DIRT, STUBBLE } from "./seasons.js";
 // Still only defined in legacy.js at this point in the module split -
 // paintPaddockFills/paddockDabs (Minimap section), spawnChaff (Smoke
 // section), and the seed/sack economy state (Tractor section). Genuine
@@ -66,49 +67,15 @@ export function tileTypeAt(wx, wy) {
   return tiles[ty][tx];
 }
 
-// Ground colors are seasonal: these are the spring values (from this map's
-// own palette), and updateSeason() rewrites them as the round progresses
-export let GRASS = PROFILE.palette.grass[0];
+// Ground colors are seasonal; GRASS/MEADOW/DIRT/STUBBLE live in seasons.js
+// (updateSeason() is their sole writer), imported here read-only. The dot
+// arrays stay here since paintTile() is their only reader and
+// updateSeason() only mutates them in place through this same reference.
 export const GRASS_DOTS = grassDotShades(GRASS);
-// Meadow is warmer/yellower than plain grass — a wildflower patch — derived
-// from the map's own grass tone rather than a separate authored color
-export let MEADOW = meadowTint(GRASS);
 export const MEADOW_DOTS = grassDotShades(MEADOW);
-export let DIRT = PROFILE.palette.dirt[0];
 export const DIRT_DOTS = dirtDotShades(DIRT);
-// Stubble — a harvested field before it's plowed — reads as dried pale
-// straw rather than bare soil
-export let STUBBLE = stubbleTint(DIRT);
 export const STUBBLE_DOTS = dirtDotShades(STUBBLE);
 
-// Only this module may reassign GRASS/MEADOW/DIRT/STUBBLE (ESM imports are
-// read-only bindings) — updateSeason() (still in legacy.js until seasons.js
-// exists, its real destined home since it's their sole writer) calls these
-// instead of assigning directly.
-export function setGrass(v) {
-  GRASS = v;
-}
-export function setMeadow(v) {
-  MEADOW = v;
-}
-export function setDirt(v) {
-  DIRT = v;
-}
-export function setStubble(v) {
-  STUBBLE = v;
-}
-
-// The season color wheel, declared here because the initial map paint
-// already reads it (through seasonHex): 0 = spring, 1/3 = summer,
-// 2/3 = autumn; 1 wraps back onto spring. Continuous — mixHex quantizes
-// the blends, so colors still move in tiny ticks.
-export let seasonQ = 0;
-export let seasonStep = -1; // sky repaint trigger, on a fine grid of seasonQ
-// Only this module may reassign seasonStep (ESM imports are read-only
-// bindings) — updateSeason() (still in legacy.js) calls this instead.
-export function setSeasonStep(v) {
-  seasonStep = v;
-}
 export const FLOWER_COLORS = PROFILE.palette.flowers || ["#ff9ed2", "#ffffff", "#c9a6ff", "#ffb27d"];
 
 // The map's own water tone, and the drainage-ditch and ripple shades derived
