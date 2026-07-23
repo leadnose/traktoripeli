@@ -2,10 +2,10 @@ import { INK, shade } from "./lighting.js";
 import { FARM } from "./farmyard.js";
 import { tileTypeAt, roads } from "./ground.js";
 import { nearestShoreSpot } from "./animals.js";
-// sceneCtx isn't split out yet (Scene rendering section) - a genuine
-// circular import, safe because drawSign() only reads it when called at
-// runtime, never at this module's own top level.
-import { sceneCtx } from "./legacy.js";
+// Circular with scene-rendering.js (which imports drawSign back), safe
+// because drawSign() only reads sceneCtx when called at runtime, never
+// at this module's own top level.
+import { sceneCtx } from "./scene-rendering.js";
 
 // ---------------------------------------------------------------------------
 // Signposts: little roadside boards naming the landmarks
