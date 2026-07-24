@@ -1,5 +1,6 @@
 
 let worldTime = 0;
+let saveTimer = 0; // seconds since the last autosave
 
 // ---------------------------------------------------------------------------
 // Tractor state, economy & physics
