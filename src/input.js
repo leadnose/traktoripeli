@@ -5,13 +5,7 @@ import { nearFarm } from "./farmyard.js";
 import { IMPLEMENTS } from "./box-models.js";
 import { loadSave, clearSave, setSavingDisabled } from "./save.js";
 import { startGame, continueInSandbox, tryDateJump, gameOver, implementOverField, tractor } from "./tractor.js";
-// fpsShown (Main loop) isn't split out yet - a genuine circular import,
-// safe because it's only read/reassigned inside the keydown handler,
-// never at this module's own top level.
-import {
-  fpsShown,
-  setFpsShown,
-} from "./legacy.js";
+import { fpsShown, setFpsShown } from "./fps.js";
 
 // ---------------------------------------------------------------------------
 // Input
