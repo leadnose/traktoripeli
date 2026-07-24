@@ -48,6 +48,7 @@ import {
   tractor,
   gameOver,
   GEAR_FAST,
+  MOVING_THRESHOLD,
   autoThrottling,
   update,
   advanceTime,

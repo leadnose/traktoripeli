@@ -1,5 +1,5 @@
 import { clamp } from "./setup.js";
-import { PROFILE, rand, rollBand } from "./rng.js";
+import { PROFILE, SEED, rand, rollBand } from "./rng.js";
 import { TILE, MAP_TILES, MAP_SIZE, projX, projY } from "./projection.js";
 import {
   LIGHT,
@@ -16,7 +16,17 @@ import {
 } from "./lighting.js";
 import { ditherRegion } from "./dithering.js";
 import { terrainHeight } from "./terrain.js";
-import { FARM, FARM_RADIUS, FARM_PASTURE_RADIUS, nearAnyPaddock, farmYardPath, yardScaleAt } from "./farmyard.js";
+import {
+  FARM,
+  FARM_RADIUS,
+  FARM_PASTURE_RADIUS,
+  PADDOCKS_WORLD,
+  YARD_MAX_SCALE,
+  YARD_RADIUS,
+  nearAnyPaddock,
+  farmYardPath,
+  yardScaleAt,
+} from "./farmyard.js";
 import { CITY, CITY_RADIUS } from "./city.js";
 import { minimapTile } from "./minimap.js";
 import { restampTracks } from "./wheel-tracks.js";
