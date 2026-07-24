@@ -206,7 +206,7 @@ function handleGameplayKey(e) {
   }
   if (IMPLEMENT_KEYS[e.key] && !e.repeat) {
     // Implements are swapped at the farmyard
-    if (nearFarm()) {
+    if (nearFarm(tractor.x, tractor.y)) {
       if (tractor.implement !== IMPLEMENT_KEYS[e.key]) {
         tractor.implement = IMPLEMENT_KEYS[e.key];
         tractor.implDown = false;

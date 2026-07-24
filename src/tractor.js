@@ -792,7 +792,7 @@ export function update(dt) {
   pickUpTrailerSacks();
 
   function handleRefuelAndTrading() {
-  atFuelTank = nearFuelTank();
+  atFuelTank = nearFuelTank(tractor.x, tractor.y);
   atCity = nearCity();
 
   // Refueling happens only at the fuel tank, off in its own corner of the
@@ -813,7 +813,7 @@ export function update(dt) {
 
   // Farmyard services: seed purchase only — grain is sold at the city now,
   // not handed over on the spot where it was grown
-  if (nearFarm()) {
+  if (nearFarm(tractor.x, tractor.y)) {
     if (tractor.implement === "seeder" && seeds < SEED_CAP) {
       // Top up the hopper with as many seeds as the cash covers; in
       // survival the farm buys on credit down to the debt limit

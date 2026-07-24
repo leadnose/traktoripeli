@@ -1,12 +1,6 @@
 import { rand, SEED } from "./rng.js";
 import { MAP_SIZE, TILE, rotateLocal } from "./projection.js";
 import { nearPoint } from "./setup.js";
-// The Tractor<->Farmyard relationship (nearFarm/nearFuelTank read
-// tractor.x/y; the tractor update loop calls them every frame) is a mutual
-// runtime function-call/property-read, not a circular value read at
-// module-init time, so importing `tractor` back from tractor.js here is
-// safe - see the plan's note on this for the full reasoning.
-import { tractor } from "./tractor.js";
 
 // ---------------------------------------------------------------------------
 // Farmyard location (needed by the terrain: the yard sits on a flat pad)
@@ -23,8 +17,8 @@ export const FARM = {
 };
 export const FARM_RADIUS = 50; // within this distance farm services are available
 
-export function nearFarm() {
-  return nearPoint(tractor.x, tractor.y, FARM.x, FARM.y, FARM_RADIUS);
+export function nearFarm(tx, ty) {
+  return nearPoint(tx, ty, FARM.x, FARM.y, FARM_RADIUS);
 }
 
 // Cow and pig paddocks: unlike the other grazing species, these two stay
@@ -123,9 +117,9 @@ export const FUEL_TANK_STAND_H = 2.4; // leg height under the tank
 export function fuelTankPos() {
   return rotateLocal(FARM.x, FARM.y, FARM.angle, FUEL_TANK_LOCAL.x, FUEL_TANK_LOCAL.y);
 }
-export function nearFuelTank() {
+export function nearFuelTank(tx, ty) {
   const p = fuelTankPos();
-  return nearPoint(tractor.x, tractor.y, p.x, p.y, FUEL_TANK_RADIUS);
+  return nearPoint(tx, ty, p.x, p.y, FUEL_TANK_RADIUS);
 }
 
 // The trodden yard isn't a perfect ellipse: each map bends its rim in and
