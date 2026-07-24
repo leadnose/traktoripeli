@@ -1,6 +1,3 @@
-import { rand, SEED } from "./rng.js";
-import { MAP_SIZE, TILE, rotateLocal } from "./projection.js";
-import { nearPoint } from "./setup.js";
 
 // ---------------------------------------------------------------------------
 // Farmyard location (needed by the terrain: the yard sits on a flat pad)
@@ -10,14 +7,14 @@ import { nearPoint } from "./setup.js";
 // the edges. The buildings are square-cornered boxes on an isometric grid,
 // so they only ever face one of the 4 cardinal ways — anything in between
 // reads as buildings sitting crooked, off the grid.
-export const FARM = {
+const FARM = {
   x: MAP_SIZE * (0.2 + rand() * 0.6),
   y: MAP_SIZE * (0.2 + rand() * 0.6),
   angle: (Math.floor(rand() * 4) * Math.PI) / 2,
 };
-export const FARM_RADIUS = 50; // within this distance farm services are available
+const FARM_RADIUS = 50; // within this distance farm services are available
 
-export function nearFarm(tx, ty) {
+function nearFarm(tx, ty) {
   return nearPoint(tx, ty, FARM.x, FARM.y, FARM_RADIUS);
 }
 
@@ -36,27 +33,27 @@ export function nearFarm(tx, ty) {
 // east) and keeping whichever scores cleanest. PADDOCKS_LOCAL/PADDOCKS_WORLD
 // are declared here as `let` and stay null until that block runs —
 // nothing before it may read them.
-export const PADDOCK_SIZE = {
+const PADDOCK_SIZE = {
   cow: { w: 70, h: 32 },
   pig: { w: 36, h: 30 },
 };
-export const PENNED_SPECIES = new Set(Object.keys(PADDOCK_SIZE));
-export let PADDOCKS_LOCAL = null;
-export let PADDOCKS_WORLD = null;
-// Only this module may reassign PADDOCKS_LOCAL/PADDOCKS_WORLD (ESM imports
-// are read-only bindings) — main.js's paddock-finalization code calls
-// these instead.
-export function setPaddocksLocal(v) {
+const PENNED_SPECIES = new Set(Object.keys(PADDOCK_SIZE));
+let PADDOCKS_LOCAL = null;
+let PADDOCKS_WORLD = null;
+// Kept as setters (rather than assigning PADDOCKS_LOCAL/PADDOCKS_WORLD
+// directly) so this file stays the one clear place their shape is
+// defined — main.js's paddock-finalization code calls these.
+function setPaddocksLocal(v) {
   PADDOCKS_LOCAL = v;
 }
-export function setPaddocksWorld(v) {
+function setPaddocksWorld(v) {
   PADDOCKS_WORLD = v;
 }
 
 // Is world point (wx, wy) within margin of any paddock's rectangle? Used
 // below to keep vegetation planted after paddock placement (lone trees,
 // bushes, hedgerows) from ending up fenced in with the stock.
-export function paddockHit(wx, wy, margin) {
+function paddockHit(wx, wy, margin) {
   for (const species of Object.keys(PADDOCKS_WORLD)) {
     const p = PADDOCKS_WORLD[species];
     if (wx > p.x0 - margin && wx < p.x1 + margin && wy > p.y0 - margin && wy < p.y1 + margin)
@@ -65,7 +62,7 @@ export function paddockHit(wx, wy, margin) {
   return false;
 }
 
-export function insideAnyPaddock(wx, wy) {
+function insideAnyPaddock(wx, wy) {
   return paddockHit(wx, wy, 0);
 }
 
@@ -73,7 +70,7 @@ export function insideAnyPaddock(wx, wy) {
 // anywhere inside a paddock, plus a tile of slop so the fence-hugging worn
 // path along the rim doesn't go missing when the tile just outside the
 // rail repaints.
-export function nearAnyPaddock(tx, ty) {
+function nearAnyPaddock(tx, ty) {
   return paddockHit((tx + 0.5) * TILE, (ty + 0.5) * TILE, TILE);
 }
 
@@ -81,7 +78,7 @@ export function nearAnyPaddock(tx, ty) {
 // list FARM_SOLID_LOCAL (tractor collision, further down) builds from,
 // minus the pig sty, which isn't a fixed obstacle: it gets carved out of
 // whichever pig candidate wins, not placed independently of it.
-export const FARM_BUILDING_FOOTPRINTS = [
+const FARM_BUILDING_FOOTPRINTS = [
   [-16.0, 2.0, -12.0, 2.0], // barn
   [-13.0, 1.0, -30.0, -16.0], // farmhouse
   [-9.0, -4.0, 6.0, 11.0], // hen house
@@ -99,7 +96,7 @@ export const FARM_BUILDING_FOOTPRINTS = [
 // +16 margin (room for a forest blob's own radius, they grow up to ~6.5
 // units). Re-check this by hand if the search's ring radii or PADDOCK_SIZE
 // change.
-export const FARM_PASTURE_RADIUS = 205;
+const FARM_PASTURE_RADIUS = 205;
 
 // The fuel tank sits out near the rim of the trampled yard (YARD_RADIUS
 // is ~64 units; this is ~90% of that, clear of the barn/yard cluster
@@ -107,17 +104,17 @@ export const FARM_PASTURE_RADIUS = 205;
 // (which costs cash) only happens when the player deliberately drives
 // out to it, instead of automatically every time they're at the farm
 // for seed or grain.
-export const FUEL_TANK_LOCAL = { x: -8, y: 57 };
-export const FUEL_TANK_RADIUS = 16;
+const FUEL_TANK_LOCAL = { x: -8, y: 57 };
+const FUEL_TANK_RADIUS = 16;
 // Shape of the tank itself: a long horizontal cylinder up on legs,
 // see the FARM_BOXES/FARM_SHAPES entries built from these.
-export const FUEL_TANK_LEN = 5.0; // half-length of the cylinder
-export const FUEL_TANK_R = 2.2; // cylinder radius
-export const FUEL_TANK_STAND_H = 2.4; // leg height under the tank
-export function fuelTankPos() {
+const FUEL_TANK_LEN = 5.0; // half-length of the cylinder
+const FUEL_TANK_R = 2.2; // cylinder radius
+const FUEL_TANK_STAND_H = 2.4; // leg height under the tank
+function fuelTankPos() {
   return rotateLocal(FARM.x, FARM.y, FARM.angle, FUEL_TANK_LOCAL.x, FUEL_TANK_LOCAL.y);
 }
-export function nearFuelTank(tx, ty) {
+function nearFuelTank(tx, ty) {
   const p = fuelTankPos();
   return nearPoint(tx, ty, p.x, p.y, FUEL_TANK_RADIUS);
 }
@@ -140,22 +137,22 @@ const YARD_SHAPE = [];
 for (let i = 0; i < YARD_LOBES; i++) YARD_SHAPE.push(0.8 + yardHash(i) * 0.4);
 
 // Interpolated rim scale at a given angle (0 = the ellipse's own radius).
-export function yardScaleAt(angle) {
+function yardScaleAt(angle) {
   const t = (((angle / (Math.PI * 2)) % 1) + 1) % 1 * YARD_LOBES;
   const i0 = Math.floor(t) % YARD_LOBES;
   const i1 = (i0 + 1) % YARD_LOBES;
   const f = t - Math.floor(t);
   return YARD_SHAPE[i0] * (1 - f) + YARD_SHAPE[i1] * f;
 }
-export const YARD_MAX_SCALE = Math.max(...YARD_SHAPE);
+const YARD_MAX_SCALE = Math.max(...YARD_SHAPE);
 
 // A world-space circle matching the yard's screen ellipse (screen ellipse
 // radii are the true isometric projection of a world circle: projX has
 // amplitude r*sqrt(2), projY has amplitude r/sqrt(2), a 2:1 ratio — exactly
 // the ellipse's 1.8/0.9 radii). Used to gate tire tracks on the yard dirt,
 // which otherwise only marks the unplowed-field tile type.
-export const YARD_RADIUS = (FARM_RADIUS * 1.8) / Math.SQRT2;
-export function inYard(wx, wy) {
+const YARD_RADIUS = (FARM_RADIUS * 1.8) / Math.SQRT2;
+function inYard(wx, wy) {
   return Math.hypot(wx - FARM.x, wy - FARM.y) < YARD_RADIUS;
 }
 
@@ -164,7 +161,7 @@ export function inYard(wx, wy) {
 // at YARD_SHAPE's radii and the path threads their midpoints with quadratic
 // curves, the standard canvas trick for a smooth closed blob through a fixed
 // ring of control points.
-export function farmYardPath(mapCtx, fc) {
+function farmYardPath(mapCtx, fc) {
   const Rx = FARM_RADIUS * 1.8;
   const Ry = FARM_RADIUS * 0.9;
   const pts = YARD_SHAPE.map((scale, i) => {

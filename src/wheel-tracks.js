@@ -1,12 +1,3 @@
-import { rotateLocal, projX, projY, TILE, MAP_TILES } from "./projection.js";
-import { terrainHeight } from "./terrain.js";
-import { inYard } from "./farmyard.js";
-import { tileTypeAt, tiles, tileKey, mapCanvas, mapCtx, MAP_OFFSET_X, MAP_OFFSET_Y } from "./ground.js";
-// tractor isn't split out yet (Tractor section) - a genuine circular
-// import, safe because updateTracks() only reads tractor.x/y/angle/speed
-// at runtime, never at this module's own top level.
-import { tractor } from "./tractor.js";
-
 // ---------------------------------------------------------------------------
 // Wheel tracks: stamped into the prerendered map canvas while driving over
 // unplowed field dirt or the farmyard's trodden yard. Each mark is also
@@ -35,7 +26,7 @@ const packMark = (px, py, w) => (py * mapCanvas.width + px) * 2 + (w - 1);
 
 let trackDist = 0;
 
-export function updateTracks(dt) {
+function updateTracks(dt) {
   trackDist += Math.abs(tractor.speed) * dt;
   if (trackDist < 2) return;
   trackDist = 0;
@@ -60,7 +51,7 @@ export function updateTracks(dt) {
 
 // Stamp a tile's recorded marks back over a fresh repaint (called by
 // drawTile after its re-dither, matching how live marks go down undithered)
-export function restampTracks(tx, ty) {
+function restampTracks(tx, ty) {
   const key = ty * MAP_TILES + tx;
   const marks = trackMarks.get(key);
   if (!marks) return;

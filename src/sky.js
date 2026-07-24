@@ -1,13 +1,3 @@
-import { VIEW_W, VIEW_H, ctx } from "./setup.js";
-import { rand } from "./rng.js";
-import { shade } from "./lighting.js";
-import { ditherRegion } from "./dithering.js";
-import { seasonHex, SKY_TOP_SEASONS, SKY_BOTTOM_SEASONS } from "./seasons.js";
-// worldTime isn't split out yet (Tractor section) - a genuine circular
-// import, safe because drawClouds() only reads it at runtime.
-import { worldTime } from "./tractor.js";
-import { mistiness } from "./mist.js";
-
 // ---------------------------------------------------------------------------
 // Sky: gradient, a friendly sun, and puffy clouds drifting past the island
 // ---------------------------------------------------------------------------
@@ -18,9 +8,8 @@ const skyCanvas = document.createElement("canvas");
 skyCanvas.width = VIEW_W;
 skyCanvas.height = VIEW_H;
 const skyCtx = skyCanvas.getContext("2d", { willReadFrequently: true });
-export { skyCanvas };
 
-export function paintSky() {
+function paintSky() {
   const g = skyCtx.createLinearGradient(0, 0, 0, VIEW_H);
   g.addColorStop(0, shade(seasonHex(SKY_TOP_SEASONS), 1));
   g.addColorStop(1, shade(seasonHex(SKY_BOTTOM_SEASONS), 1));
@@ -29,7 +18,7 @@ export function paintSky() {
   ditherRegion(skyCtx, 0, 0, VIEW_W, VIEW_H);
 }
 
-export function drawSun() {
+function drawSun() {
   ctx.fillStyle = "rgba(255,240,170,0.4)";
   ctx.beginPath();
   ctx.arc(56, 44, 20, 0, Math.PI * 2);
@@ -40,14 +29,14 @@ export function drawSun() {
   ctx.fill();
 }
 
-export const CLOUDS = [];
+const CLOUDS = [];
 
 // The initial paintSky() and the CLOUDS layout both need to run at the
 // exact point the original inline code did (CLOUDS' rand() calls have a
 // fixed position in the world-gen sequence), so - like
 // initTerrain()/initTrees() - this is an explicit init call rather than
 // module-load-order top-level code.
-export function initSky() {
+function initSky() {
   paintSky();
   for (let i = 0; i < 9; i++) {
     CLOUDS.push({
@@ -60,7 +49,7 @@ export function initSky() {
   }
 }
 
-export function drawClouds(camX, camY) {
+function drawClouds(camX, camY) {
   const wrapX = VIEW_W + 240;
   const wrapY = VIEW_H + 200;
   // Greyer and a touch more solid on overcast days, paper-white on clear ones

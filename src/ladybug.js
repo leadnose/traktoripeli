@@ -1,16 +1,3 @@
-import { VIEW_W, VIEW_H, ctx } from "./setup.js";
-import { rand, gameStarted } from "./rng.js";
-import { MAP_SIZE, projX, projY } from "./projection.js";
-import { terrainHeight } from "./terrain.js";
-import { INK, shade } from "./lighting.js";
-import { FARM, FARM_RADIUS } from "./farmyard.js";
-import { tileTypeAt, roadTiles, tileKey } from "./ground.js";
-import { playPickup } from "./sound.js";
-// tractor/GEAR_SLOW/gameOver/worldTime/addCash aren't split out yet
-// (Tractor section) - genuine circular imports, safe because they're only
-// read/called inside update/draw functions.
-import { tractor, GEAR_SLOW, gameOver, worldTime, addCash } from "./tractor.js";
-
 // ---------------------------------------------------------------------------
 // The ladybug: one tiny critter hides in the grass somewhere. Roll up to it
 // slowly and it pays a little luck money, buzzes off, and hides again.
@@ -18,10 +5,10 @@ import { tractor, GEAR_SLOW, gameOver, worldTime, addCash } from "./tractor.js";
 
 const LADYBUG_BONUS = 10;
 
-export const ladybug = { wx: 0, wy: 0, flee: 0, dir: 0 };
-export let luckFlash = 0; // makes the CASH readout blink green on a find
+const ladybug = { wx: 0, wy: 0, flee: 0, dir: 0 };
+let luckFlash = 0; // makes the CASH readout blink green on a find
 
-export function placeLadybug() {
+function placeLadybug() {
   for (let tries = 0; tries < 200; tries++) {
     const wx = 24 + rand() * (MAP_SIZE - 48);
     const wy = 24 + rand() * (MAP_SIZE - 48);
@@ -35,7 +22,7 @@ export function placeLadybug() {
   }
 }
 
-export function updateLadybug(dt) {
+function updateLadybug(dt) {
   luckFlash = Math.max(0, luckFlash - dt);
   if (ladybug.flee > 0) {
     // Airborne: buzz away from the finder, then hide somewhere fresh
@@ -59,7 +46,7 @@ export function updateLadybug(dt) {
   }
 }
 
-export function drawLadybug(camX, camY) {
+function drawLadybug(camX, camY) {
   const b = ladybug;
   const lift = b.flee > 0 ? (1.6 - b.flee) * 14 : 0;
   const x = Math.round(projX(b.wx, b.wy) - camX);

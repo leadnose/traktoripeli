@@ -1,8 +1,3 @@
-import { SEED } from "./rng.js";
-import { MAP_SIZE } from "./projection.js";
-import { nearPoint } from "./setup.js";
-import { FARM } from "./farmyard.js";
-import { tractor } from "./tractor.js";
 
 // ---------------------------------------------------------------------------
 // City location: where grain actually gets sold. Placed a real drive away
@@ -50,9 +45,9 @@ function pickCityPos() {
   }
   return best;
 }
-export const CITY = { ...pickCityPos(), angle: cityHash(500) * Math.PI * 2 };
-export const CITY_RADIUS = 30; // within this distance the depot buys grain
+const CITY = { ...pickCityPos(), angle: cityHash(500) * Math.PI * 2 };
+const CITY_RADIUS = 30; // within this distance the depot buys grain
 
-export function nearCity() {
+function nearCity() {
   return nearPoint(tractor.x, tractor.y, CITY.x, CITY.y, CITY_RADIUS);
 }

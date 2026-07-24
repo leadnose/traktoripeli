@@ -1,18 +1,16 @@
-import { PROFILE, rand, rollBand } from "./rng.js";
-import { MAP_SIZE } from "./projection.js";
 
 // ---------------------------------------------------------------------------
 // Terrain: smooth rolling hills from summed cosine bumps, fading to flat
 // near the map edges so the dirt cliffs stay level.
 // ---------------------------------------------------------------------------
 
-export const HILLS = [];
+const HILLS = [];
 
 // Builds the hill field. This is a one-time, rand()-consuming step whose
 // position in the overall world-gen sequence matters for map reproducibility
 // (see main.js), so it's an explicit init call rather than module-load-order
 // top-level code — merely importing this module must not roll any dice.
-export function initTerrain() {
+function initTerrain() {
   // This map's hilliness: a multiplier on both how many hills stack up and
   // how tall each one is, rolled from the profile's band.
   const HILLINESS = rollBand(PROFILE.hilliness);
@@ -30,7 +28,7 @@ export function initTerrain() {
 // terrain like everything else. No flattening at the map edges either —
 // hills run right up to (and are sliced by) the boundary; the cliff and
 // clip both trace the real per-point height so there's nothing to keep flat.
-export function terrainHeight(wx, wy) {
+function terrainHeight(wx, wy) {
   let h = 0;
   for (const hill of HILLS) {
     const d = Math.hypot(wx - hill.cx, wy - hill.cy);

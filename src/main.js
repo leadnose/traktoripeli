@@ -1,61 +1,3 @@
-import { VIEW_W, VIEW_H } from "./setup.js";
-import { MAP_INDEX, mode, gameStarted, rand } from "./rng.js";
-import { TILE, MAP_TILES, MAP_SIZE, projX, projY, rotateLocal } from "./projection.js";
-import { shade, tint } from "./lighting.js";
-import { ditherRegion } from "./dithering.js";
-import { audio } from "./sound.js";
-import { scheduleMusic } from "./music.js";
-import { initTerrain, terrainHeight } from "./terrain.js";
-import {
-  FARM,
-  PADDOCK_SIZE,
-  PADDOCKS_LOCAL,
-  PADDOCKS_WORLD,
-  setPaddocksLocal,
-  setPaddocksWorld,
-  FARM_BUILDING_FOOTPRINTS,
-} from "./farmyard.js";
-import {
-  mapCanvas,
-  mapCtx,
-  tiles,
-  dirs,
-  growth,
-  tileTypeAt,
-  mp,
-  drawTile,
-  roadSamples,
-  roadTiles,
-  tileKey,
-  makeMap,
-} from "./ground.js";
-import { minimapCtx, FARM_MARKER, CITY_MARKER, roadPixels, minimapTile } from "./minimap.js";
-import { initTrees } from "./trees.js";
-import { initBushes } from "./bushes.js";
-import { initAnimals, initBirds } from "./animals.js";
-import { initSignposts } from "./signposts.js";
-import { initCart } from "./cart.js";
-import { IMPLEMENTS, initBoxModels } from "./box-models.js";
-import { draw } from "./hud-and-overlays.js";
-import { keys, paused, refreshMenuSaveInfo, awayClock } from "./input.js";
-import { updateFps } from "./fps.js";
-import { touchDrive } from "./touch.js";
-import { GRASS } from "./seasons.js";
-import { initSky } from "./sky.js";
-import { initButterflies } from "./butterflies.js";
-import { placeLadybug } from "./ladybug.js";
-import {
-  tractor,
-  gameOver,
-  GEAR_FAST,
-  MOVING_THRESHOLD,
-  autoThrottling,
-  update,
-  advanceTime,
-  loadSavedRun,
-} from "./tractor.js";
-import { loadSave } from "./save.js";
-import { cam, updateCamera } from "./camera.js";
 
 // ---------------------------------------------------------------------------
 // Entry point: the world's one-time load sequence, in the exact relative
@@ -237,7 +179,7 @@ const PADDOCK_MUD_DARK = "#3d3220";
 // The flat fill: one solid screen-projected quad per paddock. Recomputed
 // (not cached as a pixel list like paddockDabs below) wherever it's
 // painted — it's only 4 mp() calls and a fill, cheaper to redo than store.
-export function paintPaddockFills() {
+function paintPaddockFills() {
   mapCtx.fillStyle = shade(PADDOCK_GRASS, 1);
   for (const species of Object.keys(PADDOCKS_WORLD)) {
     const p = PADDOCKS_WORLD[species];
@@ -255,7 +197,7 @@ export function paintPaddockFills() {
 // solid dark border. Screen-space (mp-projected), exactly like yardPixels
 // above — deterministic, so replaying it after a later repaint (drawTile's
 // nearAnyPaddock branch, see there) is a no-op.
-export const paddockDabs = [];
+const paddockDabs = [];
 function stampPaddockGround(p) {
   const inset = 1.6;
   const w = p.x1 - p.x0 - inset * 2;

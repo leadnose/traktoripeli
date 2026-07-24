@@ -1,34 +1,3 @@
-import { VIEW_W, VIEW_H, ctx, clamp, AMBIENT_FLOOR } from "./setup.js";
-import { projX, projY, rotateXY, rotateLocal } from "./projection.js";
-import { terrainHeight } from "./terrain.js";
-import { LIGHT, INK, shade } from "./lighting.js";
-import {
-  TIRE,
-  HUB,
-  BOXES,
-  TRACTOR_WHEELS,
-  TRACTOR_SHAPES,
-  DRIVER_SHAPES,
-  IMPLEMENT_LIFT_HEIGHT,
-  IMPLEMENTS,
-  FARM_BOXES,
-  FARM_SHAPES,
-  PADDOCK_BOXES,
-  CITY_BOXES,
-  CITY_SHAPES,
-  SACK_SHAPES,
-  FACES,
-  signedArea4,
-} from "./box-models.js";
-import { tractor, worldTime, implementPose, ROLLING_THRESHOLD, sacks } from "./tractor.js";
-import { FARM } from "./farmyard.js";
-import { CITY } from "./city.js";
-import { cart, CART_BOXES, CART_WHEELS, CART_DRIVER } from "./cart.js";
-import { trees, TREE_KINDS } from "./trees.js";
-import { bushes } from "./bushes.js";
-import { animals, ANIMAL_SPECS, ANIMAL_BOXES, SHEEP_BOXES, SHEEP_SHAPES } from "./animals.js";
-import { signs, drawSign } from "./signposts.js";
-import { seasonHex } from "./seasons.js";
 
 // ---------------------------------------------------------------------------
 // Scene rendering: all box sets (tractor, implement, farm, sacks) go into one
@@ -157,14 +126,14 @@ function onScreen(wx, wy, camX, camY) {
 const sceneCanvas = document.createElement("canvas");
 sceneCanvas.width = VIEW_W;
 sceneCanvas.height = VIEW_H;
-export const sceneCtx = sceneCanvas.getContext("2d");
+const sceneCtx = sceneCanvas.getContext("2d");
 
 const inkCanvas = document.createElement("canvas");
 inkCanvas.width = VIEW_W;
 inkCanvas.height = VIEW_H;
 const inkCtx = inkCanvas.getContext("2d");
 
-export function drawScene(camX, camY) {
+function drawScene(camX, camY) {
   const pose = implementPose();
 
   // Ground shadows: one quad under the tractor, one under the implement

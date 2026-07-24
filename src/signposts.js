@@ -1,12 +1,3 @@
-import { INK, shade } from "./lighting.js";
-import { FARM } from "./farmyard.js";
-import { tileTypeAt, roads } from "./ground.js";
-import { nearestShoreSpot } from "./animals.js";
-// Circular with scene-rendering.js (which imports drawSign back), safe
-// because drawSign() only reads sceneCtx when called at runtime, never
-// at this module's own top level.
-import { sceneCtx } from "./scene-rendering.js";
-
 // ---------------------------------------------------------------------------
 // Signposts: little roadside boards naming the landmarks
 // ---------------------------------------------------------------------------
@@ -30,9 +21,9 @@ const SIGN_FONT = {
   T: ["###", ".#.", ".#.", ".#.", ".#."],
 };
 
-export const signs = [];
+const signs = [];
 
-export function addSign(text, wx, wy) {
+function addSign(text, wx, wy) {
   let w = -1;
   for (const ch of text) w += SIGN_FONT[ch][0].length + 1;
   signs.push({ text, wx, wy, w });
@@ -41,7 +32,7 @@ export function addSign(text, wx, wy) {
 // A post with a cream board, drawn straight to the screen as a billboard.
 // It renders into the scene canvas, so the ink pass outlines it like
 // everything else and the board needs no frame of its own.
-export function drawSign(s, x, y) {
+function drawSign(s, x, y) {
   const bw = s.w + 4;
   const bh = 9;
   const bx = x - (bw >> 1);
@@ -62,7 +53,7 @@ export function drawSign(s, x, y) {
 }
 
 // Beside a road point, on whichever side is open grass
-export function placeSignBeside(text, p) {
+function placeSignBeside(text, p) {
   for (const side of [1, -1]) {
     const sx = p.x + Math.cos(p.dir + (Math.PI / 2) * side) * 7;
     const sy = p.y + Math.sin(p.dir + (Math.PI / 2) * side) * 7;
@@ -79,7 +70,7 @@ export function placeSignBeside(text, p) {
 // calls, so unlike initTerrain()/initTrees() its position in the
 // world-gen sequence only needs to come after those, not at any
 // RNG-precise slot.
-export function initSignposts() {
+function initSignposts() {
   // FARM where the farm's own road leaves the yard
   if (roads.length && roads[0].pts.length > 6) placeSignBeside("FARM", roads[0].pts[5]);
   else addSign("FARM", FARM.x + 24, FARM.y + 24);

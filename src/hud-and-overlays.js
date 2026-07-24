@@ -1,50 +1,3 @@
-import { screenCanvas, screenCtx, ctx, view, VIEW_W, VIEW_H, clamp } from "./setup.js";
-import { MAP_INDEX, PROFILE, mode, gameStarted } from "./rng.js";
-import { MAP_PROFILES } from "./map-profiles.js";
-import { MAP_SIZE, MAP_TILES, TILE } from "./projection.js";
-import { IMPLEMENTS, TRACTOR_BODY } from "./box-models.js";
-import {
-  tractor,
-  worldTime,
-  cash,
-  seeds,
-  cargo,
-  sold,
-  fuel,
-  atFuelTank,
-  atCity,
-  year,
-  propertyTax,
-  timeLeft,
-  gameOver,
-  bestScores,
-  finalRank,
-  taxFlash,
-  taxPaid,
-  taxYear,
-  SEED_PRICE,
-  FUEL_CAP,
-  TRAILER_CAP,
-  MOVING_THRESHOLD,
-  implementOverField,
-  sandboxClockRate,
-  currentCalendarDay,
-} from "./tractor.js";
-import { IMPLEMENT_KEYS, menuOpen, paused, autoThrottleOn, dateJump, dateJumpError, menuMap, menuMode, menuSaveInfo, awayClock } from "./input.js";
-import { luckFlash } from "./ladybug.js";
-import { seasonHex, SEASON_BAR_COLORS, MONTH_NAMES } from "./seasons.js";
-import { soundMuted, musicMuted } from "./sound.js";
-import { cam } from "./camera.js";
-import { skyCanvas, drawSun, drawClouds } from "./sky.js";
-import { drawMist } from "./mist.js";
-import { drawButterflies } from "./butterflies.js";
-import { drawLadybug } from "./ladybug.js";
-import { drawBirds } from "./animals.js";
-import { drawSmoke } from "./smoke.js";
-import { drawScene } from "./scene-rendering.js";
-import { mapCanvas, MAP_OFFSET_X, MAP_OFFSET_Y, countFieldTiles } from "./ground.js";
-import { minimapCanvas, MINIMAP_COLORS } from "./minimap.js";
-import { fpsShown, fpsValue } from "./fps.js";
 
 // ---------------------------------------------------------------------------
 // Rendering
@@ -194,7 +147,7 @@ function drawSpeakerIcon(x, y, on) {
   }
 }
 
-export function draw() {
+function draw() {
   // Scene, sky and weather compositing: everything that isn't HUD/overlay
   function drawWorldAndWeather() {
     const camX = Math.round(cam.x);

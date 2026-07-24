@@ -1,75 +1,35 @@
-import { clamp } from "./setup.js";
-import { PROFILE, SEED, rand, rollBand } from "./rng.js";
-import { TILE, MAP_TILES, MAP_SIZE, projX, projY } from "./projection.js";
-import {
-  LIGHT,
-  INK,
-  MAP_INK,
-  ROAD_INK,
-  shade,
-  mixHex,
-  tint,
-  grassDotShades,
-  dirtDotShades,
-  meadowTint,
-  stubbleTint,
-} from "./lighting.js";
-import { ditherRegion } from "./dithering.js";
-import { terrainHeight } from "./terrain.js";
-import {
-  FARM,
-  FARM_RADIUS,
-  FARM_PASTURE_RADIUS,
-  PADDOCKS_WORLD,
-  YARD_MAX_SCALE,
-  YARD_RADIUS,
-  nearAnyPaddock,
-  farmYardPath,
-  yardScaleAt,
-} from "./farmyard.js";
-import { CITY, CITY_RADIUS } from "./city.js";
-import { minimapTile } from "./minimap.js";
-import { restampTracks } from "./wheel-tracks.js";
-import { GRASS, MEADOW, DIRT, STUBBLE } from "./seasons.js";
-import { spawnChaff } from "./smoke.js";
-import { seeds, consumeSeed, sacks } from "./tractor.js";
-// Circular with main.js (which imports back from here for the map/tile
-// data), safe because drawTile() only calls these at runtime, never
-// during either module's own top-level evaluation.
-import { paintPaddockFills, paddockDabs } from "./main.js";
-
 // ---------------------------------------------------------------------------
 // Ground map (prerendered once)
 // ---------------------------------------------------------------------------
 
-export const EDGE_DEPTH = 36; // thickness of the dirt "cliff" at the map's near edges
-export const MAP_OFFSET_X = MAP_SIZE; // shift so projX is never negative
-export const MAP_OFFSET_Y = 64; // headroom for hilltops that project above y = 0
+const EDGE_DEPTH = 36; // thickness of the dirt "cliff" at the map's near edges
+const MAP_OFFSET_X = MAP_SIZE; // shift so projX is never negative
+const MAP_OFFSET_Y = 64; // headroom for hilltops that project above y = 0
 
-export const mapCanvas = document.createElement("canvas");
+const mapCanvas = document.createElement("canvas");
 mapCanvas.width = MAP_SIZE * 2;
 mapCanvas.height = MAP_SIZE + EDGE_DEPTH + MAP_OFFSET_Y;
 
 // willReadFrequently keeps the canvas CPU-side: the constant background
 // repaints re-dither through getImageData, and on a GPU-backed canvas every
 // one of those is a pipeline-stalling readback
-export const mapCtx = mapCanvas.getContext("2d", { willReadFrequently: true });
+const mapCtx = mapCanvas.getContext("2d", { willReadFrequently: true });
 
 // Tile types: 0 = grass, 1 = field (unplowed / stubble), 2 = plowed, 3 = seeded.
 // dirs holds the furrow direction (0 = along world y, 1 = along world x) and
 // growth the seconds since seeding, which drives the crop stages.
-export const tiles = [];
-export const dirs = [];
-export const growth = [];
-export const CROP_STAGES = [8, 18, 32]; // seconds to reach sprout / young / mature
+const tiles = [];
+const dirs = [];
+const growth = [];
+const CROP_STAGES = [8, 18, 32]; // seconds to reach sprout / young / mature
 
-export function cropStage(g) {
+function cropStage(g) {
   let s = 0;
   for (const t of CROP_STAGES) if (g >= t) s++;
   return s;
 }
 
-export function tileTypeAt(wx, wy) {
+function tileTypeAt(wx, wy) {
   const tx = (wx / TILE) | 0;
   const ty = (wy / TILE) | 0;
   if (tx < 0 || ty < 0 || tx >= MAP_TILES || ty >= MAP_TILES) return -1;
@@ -80,39 +40,39 @@ export function tileTypeAt(wx, wy) {
 // (updateSeason() is their sole writer), imported here read-only. The dot
 // arrays stay here since paintTile() is their only reader and
 // updateSeason() only mutates them in place through this same reference.
-export const GRASS_DOTS = grassDotShades(GRASS);
-export const MEADOW_DOTS = grassDotShades(MEADOW);
-export const DIRT_DOTS = dirtDotShades(DIRT);
-export const STUBBLE_DOTS = dirtDotShades(STUBBLE);
+const GRASS_DOTS = grassDotShades(GRASS);
+const MEADOW_DOTS = grassDotShades(MEADOW);
+const DIRT_DOTS = dirtDotShades(DIRT);
+const STUBBLE_DOTS = dirtDotShades(STUBBLE);
 
-export const FLOWER_COLORS = PROFILE.palette.flowers || ["#ff9ed2", "#ffffff", "#c9a6ff", "#ffb27d"];
+const FLOWER_COLORS = PROFILE.palette.flowers || ["#ff9ed2", "#ffffff", "#c9a6ff", "#ffb27d"];
 
 // The map's own water tone, and the drainage-ditch and ripple shades derived
 // from it
-export const WATER_COLOR = PROFILE.palette.water;
-export const WATER_RIPPLE = tint(WATER_COLOR, 0.25);
-export const DITCH_COLOR = tint(WATER_COLOR, -0.12); // water-filled drainage ditches
+const WATER_COLOR = PROFILE.palette.water;
+const WATER_RIPPLE = tint(WATER_COLOR, 0.25);
+const DITCH_COLOR = tint(WATER_COLOR, -0.12); // water-filled drainage ditches
 
 // The farmyard's trodden dirt never turns with the seasons (unlike field
 // dirt), so it's pinned to the map's base dirt tone rather than the mutable
 // DIRT variable
-export const YARD_DIRT = PROFILE.palette.dirt[0];
-export const YARD_DIRT_DARK = tint(YARD_DIRT, -0.16);
+const YARD_DIRT = PROFILE.palette.dirt[0];
+const YARD_DIRT_DARK = tint(YARD_DIRT, -0.16);
 
-export const mp = (wx, wy) => ({
+const mp = (wx, wy) => ({
   x: projX(wx, wy) + MAP_OFFSET_X,
   y: projY(wx, wy, terrainHeight(wx, wy)) + MAP_OFFSET_Y,
 });
 
 // Flat (height-0) projection: used only for the cliffs' straight bottom rim,
 // which sits level regardless of how the terrain above it undulates.
-export const mp0 = (wx, wy) => ({
+const mp0 = (wx, wy) => ({
   x: projX(wx, wy) + MAP_OFFSET_X,
   y: projY(wx, wy, 0) + MAP_OFFSET_Y,
 });
 
 // Brightness at a world point from the terrain normal against the light
-export function groundShade(wx, wy) {
+function groundShade(wx, wy) {
   const d = 4;
   const dzdx = (terrainHeight(wx + d, wy) - terrainHeight(wx - d, wy)) / (2 * d);
   const dzdy = (terrainHeight(wx, wy + d) - terrainHeight(wx, wy - d)) / (2 * d);
@@ -121,13 +81,13 @@ export function groundShade(wx, wy) {
   return clamp(0.3 + dot, 0.4, 1.25);
 }
 
-export function isField(tx, ty) {
+function isField(tx, ty) {
   if (tx < 0 || ty < 0 || tx >= MAP_TILES || ty >= MAP_TILES) return false;
   const t = tiles[ty][tx];
   return t >= 1 && t <= 3;
 }
 
-export function isWater(tx, ty) {
+function isWater(tx, ty) {
   if (tx < 0 || ty < 0 || tx >= MAP_TILES || ty >= MAP_TILES) return false;
   return tiles[ty][tx] === 4;
 }
@@ -142,7 +102,7 @@ export function isWater(tx, ty) {
 // which is most of a jagged coast. Each of the (up to) four tiles touching
 // such a vertex rounds its own corner independently; together they turn the
 // crossing into a small rounded pinwheel instead of a hard point.
-export function tileGeometry(tx, ty, same) {
+function tileGeometry(tx, ty, same) {
   const P = [
     mp(tx * TILE, ty * TILE),
     mp((tx + 1) * TILE, ty * TILE),
@@ -159,10 +119,10 @@ export function tileGeometry(tx, ty, same) {
   return { P, rounded };
 }
 
-export const CORNER_T = 0.45; // how far along the tile edges the rounding cuts in
+const CORNER_T = 0.45; // how far along the tile edges the rounding cuts in
 
 // Dirt outline of a field tile with the rounded corners curved inward
-export function fieldPath(P, rounded) {
+function fieldPath(P, rounded) {
   const path = new Path2D();
   let started = false;
   for (let i = 0; i < 4; i++) {
@@ -192,7 +152,7 @@ export function fieldPath(P, rounded) {
 // polyline follows the real terrain height instead of cutting a flat line
 // corner-to-corner — hills run up to (and are sliced by) the boundary now.
 // `project` defaults to the real-height mp(); pass mp0 for a level line.
-export function mapEdge(fromX, fromY, toX, toY, project = mp) {
+function mapEdge(fromX, fromY, toX, toY, project = mp) {
   const pts = [];
   for (let i = 0; i <= MAP_TILES; i++) {
     const t = i / MAP_TILES;
@@ -202,7 +162,7 @@ export function mapEdge(fromX, fromY, toX, toY, project = mp) {
 }
 
 // Clip the map context to the ground diamond (caller does save/restore)
-export function clipMapDiamond() {
+function clipMapDiamond() {
   mapCtx.beginPath();
   let started = false;
   for (const edge of [
@@ -226,9 +186,9 @@ export function clipMapDiamond() {
 // outline the fills use; rounded corners ink their crescent arc, and edges
 // against the void draw the island's rim. Everything derives from the tile
 // grid, so any repaint reproduces the exact same line pixels.
-export const EDGE_NEIGHBOR = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+const EDGE_NEIGHBOR = [[0, -1], [1, 0], [0, 1], [-1, 0]];
 
-export function tileInk(tx, ty) {
+function tileInk(tx, ty) {
   const t = tiles[ty][tx];
   const same = t === 4 ? isWater : t > 0 ? isField : () => true;
   const { P, rounded } = tileGeometry(tx, ty, same);
@@ -306,7 +266,7 @@ export function tileInk(tx, ty) {
 
 // Crop sprites for a seeded tile; the caller must have clipped to the
 // tile's field outline so plants never poke into the surrounding grass
-export function drawCropsOn(tx, ty, kc) {
+function drawCropsOn(tx, ty, kc) {
   const alongX = dirs[ty][tx] === 1;
   const stage = cropStage(growth[ty][tx]);
   for (const s of [0.25, 0.5, 0.75]) {
@@ -336,7 +296,7 @@ export function drawCropsOn(tx, ty, kc) {
 }
 
 // Repaint one tile, then re-dither just that neighborhood of the map canvas
-export function drawTile(tx, ty) {
+function drawTile(tx, ty) {
   paintTile(tx, ty);
   minimapTile(tx, ty);
 
@@ -523,7 +483,7 @@ export function drawTile(tx, ty) {
 // Per-tile deterministic randomness for tile details (speckles, flowers,
 // ripples): a tile repaint must reproduce the exact same pixels, otherwise
 // the constant background repaints (seasons, field work) twinkle
-export function tileRand(tx, ty) {
+function tileRand(tx, ty) {
   let s = (SEED ^ Math.imul(tx + 1, 374761393) ^ Math.imul(ty + 1, 668265263)) | 0;
   return function () {
     s = (s + 0x6d2b79f5) | 0;
@@ -540,7 +500,7 @@ export function tileRand(tx, ty) {
 // boundary instead of leaving a hard tile-grid edge. Returns tileGeometry's
 // {P, rounded} since the field-tile caller needs them again afterward to
 // clip furrows/crops to the same rounded outline.
-export function paintCornerCrescents(tx, ty, sameFn, colorFn) {
+function paintCornerCrescents(tx, ty, sameFn, colorFn) {
   const { P, rounded } = tileGeometry(tx, ty, sameFn);
   for (let i = 0; i < 4; i++) {
     if (!rounded[i]) continue;
@@ -569,12 +529,12 @@ export function paintCornerCrescents(tx, ty, sameFn, colorFn) {
 // grass: shaded per-corner from that corner's own terrain normal, since a
 // crescent can span a slope where shading legitimately differs corner to
 // corner.
-export function grassCornerColor(tx, ty) {
+function grassCornerColor(tx, ty) {
   const cornerTile = [[tx, ty], [tx + 1, ty], [tx + 1, ty + 1], [tx, ty + 1]];
   return (i) => shade(GRASS, groundShade(cornerTile[i][0] * TILE, cornerTile[i][1] * TILE));
 }
 
-export function paintTile(tx, ty) {
+function paintTile(tx, ty) {
   const type = tiles[ty][tx];
   const kc = groundShade((tx + 0.5) * TILE, (ty + 0.5) * TILE);
   const tr = tileRand(tx, ty);
@@ -732,7 +692,7 @@ export function paintTile(tx, ty) {
 // --- Field work, one function per implement ---------------------------------
 
 // Plow: turn unplowed field into furrows along the travel direction
-export function plowTileAt(wx, wy, alongX) {
+function plowTileAt(wx, wy, alongX) {
   if (tileTypeAt(wx, wy) !== 1) return;
   const tx = (wx / TILE) | 0;
   const ty = (wy / TILE) | 0;
@@ -742,7 +702,7 @@ export function plowTileAt(wx, wy, alongX) {
 }
 
 // Seeder: plant a plowed tile, consuming one seed
-export function seedTileAt(wx, wy) {
+function seedTileAt(wx, wy) {
   if (seeds <= 0 || tileTypeAt(wx, wy) !== 2) return;
   const tx = (wx / TILE) | 0;
   const ty = (wy / TILE) | 0;
@@ -753,7 +713,7 @@ export function seedTileAt(wx, wy) {
 }
 
 // Harvester: cut a mature crop, leaving a grain sack and stubble behind
-export function harvestTileAt(wx, wy) {
+function harvestTileAt(wx, wy) {
   if (tileTypeAt(wx, wy) !== 3) return;
   const tx = (wx / TILE) | 0;
   const ty = (wy / TILE) | 0;
@@ -768,7 +728,7 @@ export function harvestTileAt(wx, wy) {
 }
 
 // Advance crop growth on seeded tiles, repainting when a stage is reached
-export function updateCrops(dt) {
+function updateCrops(dt) {
   for (let ty = 0; ty < MAP_TILES; ty++) {
     for (let tx = 0; tx < MAP_TILES; tx++) {
       if (tiles[ty][tx] !== 3) continue;
@@ -782,7 +742,7 @@ export function updateCrops(dt) {
 // Tally the field tiles by working state for the HUD's ledger tag. Sown
 // splits into growing and ripe, since a mature crop is what the harvester
 // hunts for. The 60×60 map is small enough to recount every frame.
-export function countFieldTiles() {
+function countFieldTiles() {
   const c = { stubble: 0, plowed: 0, sown: 0, ripe: 0 };
   for (let ty = 0; ty < MAP_TILES; ty++) {
     for (let tx = 0; tx < MAP_TILES; tx++) {
@@ -803,21 +763,21 @@ export function countFieldTiles() {
 // themselves (point sequences) so the delivery cart can drive the network.
 // The field patch rectangles are kept for the hedgerows planted along their
 // edges.
-export const roads = [];
-export const roadSamples = [];
-export const roadTiles = new Set();
-export const patches = [];
-export const forestTiles = new Set(); // tile indexes under forest stands
-export const meadowTiles = new Set(); // tile indexes under wildflower meadow patches
-export const tileKey = (wx, wy) => ((wy / TILE) | 0) * MAP_TILES + ((wx / TILE) | 0);
-export const ROAD_COLOR = PROFILE.palette.road;
-export const BRIDGE_COLOR = tint(ROAD_COLOR, -0.2); // road surface where it crosses water
-export const ROAD_SPECKLE = tint(ROAD_COLOR, -0.15); // wheel-worn speckles along the middle
+const roads = [];
+const roadSamples = [];
+const roadTiles = new Set();
+const patches = [];
+const forestTiles = new Set(); // tile indexes under forest stands
+const meadowTiles = new Set(); // tile indexes under wildflower meadow patches
+const tileKey = (wx, wy) => ((wy / TILE) | 0) * MAP_TILES + ((wx / TILE) | 0);
+const ROAD_COLOR = PROFILE.palette.road;
+const BRIDGE_COLOR = tint(ROAD_COLOR, -0.2); // road surface where it crosses water
+const ROAD_SPECKLE = tint(ROAD_COLOR, -0.15); // wheel-worn speckles along the middle
 // Stamps by tile index: roads and ditches are painted over the tiles, so
 // whenever a tile repaints (field work, seasons) they must be restored
-export const roadStamps = new Map();
+const roadStamps = new Map();
 
-export function addStamp(x, y, r, color) {
+function addStamp(x, y, r, color) {
   // The margin past r covers the painted ellipse plus its one-pixel ink rim,
   // so every pixel a stamp can touch lies in a tile that knows the stamp
   const touched = new Set();
@@ -830,14 +790,14 @@ export function addStamp(x, y, r, color) {
 }
 // Same for the farmyard's trodden dirt: its speckles are kept so the yard
 // can be redrawn identically over a repainted tile
-export const yardPixels = [];
+const yardPixels = [];
 
 // Blob-edge irregularity: a tile counts as "in the blob" only inside a
 // random fraction of the nominal radius (70%-130%), so lakes, forest
 // stands and meadow patches all come out ragged rather than as perfect
 // circles. Shared by every blob-growth loop in makeMap() below.
-export const BLOB_EDGE_MIN = 0.7;
-export const BLOB_EDGE_SPREAD = 0.6;
+const BLOB_EDGE_MIN = 0.7;
+const BLOB_EDGE_SPREAD = 0.6;
 
 // Grow ragged blobs of tiles into targetSet (forest stands, meadow
 // patches) until it holds targetCount tiles or too many attempts fail:
@@ -848,7 +808,7 @@ export const BLOB_EDGE_SPREAD = 0.6;
 // never perturbs the rand() call sequence — e.g. meadow patches use it to
 // dodge tiles forest already claimed, without forest needing to know
 // meadow exists.
-export function growPatch(targetSet, targetCount, extraExclude) {
+function growPatch(targetSet, targetCount, extraExclude) {
   for (let tries = 0; targetSet.size < targetCount && tries < 600; tries++) {
     const cx = 2 + ((rand() * (MAP_TILES - 4)) | 0);
     const cy = 2 + ((rand() * (MAP_TILES - 4)) | 0);
@@ -871,7 +831,7 @@ export function growPatch(targetSet, targetCount, extraExclude) {
   }
 }
 
-export function makeMap() {
+function makeMap() {
   for (let ty = 0; ty < MAP_TILES; ty++) {
     tiles.push(new Array(MAP_TILES).fill(0));
     dirs.push(new Array(MAP_TILES).fill(0));

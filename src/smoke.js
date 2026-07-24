@@ -1,14 +1,3 @@
-import { ctx } from "./setup.js";
-import { rand } from "./rng.js";
-import { projX, projY } from "./projection.js";
-import { terrainHeight } from "./terrain.js";
-import { keys } from "./input.js";
-import { touchDrive } from "./touch.js";
-// tractor/GEAR_FAST_RATIO/gameOver/autoThrottling aren't split out yet
-// (Tractor section) - genuine circular imports, safe because they're only
-// read/called inside update/draw functions.
-import { tractor, GEAR_FAST_RATIO, gameOver, autoThrottling } from "./tractor.js";
-
 // ---------------------------------------------------------------------------
 // Exhaust smoke & chaff particles
 // ---------------------------------------------------------------------------
@@ -16,7 +5,7 @@ import { tractor, GEAR_FAST_RATIO, gameOver, autoThrottling } from "./tractor.js
 const smoke = [];
 let smokeTimer = 0;
 
-export function updateSmoke(dt) {
+function updateSmoke(dt) {
   const onGas =
     keys.ArrowUp || autoThrottling() || (touchDrive.throttleActive && touchDrive.throttle > 0.05);
   if (!gameOver && (onGas || Math.abs(tractor.speed) > 5 * GEAR_FAST_RATIO)) {
@@ -47,7 +36,7 @@ export function updateSmoke(dt) {
 }
 
 // Golden chaff burst thrown up when a tile is harvested or grain is sold
-export function spawnChaff(wx, wy) {
+function spawnChaff(wx, wy) {
   const base = terrainHeight(wx, wy);
   for (let i = 0; i < 8; i++) {
     const life = 0.5 + rand() * 0.4;
@@ -62,7 +51,7 @@ export function spawnChaff(wx, wy) {
   }
 }
 
-export function drawSmoke(camX, camY) {
+function drawSmoke(camX, camY) {
   for (const p of smoke) {
     const t = 1 - p.life / p.maxLife;
     const r = 0.8 + t * 2.6;

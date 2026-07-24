@@ -1,18 +1,12 @@
-import { PROFILE } from "./rng.js";
-import { TILE, MAP_TILES } from "./projection.js";
-import { shade, tint, meadowTint, stubbleTint } from "./lighting.js";
-import { FARM } from "./farmyard.js";
-import { CITY } from "./city.js";
-import { tiles, growth, cropStage, forestTiles, meadowTiles, WATER_COLOR, ROAD_COLOR } from "./ground.js";
 
 // ---------------------------------------------------------------------------
 // Minimap: one 2x1-pixel tile diamond, kept up to date by drawTile
 // ---------------------------------------------------------------------------
 
-export const minimapCanvas = document.createElement("canvas");
+const minimapCanvas = document.createElement("canvas");
 minimapCanvas.width = MAP_TILES * 2;
 minimapCanvas.height = MAP_TILES;
-export const minimapCtx = minimapCanvas.getContext("2d");
+const minimapCtx = minimapCanvas.getContext("2d");
 
 // grass, field, plowed, seeded, water; ripe crops turn gold (kept a universal
 // wheat tone below, unlike the rest of this array — grain looks the same
@@ -20,20 +14,20 @@ export const minimapCtx = minimapCanvas.getContext("2d");
 // so the two read apart at a glance, both here and in the field ledger's
 // legend swatches. Derived from the map's palette rather than hand-picked so
 // every theme gets a matching minimap.
-export const MINIMAP_COLORS = [
+const MINIMAP_COLORS = [
   tint(PROFILE.palette.grass[1], -0.22),
   stubbleTint(PROFILE.palette.dirt[0]),
   tint(PROFILE.palette.dirt[0], -0.45),
   tint(PROFILE.palette.grass[1], 0.32),
   WATER_COLOR,
 ];
-export const MINIMAP_MEADOW = meadowTint(PROFILE.palette.grass[1]);
+const MINIMAP_MEADOW = meadowTint(PROFILE.palette.grass[1]);
 
 // The farm marker's footprint in minimap diamond space (matches the fillRect
 // below it's drawn with). minimapTile steers clear of these pixels so
 // season and field repaints, which restamp random tiles over time, can
 // never paint over the marker.
-export const FARM_MARKER = {
+const FARM_MARKER = {
   x0: Math.round((FARM.x - FARM.y) / TILE) + MAP_TILES - 1,
   y0: Math.round((FARM.x + FARM.y) / (2 * TILE)) - 1,
 };
@@ -42,7 +36,7 @@ FARM_MARKER.y1 = FARM_MARKER.y0 + 2;
 
 // The city marker, same footprint math as the farm's, so minimapTile can
 // steer clear of it the same way
-export const CITY_MARKER = {
+const CITY_MARKER = {
   x0: Math.round((CITY.x - CITY.y) / TILE) + MAP_TILES - 1,
   y0: Math.round((CITY.x + CITY.y) / (2 * TILE)) - 1,
 };
@@ -53,9 +47,9 @@ CITY_MARKER.y1 = CITY_MARKER.y0 + 2;
 // roadSamples once the road network exists, then consulted by minimapTile
 // so a road survives every future repaint of the tile underneath it instead
 // of only being stamped once at startup.
-export const roadPixels = new Set();
+const roadPixels = new Set();
 
-export function minimapTile(tx, ty) {
+function minimapTile(tx, ty) {
   const type = tiles[ty][tx];
   let color = MINIMAP_COLORS[type];
   if (type === 0 && forestTiles.has(ty * MAP_TILES + tx)) color = PROFILE.palette.conifer;

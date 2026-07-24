@@ -1,5 +1,3 @@
-import { audio, scheduleTone } from "./sound.js";
-import { seasonQ } from "./seasons.js";
 
 // ---------------------------------------------------------------------------
 // Background music: a gentle music-box arpeggio over an A / F#m / D / E
@@ -49,7 +47,7 @@ function musicNote(freq, at, dur, vol) {
   scheduleTone(audio.musicGain, at, { type: "triangle", freq, gainPeak: vol, attack: 0.015, decay: dur, stopPad: 0.02 });
 }
 
-export function scheduleMusic() {
+function scheduleMusic() {
   // After a pause (hidden tab), skip ahead instead of replaying missed notes
   if (audio.musicTime < audio.ac.currentTime - 0.1) {
     audio.musicTime = audio.ac.currentTime + 0.1;

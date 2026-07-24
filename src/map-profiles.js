@@ -26,7 +26,7 @@
 // minimap tones, tree canopy tiers — is derived from these few tones at load
 // time via tint(), so a new theme only needs these fields.
 
-export const MAP_PROFILES = [
+const MAP_PROFILES = [
   {
     name: "Homestead Plains", seed: 1137, water: [0.03, 0.10], field: [0.45, 0.65], forest: [0.10, 0.25], meadow: [0.20, 0.40], hilliness: [0.4, 0.6], broadleaf: 0.8,
     palette: {

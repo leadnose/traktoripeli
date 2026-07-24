@@ -4,11 +4,11 @@
 // hydraulic lift whines. Created on the first keypress (autoplay policy).
 // ---------------------------------------------------------------------------
 
-export let audio = null;
-export let soundMuted = false; // Q: all sound
-export let musicMuted = false; // M: just the music
+let audio = null;
+let soundMuted = false; // Q: all sound
+let musicMuted = false; // M: just the music
 
-export function initAudio() {
+function initAudio() {
   if (audio) return;
   const ac = new (window.AudioContext || window.webkitAudioContext)();
   const master = ac.createGain();
@@ -99,7 +99,7 @@ export function initAudio() {
 // decays straight away (attack 0, e.g. a percussive thud). Shared by every
 // synthesized sound effect and each background-music note — they only ever
 // differ in these parameters, never in the oscillator/gain wiring.
-export function scheduleTone(destGain, at, { type, freq, freqRamp, gainPeak, attack = 0, decay, stopPad }) {
+function scheduleTone(destGain, at, { type, freq, freqRamp, gainPeak, attack = 0, decay, stopPad }) {
   const o = audio.ac.createOscillator();
   o.type = type;
   const g = audio.ac.createGain();
@@ -123,7 +123,7 @@ export function scheduleTone(destGain, at, { type, freq, freqRamp, gainPeak, att
 
 // Hydraulic whine when the lift moves; pitch falls when dropping, rises
 // when raising
-export function playHydraulic(downward) {
+function playHydraulic(downward) {
   if (!audio) return;
   const t = audio.ac.currentTime;
   scheduleTone(audio.master, t, {
@@ -138,7 +138,7 @@ export function playHydraulic(downward) {
 }
 
 // Dull metallic thud when an implement is hitched on
-export function playClunk() {
+function playClunk() {
   if (!audio) return;
   const t = audio.ac.currentTime;
   scheduleTone(audio.master, t, {
@@ -152,7 +152,7 @@ export function playClunk() {
 }
 
 // Soft thump when the trailer scoops up a grain sack
-export function playPickup() {
+function playPickup() {
   if (!audio) return;
   const t = audio.ac.currentTime;
   scheduleTone(audio.master, t, {
@@ -166,7 +166,7 @@ export function playPickup() {
 }
 
 // Rising three-note chime when grain is sold at the farm
-export function playSell() {
+function playSell() {
   if (!audio) return;
   const t = audio.ac.currentTime;
   [880, 1109, 1319].forEach((freq, i) => {
@@ -182,7 +182,7 @@ export function playSell() {
 }
 
 // Falling two-note toll when the yearly property tax is collected
-export function playTax() {
+function playTax() {
   if (!audio) return;
   const t = audio.ac.currentTime;
   [523, 349].forEach((freq, i) => {
@@ -199,12 +199,12 @@ export function playTax() {
 
 // Music and sound toggles work both in-game and inside the menu (which
 // swallows all other input), so they live in shared helpers
-export function toggleMusic() {
+function toggleMusic() {
   musicMuted = !musicMuted;
   audio.musicGain.gain.setTargetAtTime(musicMuted ? 0 : 1, audio.ac.currentTime, 0.02);
 }
 
-export function toggleSound() {
+function toggleSound() {
   soundMuted = !soundMuted;
   audio.master.gain.setTargetAtTime(soundMuted ? 0 : 0.5, audio.ac.currentTime, 0.02);
 }

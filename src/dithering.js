@@ -3,7 +3,7 @@
 // them with a Bayer matrix, the classic pixel-art way to draw gradients.
 // ---------------------------------------------------------------------------
 
-export const BAYER = [
+const BAYER = [
   [0, 8, 2, 10],
   [12, 4, 14, 6],
   [3, 11, 1, 9],
@@ -11,7 +11,7 @@ export const BAYER = [
 ];
 const DITHER_STEP = 24; // size of one posterized color level
 
-export function ditherRegion(c2d, x, y, w, h) {
+function ditherRegion(c2d, x, y, w, h) {
   x = Math.max(0, Math.floor(x));
   y = Math.max(0, Math.floor(y));
   w = Math.min(c2d.canvas.width - x, Math.ceil(w));

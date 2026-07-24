@@ -1,8 +1,3 @@
-import { VIEW_W, VIEW_H, ctx } from "./setup.js";
-// worldTime isn't split out yet (Tractor section) - a genuine circular
-// import, safe because these only read it at runtime.
-import { worldTime } from "./tractor.js";
-
 // ---------------------------------------------------------------------------
 // Mist: a soft overcast haze that thickens and thins with mistiness(), plus
 // a light shower once it's properly socked in. Pure screen-space overlay
@@ -16,7 +11,7 @@ import { worldTime } from "./tractor.js";
 // never repeats on a predictable beat or pops between frames — same
 // no-per-frame-randomness, no-snapping rule the rest of the weather/season
 // system follows.
-export function mistiness() {
+function mistiness() {
   return 0.5 + 0.5 * Math.sin(worldTime * 0.02) * Math.sin(worldTime * 0.0053 + 1.7);
 }
 
@@ -31,7 +26,7 @@ for (let i = 0; i < 70; i++) {
   });
 }
 
-export function drawMist(camX, camY) {
+function drawMist(camX, camY) {
   const m = mistiness();
 
   // Haze: a pale gradient, thicker toward the top of the view (distance)

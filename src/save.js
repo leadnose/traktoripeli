@@ -1,19 +1,3 @@
-import { MAP_INDEX, mode, gameStarted } from "./rng.js";
-import { MAP_TILES } from "./projection.js";
-import { tiles, dirs, growth } from "./ground.js";
-import {
-  sacks,
-  cash,
-  seeds,
-  cargo,
-  sold,
-  fuel,
-  year,
-  propertyTax,
-  timeLeft,
-  tractor,
-  gameOver,
-} from "./tractor.js";
 
 // ---------------------------------------------------------------------------
 // Save games: the whole mutable state autosaves to localStorage, so a reload
@@ -24,14 +8,14 @@ import {
 
 const SAVE_KEY = "traktoripeli.save";
 const SAVE_VERSION = 4; // bump when map generation or calendar meaning changes: stale saves drop
-export let savingDisabled = false; // set when navigating away from a discarded run
-// Only this module may reassign savingDisabled (ESM imports are read-only
-// bindings) - input.js's handleMenuKey() calls this instead.
-export function setSavingDisabled(v) {
+let savingDisabled = false; // set when navigating away from a discarded run
+// Kept as a setter so this file stays the one place savingDisabled is
+// declared - input.js's handleMenuKey() calls this instead.
+function setSavingDisabled(v) {
   savingDisabled = v;
 }
 
-export function saveGame() {
+function saveGame() {
   if (!gameStarted || gameOver || savingDisabled) return;
   const data = {
     v: SAVE_VERSION,
@@ -67,7 +51,7 @@ export function saveGame() {
   }
 }
 
-export function loadSave() {
+function loadSave() {
   try {
     const s = JSON.parse(localStorage.getItem(SAVE_KEY));
     return s && s.v === SAVE_VERSION && s.tiles && s.tiles.length === MAP_TILES
@@ -78,7 +62,7 @@ export function loadSave() {
   }
 }
 
-export function clearSave() {
+function clearSave() {
   try {
     localStorage.removeItem(SAVE_KEY);
   } catch {

@@ -1,16 +1,3 @@
-import { clamp, VIEW_W, VIEW_H, ctx } from "./setup.js";
-import { rand } from "./rng.js";
-import { TILE, MAP_TILES, MAP_SIZE, projX, projY } from "./projection.js";
-import { FARM, FARM_RADIUS, PADDOCKS_WORLD, PENNED_SPECIES, insideAnyPaddock } from "./farmyard.js";
-import { tiles, tileTypeAt, roadTiles, forestTiles, tileKey, isWater } from "./ground.js";
-import { terrainHeight } from "./terrain.js";
-import { FENCE_SOLID_WORLD } from "./box-models.js";
-import { cart } from "./cart.js";
-// tractor/worldTime/GEAR_SLOW_RATIO aren't split out yet - genuine
-// circular imports, safe because they're only read inside per-frame
-// update/draw functions.
-import { tractor, worldTime, GEAR_SLOW_RATIO } from "./tractor.js";
-
 // ---------------------------------------------------------------------------
 // Animals: cows, sheep, pigs and goats graze in small herds on the meadows,
 // horses roam wider, ducks keep to the shoreline, a cat and dog linger
@@ -120,7 +107,7 @@ const CAT_BOXES = [
 // Every species gets clear of the tractor (spook radius + flee speed +
 // fleeTurn rate): horses and chickens dash in a panic, while cows and sheep
 // — still solid to drive against — just plod calmly out of the way.
-export const ANIMAL_SPECS = {
+const ANIMAL_SPECS = {
   cow: { speed: 2.5, range: 22, sep: 4.5, turn: 1.4, pauseChance: 0.004, pauseDur: [1, 3], shadow: 3.4, spook: 16, flee: 3.5, fleeTurn: 3 },
   sheep: { speed: 2.2, range: 20, sep: 4.5, turn: 1.4, pauseChance: 0.005, pauseDur: [1, 3], shadow: 2.4, spook: 16, flee: 3.8, fleeTurn: 3.5 },
   horse: { speed: 3.2, range: 26, sep: 4.5, turn: 1.4, pauseChance: 0.004, pauseDur: [1, 3], shadow: 3.4, spook: 26, flee: 22, fleeTurn: 8 },
@@ -135,7 +122,7 @@ export const ANIMAL_SPECS = {
 // Every species draws as one fixed-order box unit except sheep, which pairs
 // a woolly blob (SHEEP_SHAPES) with SHEEP_BOXES and is special-cased where
 // items get built (see the sheep branch there)
-export const ANIMAL_BOXES = {
+const ANIMAL_BOXES = {
   cow: COW_BOXES,
   horse: HORSE_BOXES,
   chicken: CHICKEN_BOXES,
@@ -145,15 +132,14 @@ export const ANIMAL_BOXES = {
   dog: DOG_BOXES,
   cat: CAT_BOXES,
 };
-export { SHEEP_BOXES, SHEEP_SHAPES };
 
-export const animals = [];
+const animals = [];
 
 // Every spawned group is registered as a herd, so routines can send its
 // members somewhere together (see updateHerds) by moving their home anchor
-export const herds = [];
+const herds = [];
 
-export function spawnHerd(species, hx, hy, count) {
+function spawnHerd(species, hx, hy, count) {
   const n = count || 3 + ((rand() * 4) | 0);
   const members = [];
   for (let i = 0; i < n; i++) {
@@ -210,9 +196,9 @@ export function spawnHerd(species, hx, hy, count) {
 // Grass banks beside water, where the herds can amble down for a drink (and
 // where ducks make their home outright) — computed early so the farm and
 // wild duck herds below can place themselves on the shore
-export const shoreSpots = [];
+const shoreSpots = [];
 
-export function nearestShoreSpot(x, y) {
+function nearestShoreSpot(x, y) {
   let spot = null;
   let bd = Infinity;
   for (const s of shoreSpots) {
@@ -229,7 +215,7 @@ export function nearestShoreSpot(x, y) {
 // paddocks to already exist, and its rand() calls have a fixed position in
 // the world-gen sequence - like initTerrain()/initTrees(), an explicit init
 // call rather than module-load-order top-level code.
-export function initAnimals() {
+function initAnimals() {
   for (let sy = 0; sy < MAP_TILES; sy++)
     for (let sx = 0; sx < MAP_TILES; sx++) {
       if (tiles[sy][sx] !== 0 || roadTiles.has(sy * MAP_TILES + sx)) continue;
@@ -404,7 +390,7 @@ function updateWander(a, spec, pad, dt, walkable) {
   }
 }
 
-export function updateAnimals(dt) {
+function updateAnimals(dt) {
   for (const a of animals) {
     const spec = ANIMAL_SPECS[a.species];
     const tractorDist = Math.hypot(a.wx - tractor.x, a.wy - tractor.y);
@@ -444,7 +430,7 @@ export function updateAnimals(dt) {
 // — none of them have anywhere their routine could send them
 const STATIONARY_HERDS = new Set(["chicken", "cat", "dog", "duck", ...PENNED_SPECIES]);
 
-export function updateHerds(dt) {
+function updateHerds(dt) {
   for (const h of herds) {
     if (STATIONARY_HERDS.has(h.species)) continue;
     h.next -= dt;
@@ -481,13 +467,13 @@ export function updateHerds(dt) {
   }
 }
 
-export const birds = [];
+const birds = [];
 
 // Bird-flock placement is order-sensitive (rand()-consuming), and the
 // original sequence placed it after the cart, not with the rest of the
 // animal herds - so it's a separate init call from initAnimals(), called
 // from main.js at that later point.
-export function initBirds() {
+function initBirds() {
   for (let flock = 0; flock < 4; flock++) {
     const fx = rand() * MAP_SIZE;
     const fy = rand() * MAP_SIZE;
@@ -505,7 +491,7 @@ export function initBirds() {
   }
 }
 
-export function updateBirds(dt) {
+function updateBirds(dt) {
   for (const b of birds) {
     b.dir += (rand() - 0.5) * 0.5 * dt;
     b.wx += Math.cos(b.dir) * 22 * dt;
@@ -517,7 +503,7 @@ export function updateBirds(dt) {
   }
 }
 
-export function drawBirds(camX, camY) {
+function drawBirds(camX, camY) {
   ctx.fillStyle = "#2e3138";
   for (const b of birds) {
     const x = Math.round(projX(b.wx, b.wy) - camX);

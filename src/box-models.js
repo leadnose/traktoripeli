@@ -1,34 +1,18 @@
-import { rotateLocal } from "./projection.js";
-import {
-  FARM,
-  FARM_BUILDING_FOOTPRINTS,
-  FUEL_TANK_LOCAL,
-  FUEL_TANK_LEN,
-  FUEL_TANK_R,
-  FUEL_TANK_STAND_H,
-  PADDOCKS_LOCAL,
-} from "./farmyard.js";
-// cargo/TRAILER_CAP aren't split out yet (Tractor section) - a genuine
-// circular import, safe because trailerBoxes() only reads them when
-// called at runtime (from drawScene, once per frame), never at this
-// module's own top level.
-import { cargo, TRAILER_CAP } from "./tractor.js";
-
 // ---------------------------------------------------------------------------
 // Box models: everything solid is axis-aligned boxes in local space
 // (+x = forward, z = up), rotated around z and projected each frame.
 // ---------------------------------------------------------------------------
 
-export const TIRE = "#33363d";
-export const HUB = "#a3874f";
+const TIRE = "#33363d";
+const HUB = "#a3874f";
 
 // Styled after the old workhorse of the farmyard: dull grey-green
 // bodywork riding on flint-gray running gear, a hood tapering into the
 // grille, a bare pan seat between flat fenders, and a muffler halfway up
 // the stack
-export const TRACTOR_BODY = "#5c6b4f";
+const TRACTOR_BODY = "#5c6b4f";
 
-export const BOXES = [
+const BOXES = [
   { x0: -7.0, x1: -3.4, y0: -1.6, y1: 1.6, z0: 2.5, z1: 4.2, color: "#6e6e6e" }, // frame rail, rear run
   { x0: -3.4, x1: -0.6, y0: -1.6, y1: 1.6, z0: 2.5, z1: 5.2, color: "#6e6e6e" }, // gearbox hump amidships, one higher
   { x0: -0.6, x1: 3.0, y0: -1.6, y1: 1.6, z0: 2.5, z1: 4.2, color: "#6e6e6e" }, // frame rail, front run
@@ -55,7 +39,7 @@ export const BOXES = [
 // Wheels are round: a disc on each face plus a slim inset box for the tread.
 // x/z is the axle center, r the tire radius, y0..y1 the width. The rear
 // pair is outsized on purpose — their tops sit level with the chassis top.
-export const TRACTOR_WHEELS = [
+const TRACTOR_WHEELS = [
   { x: -4.5, y0: 3.0, y1: 5.3, z: 3.0, r: 3.0 }, // rear L
   { x: -4.5, y0: -5.3, y1: -3.0, z: 3.0, r: 3.0 }, // rear R
   { x: 5.0, y0: 2.3, y1: 3.9, z: 1.6, r: 1.6 }, // front L
@@ -66,7 +50,7 @@ export const TRACTOR_WHEELS = [
 // perched on the nose. Their depth against the body swaps naturally with
 // the heading — the wheel sits in front of the driver toward the camera and
 // hides behind him driving away; the far-side lamp ducks behind the hood.
-export const TRACTOR_SHAPES = [
+const TRACTOR_SHAPES = [
   { blob: true, x: -2.2, y: 0, z: 7.5, r: 0.7, color: "#33363d" }, // steering wheel atop its column
   { blob: true, x: 6.6, y: 1.2, z: 4.65, r: 0.45, color: "#ffe66b" }, // headlamp L
   { blob: true, x: 6.6, y: -1.2, z: 4.65, r: 0.45, color: "#ffe66b" }, // headlamp R
@@ -76,7 +60,7 @@ export const TRACTOR_SHAPES = [
 // stack at one local depth center (x -3.7, y 0) with rising z, so their
 // paint order — overalls, head, straw hat — holds at every heading.
 // `rest` is the seated height; z gets a bounce added per frame.
-export const DRIVER_SHAPES = [
+const DRIVER_SHAPES = [
   { blob: true, x: -3.7, y: 0, rest: 7.3, z: 7.3, r: 1.5, color: "#4a6fa5" }, // overalls
   { blob: true, x: -3.7, y: 0, rest: 8.9, z: 8.9, r: 1.0, color: "#f2c091" }, // head
   { blob: true, x: -3.7, y: 0, rest: 9.65, z: 9.65, r: 0.8, color: "#e8b13d", bias: 0.05 }, // straw hat
@@ -84,9 +68,9 @@ export const DRIVER_SHAPES = [
 
 // Implements hang behind the tractor; liftable ones get a z offset from the
 // hydraulic lift so they can be raised for transport and dropped to work.
-export const IMPLEMENT_LIFT_HEIGHT = 3.5;
+const IMPLEMENT_LIFT_HEIGHT = 3.5;
 
-export const PLOW_BOXES = [
+const PLOW_BOXES = [
   { x0: -8.6, x1: -7.2, y0: -0.9, y1: 0.9, z0: 3.2, z1: 4.2, color: "#6b6b6b" }, // drawbar
   { x0: -10.2, x1: -8.8, y0: -4.6, y1: 4.6, z0: 3.4, z1: 4.6, color: "#7a3226" }, // beam
 ];
@@ -97,7 +81,7 @@ for (const yc of [-3.4, -1.1, 1.2, 3.5]) {
   });
 }
 
-export const SEEDER_BOXES = [
+const SEEDER_BOXES = [
   { x0: -8.6, x1: -7.2, y0: -0.9, y1: 0.9, z0: 3.2, z1: 4.2, color: "#6b6b6b" }, // drawbar
   { x0: -10.4, x1: -8.6, y0: -4.6, y1: 4.6, z0: 3.2, z1: 4.4, color: "#8a6a3a" }, // frame
   { x0: -10.2, x1: -8.8, y0: -3.9, y1: -1.7, z0: 4.4, z1: 6.4, color: "#c9a24a" }, // hopper
@@ -111,24 +95,24 @@ for (const yc of [-3.4, -1.1, 1.2, 3.5]) {
   });
 }
 
-export const HARVESTER_BOXES = [
+const HARVESTER_BOXES = [
   { x0: -8.6, x1: -7.2, y0: -0.9, y1: 0.9, z0: 3.2, z1: 4.2, color: "#6b6b6b" }, // drawbar
   { x0: -13.0, x1: -8.6, y0: -4.8, y1: 4.8, z0: 2.2, z1: 8.0, color: "#5a7a4a" }, // body
   { x0: -12.4, x1: -11.2, y0: -4.2, y1: 4.2, z0: 8.0, z1: 9.4, color: "#3f5a38" }, // grain tank
   { x0: -8.6, x1: -7.4, y0: -4.8, y1: 4.8, z0: 0.4, z1: 2.6, color: "#7a3226" }, // header reel
 ];
 
-export const HARVESTER_WHEELS = [
+const HARVESTER_WHEELS = [
   { x: -11.0, y0: 4.8, y1: 6.0, z: 1.8, r: 1.8 }, // wheel L
   { x: -11.0, y0: -6.0, y1: -4.8, z: 1.8, r: 1.8 }, // wheel R
 ];
 
-export const TRAILER_BOXES = [
+const TRAILER_BOXES = [
   { x0: -11.5, x1: -7.0, y0: -0.7, y1: 0.7, z0: 2.6, z1: 3.6, color: "#6b6b6b" }, // long drawbar
   { x0: -21.0, x1: -11.5, y0: -4.2, y1: 4.2, z0: 3.0, z1: 7.0, color: "#9a7442" }, // wooden bed
 ];
 // Tandem axles: two pairs of wheels under the rear half of the bed
-export const TRAILER_WHEELS = [];
+const TRAILER_WHEELS = [];
 for (const wx of [-15.2, -18.6]) {
   TRAILER_WHEELS.push(
     { x: wx, y0: 4.2, y1: 5.4, z: 1.7, r: 1.7 }, // wheel L
@@ -139,16 +123,16 @@ for (const wx of [-15.2, -18.6]) {
 // Floor slots for hay bales: one row against the front wall, one against the
 // back, ordered so loading starts in the near corner and fills outward along
 // that wall before starting the far row.
-export const BALE_POS = [];
+const BALE_POS = [];
 for (const y of [-1.7, 1.7])
   for (const x of [-18.95, -16.25, -13.55]) BALE_POS.push({ x, y });
-export const BALE_XH = 1.15;
-export const BALE_YH = 1.5;
-export const BALE_H = 1.3;
-export const BALE_LAYER_GAP = 0.15;
-export const BALE_COLORS = ["#d8ab52", "#c89a44"]; // alternating straw tones so bales read as distinct blocks
+const BALE_XH = 1.15;
+const BALE_YH = 1.5;
+const BALE_H = 1.3;
+const BALE_LAYER_GAP = 0.15;
+const BALE_COLORS = ["#d8ab52", "#c89a44"]; // alternating straw tones so bales read as distinct blocks
 
-export function trailerBoxes() {
+function trailerBoxes() {
   if (cargo === 0) return TRAILER_BOXES;
   const full = cargo === TRAILER_CAP;
   const bales = [];
@@ -170,7 +154,7 @@ export function trailerBoxes() {
 
 // Mounted implements (3-point hitch) turn rigidly with the tractor; towed
 // ones ride on their own wheels and pivot at the drawbar pin.
-export const IMPLEMENTS = {
+const IMPLEMENTS = {
   plow: { label: "PLOW", liftable: true, boxes: () => PLOW_BOXES, wheels: [] },
   seeder: { label: "SEEDER", liftable: true, boxes: () => SEEDER_BOXES, wheels: [] },
   harvester: { label: "HARVESTER", liftable: true, towed: true, towLength: 4.5, boxes: () => HARVESTER_BOXES, wheels: HARVESTER_WHEELS },
@@ -191,7 +175,7 @@ export const IMPLEMENTS = {
 // keep the rail sampling the ground about as often as the posts do, so
 // it actually hugs the same contour instead of floating over or sinking
 // into it between them.
-export function addFenceRun(boxes, x0, y0, x1, y1, color) {
+function addFenceRun(boxes, x0, y0, x1, y1, color) {
   const horizontal = y0 === y1;
   const len = horizontal ? Math.abs(x1 - x0) : Math.abs(y1 - y0);
   const n = Math.max(1, Math.round(len / 3));
@@ -225,7 +209,7 @@ export function addFenceRun(boxes, x0, y0, x1, y1, color) {
 // `ridgeAxis` is the axis the ridge runs along (stays at the wall's own
 // span, plus overhang); the other axis is the one that steps in for the
 // ridge course.
-export function addGableRoof(boxes, x0, x1, y0, y1, z0, z1, ridgeAxis, color, overhang) {
+function addGableRoof(boxes, x0, x1, y0, y1, z0, z1, ridgeAxis, color, overhang) {
   const cx = (x0 + x1) / 2;
   const cy = (y0 + y1) / 2;
   const wallHalfX = (x1 - x0) / 2;
@@ -246,7 +230,7 @@ export function addGableRoof(boxes, x0, x1, y0, y1, z0, z1, ridgeAxis, color, ov
   }
 }
 
-export const FARM_BOXES = [
+const FARM_BOXES = [
   { x0: -16.0, x1: 2.0, y0: -12.0, y1: 2.0, z0: 0.0, z1: 9.0, color: "#3d332a" }, // barn, tarred weatherboard
   { x0: -7.5, x1: -3.5, y0: 1.9, y1: 2.3, z0: 0.0, z1: 6.0, color: "#f7e8d8" }, // barn door, whitewashed
   // Farmhouse: pulled in close behind its own garden wall (below) rather
@@ -358,13 +342,13 @@ addGableRoof(FARM_BOXES, -2.0, 10.0, 32.0, 39.0, 4.0, 5.6, "x", "#5c4530", 0.6);
 // with a per-box depth override in drawScene (search PADDOCK_BOXES there)
 // using each box's own true ground position instead, the same convention
 // animals/bushes/signs already use, so the two compare on equal terms.
-export const PADDOCK_BOXES = [];
+const PADDOCK_BOXES = [];
 // Solid collision geometry for buildings/paddock fences, filled in by
 // initBoxModels() below. Empty (harmless, matching no obstacles) until
 // then rather than left undefined, since box-models.js may be imported
 // before initBoxModels() runs.
-export let FARM_SOLID_WORLD = [];
-export let FENCE_SOLID_WORLD = [];
+let FARM_SOLID_WORLD = [];
+let FENCE_SOLID_WORLD = [];
 
 // A rotated local rectangle's corners no longer line up with the world axes
 // unless FARM.angle is a 90° step (which it always is), so the world-space
@@ -385,7 +369,7 @@ function localRectToFarmWorldAABB([x0, x1, y0, y1]) {
 // initTerrain()/initTrees() - this is an explicit init call rather than
 // module-load-order top-level code: merely importing box-models.js must
 // not read PADDOCKS_LOCAL before it exists.
-export function initBoxModels() {
+function initBoxModels() {
   // Pig sty: a low lean-to shelter tucked in the pig paddock's near corner,
   // out past the yard — kept low and plain, the humblest building here.
   // Positioned relative to PADDOCKS_LOCAL.pig (not fixed coordinates) since
@@ -449,7 +433,7 @@ export function initBoxModels() {
 // well's hanging bucket, the yard's muck midden, and the hay rick's
 // tapering thatched bulk (the same stacked-blob trick a tree canopy uses,
 // just wider and golden)
-export const FARM_SHAPES = [
+const FARM_SHAPES = [
   { blob: true, x: -18.0, y: -17.0, z: 4.0, r: 0.7, color: "#4a4238" }, // well bucket
   { blob: true, x: 16.0, y: 17.0, z: 0.9, r: 2.0, color: "#3a2e22" }, // muck midden
   { blob: true, x: 32.0, y: 17.0, z: 4.0, r: 4.2, color: "#d9b355" }, // rick, main bulk
@@ -471,19 +455,19 @@ for (const [ly, n] of [
 // City buildings, local to CITY: a small trading depot where the grain
 // actually gets sold. No need for FARM's elaborate trampled yard — the
 // depot just needs to read clearly from a distance as a destination.
-export const CITY_BOXES = [
+const CITY_BOXES = [
   { x0: -14.0, x1: 6.0, y0: -9.0, y1: 5.0, z0: 0.0, z1: 8.0, color: "#8a7a68" }, // warehouse
   { x0: -15.5, x1: 7.5, y0: -10.5, y1: 6.5, z0: 8.0, z1: 10.5, color: "#4a3f34" }, // warehouse roof
   { x0: -7.0, x1: -3.0, y0: 4.6, y1: 5.0, z0: 0.0, z1: 6.0, color: "#f7e8d8" }, // loading door
   { x0: 10.0, x1: 20.0, y0: -6.0, y1: 4.0, z0: 0.0, z1: 12.0, color: "#c9b896" }, // office block
   { x0: 9.0, x1: 21.0, y0: -7.0, y1: 5.0, z0: 12.0, z1: 14.0, color: "#6b5a44" }, // office roof
 ];
-export const CITY_SHAPES = [
+const CITY_SHAPES = [
   { blob: true, x: 15.0, y: -1.0, z: 15.5, r: 2.4, color: "#8a4438" }, // roof accent
 ];
 
 // Grain sacks dropped by the harvester: plump blobs with a tied-off top
-export const SACK_SHAPES = [
+const SACK_SHAPES = [
   { blob: true, x: 0, y: 0, z: 1.5, r: 1.6, color: "#f0cf5e" },
   { blob: true, x: 0, y: 0, z: 3.1, r: 0.7, color: "#d9b446", bias: 0.05 },
 ];
@@ -491,7 +475,7 @@ export const SACK_SHAPES = [
 // Faces of a unit box; corner index = xi*4 + yi*2 + zi. Windings are chosen
 // so a face's projected signed area is positive exactly when it faces the
 // camera, which doubles as backface culling.
-export const FACES = [
+const FACES = [
   { n: [0, 0, 1], i: [1, 5, 7, 3] }, // top
   { n: [1, 0, 0], i: [4, 6, 7, 5] },
   { n: [-1, 0, 0], i: [2, 0, 1, 3] },
@@ -502,7 +486,7 @@ export const FACES = [
 // Backface test on the UNROUNDED projection (fx/fy): for small thin boxes,
 // pixel rounding can flip a near-edge-on face's sign from frame to frame
 // while the model moves, making faces pop in and out
-export function signedArea4(p0, p1, p2, p3) {
+function signedArea4(p0, p1, p2, p3) {
   return (
     p0.fx * p1.fy - p1.fx * p0.fy +
     p1.fx * p2.fy - p2.fx * p1.fy +

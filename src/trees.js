@@ -1,10 +1,3 @@
-import { clamp } from "./setup.js";
-import { PROFILE, rand } from "./rng.js";
-import { TILE, MAP_TILES, MAP_SIZE } from "./projection.js";
-import { tint } from "./lighting.js";
-import { FARM, FARM_PASTURE_RADIUS, insideAnyPaddock } from "./farmyard.js";
-import { CITY, CITY_RADIUS } from "./city.js";
-import { tileTypeAt, roadTiles, forestTiles, meadowTiles, tileKey } from "./ground.js";
 
 // ---------------------------------------------------------------------------
 // Lollipop trees scattered over the meadows
@@ -17,7 +10,7 @@ const TREE_BOXES = [
 // Cloud-shaped canopy: one big blob with two smaller ones tucked against it.
 // Spring colors (this map's palette); updateSeason() recolors them through
 // summer into autumn and back again.
-export const TREE_BLOBS = [
+const TREE_BLOBS = [
   { blob: true, x: 0, y: 0, z: 7.2, r: 4.2, color: PROFILE.palette.canopy[0] },
   { blob: true, x: 1.5, y: -1.5, z: 9.6, r: 2.7, color: tint(PROFILE.palette.canopy[0], 0.1), bias: 0.05 },
   { blob: true, x: -1.3, y: 1.3, z: 10.2, r: 2.1, color: tint(PROFILE.palette.canopy[0], 0.22), bias: 0.1 },
@@ -46,21 +39,21 @@ const FIR_BLOBS = [
   { blob: true, x: 0, y: 0, z: 10.3, r: 1.0, color: tint(FIR_BASE, 0.15), bias: 0.15 },
 ];
 
-export const TREE_KINDS = [
+const TREE_KINDS = [
   { boxes: TREE_BOXES, blobs: TREE_BLOBS }, // deciduous, turns with the seasons
   { boxes: CONIFER_BOXES, blobs: SPRUCE_BLOBS },
   { boxes: CONIFER_BOXES, blobs: FIR_BLOBS },
 ];
 
-export const trees = [];
-export const treesByTile = new Map();
+const trees = [];
+const treesByTile = new Map();
 
 // Placing trees needs the road network, forest/meadow tile sets and the
 // finalized paddocks to already exist, and its rand() calls have to land in
 // their original position in the world-gen sequence - so, like
 // terrain.js's initTerrain(), this is an explicit init call rather than
 // module-load-order top-level code.
-export function initTrees() {
+function initTrees() {
   // A map's broadleaf share sets how English-lowland (hedgerow country,
   // deciduous-heavy) vs. Scottish-highland/plantation (conifer-heavy) its
   // tree cover reads, on top of the fixed spruce:fir split within whatever's

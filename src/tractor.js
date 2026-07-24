@@ -1,75 +1,55 @@
-import { clamp } from "./setup.js";
-import { gameStarted, mode, setMode, setGameStarted, MAP_INDEX } from "./rng.js";
-import { MAP_SIZE, TILE, MAP_TILES, rotateLocal } from "./projection.js";
-import { terrainHeight } from "./terrain.js";
-import { SEASON_DAYS, updateSeason } from "./seasons.js";
-import { playTax, playPickup, playSell } from "./sound.js";
-import { keys, paused, dateJump, autoThrottleOn, setMenuOpen, setPaused, setDateJump, setDateJumpError } from "./input.js";
-import { touchDrive } from "./touch.js";
-import { FARM, nearFarm, nearFuelTank } from "./farmyard.js";
-import { nearCity } from "./city.js";
-import { IMPLEMENTS, FARM_SOLID_WORLD, FENCE_SOLID_WORLD } from "./box-models.js";
-import { CROP_STAGES, tileTypeAt, roadTiles, tileKey, plowTileAt, seedTileAt, harvestTileAt, updateCrops } from "./ground.js";
-import { treesByTile } from "./trees.js";
-import { animals, updateAnimals, updateHerds, updateBirds } from "./animals.js";
-import { updateCart } from "./cart.js";
-import { updateButterflies } from "./butterflies.js";
-import { updateLadybug } from "./ladybug.js";
-import { updateSmoke, spawnChaff } from "./smoke.js";
-import { updateTracks } from "./wheel-tracks.js";
-import { saveGame, clearSave } from "./save.js";
 
-export let worldTime = 0;
+let worldTime = 0;
 
 // ---------------------------------------------------------------------------
 // Tractor state, economy & physics
 // ---------------------------------------------------------------------------
 
-export const SEED_CAP = 64; // seeder hopper size, refilled at the farm
-export const TRAILER_CAP = 12; // sacks the trailer can carry
-export const SEED_PRICE = 2; // £ per seed, bought automatically at the farm
-export const SACK_PRICE = 10; // £ earned per sack of grain sold
+const SEED_CAP = 64; // seeder hopper size, refilled at the farm
+const TRAILER_CAP = 12; // sacks the trailer can carry
+const SEED_PRICE = 2; // £ per seed, bought automatically at the farm
+const SACK_PRICE = 10; // £ earned per sack of grain sold
 
 // Fuel: a tank sized so a full one comfortably covers a return trip from
 // anywhere on the map, refilled automatically at the farm like seeds
-export const FUEL_CAP = 100;
-export const FUEL_PRICE = 1; // £ per unit, bought automatically at the farm
+const FUEL_CAP = 100;
+const FUEL_PRICE = 1; // £ per unit, bought automatically at the farm
 
 // seconds — one Jan 1 - Dec 31 year, at the same real-seconds-per-day pace
 // the old Apr-Oct growing season ran at (300s / 213 days)
-export const ROUND_TIME = Math.round((300 * SEASON_DAYS) / 213);
-export let timeLeft = ROUND_TIME;
-export let gameOver = false;
-export let bestScores = [];
-export let finalRank = -1; // this round's place in the best list, -1 if none
+const ROUND_TIME = Math.round((300 * SEASON_DAYS) / 213);
+let timeLeft = ROUND_TIME;
+let gameOver = false;
+let bestScores = [];
+let finalRank = -1; // this round's place in the best list, -1 if none
 
 // Survival mode: the years keep rolling and every Dec 31 the property tax
 // is collected, growing a little each year, income or not. Seeds can go on
 // credit down to the debt limit; sink below it and the bank takes the farm.
 // The scoreboard is the longest runs in years, kept in localStorage.
-export const SURVIVAL_START_CASH = 250;
-export const TAX_BASE = 150; // £ — the first year's property tax
-export const TAX_STEP = 75; // £ added to the tax each following year
-export const DEBT_LIMIT = 400; // bankruptcy when cash drops below -this
-export const SURVIVAL_SCORES_KEY = "traktoripeli.survival";
-export let year = 1;
-export let propertyTax = TAX_BASE;
-export let taxFlash = 0; // seconds left of the "tax paid" banner
-export let taxPaid = 0; // amount shown in that banner
-export let taxYear = 0; // the year that amount was billed against, for the banner
+const SURVIVAL_START_CASH = 250;
+const TAX_BASE = 150; // £ — the first year's property tax
+const TAX_STEP = 75; // £ added to the tax each following year
+const DEBT_LIMIT = 400; // bankruptcy when cash drops below -this
+const SURVIVAL_SCORES_KEY = "traktoripeli.survival";
+let year = 1;
+let propertyTax = TAX_BASE;
+let taxFlash = 0; // seconds left of the "tax paid" banner
+let taxPaid = 0; // amount shown in that banner
+let taxYear = 0; // the year that amount was billed against, for the banner
 
 // Sandbox mode: the same rolling years, but nothing is ever due and
 // nothing ever ends. A fat wallet so seeds are never a worry.
-export const SANDBOX_START_CASH = 1000;
+const SANDBOX_START_CASH = 1000;
 
 // Calendar day indices for the year's key dates (Jan 1 = day 0), named so
 // every place that needs one of these boundaries — the sandbox pacing
 // phases below and currentCalendarDay()'s comment — refers to the same
 // source instead of restating the numbers.
-export const APR1_DAY = 90; // Jan 1 - Mar 31 days, i.e. the day index Apr 1 lands on
-export const JUN1_DAY = 151;
-export const SEP1_DAY = 243;
-export const NOV1_DAY = 304;
+const APR1_DAY = 90; // Jan 1 - Mar 31 days, i.e. the day index Apr 1 lands on
+const JUN1_DAY = 151;
+const SEP1_DAY = 243;
+const NOV1_DAY = 304;
 
 // Sandbox season pacing: the calendar crawls through spring planting and
 // autumn harvest so there is time to plant every field and haul every sack,
@@ -77,27 +57,27 @@ export const NOV1_DAY = 304;
 // crops ripen, and again through the quiet stretch from Nov 1 to Mar 31.
 // Rates are calendar seconds per real second; the phase boundaries are
 // expressed as timeLeft values so the frame loop can compare directly.
-export const SANDBOX_SPRING_RATE = 0.25; // Apr 1 – May 31: planting
-export const SANDBOX_SUMMER_RATE = 1; // Jun 1 – Aug 31: growing
-export const SANDBOX_AUTUMN_RATE = 0.25; // Sep 1 – Oct 31: harvest and hauling
-export const SPRING_START_LEFT = ROUND_TIME * (1 - APR1_DAY / SEASON_DAYS);
-export const SUMMER_START_LEFT = ROUND_TIME * (1 - JUN1_DAY / SEASON_DAYS);
-export const AUTUMN_START_LEFT = ROUND_TIME * (1 - SEP1_DAY / SEASON_DAYS);
-export const OFFSEASON_START_LEFT = ROUND_TIME * (1 - NOV1_DAY / SEASON_DAYS);
+const SANDBOX_SPRING_RATE = 0.25; // Apr 1 – May 31: planting
+const SANDBOX_SUMMER_RATE = 1; // Jun 1 – Aug 31: growing
+const SANDBOX_AUTUMN_RATE = 0.25; // Sep 1 – Oct 31: harvest and hauling
+const SPRING_START_LEFT = ROUND_TIME * (1 - APR1_DAY / SEASON_DAYS);
+const SUMMER_START_LEFT = ROUND_TIME * (1 - JUN1_DAY / SEASON_DAYS);
+const AUTUMN_START_LEFT = ROUND_TIME * (1 - SEP1_DAY / SEASON_DAYS);
+const OFFSEASON_START_LEFT = ROUND_TIME * (1 - NOV1_DAY / SEASON_DAYS);
 
 // In sandbox crops grow on the calendar instead of the wall clock: seed to
 // mature spans this many calendar days, so a spring planting sprouts slowly,
 // shoots up over summer and stands golden by September whatever the
 // real-time pace of each phase.
-export const SANDBOX_GROW_DAYS = 90;
-export const SANDBOX_GROW_FACTOR =
+const SANDBOX_GROW_DAYS = 90;
+const SANDBOX_GROW_FACTOR =
   CROP_STAGES[2] / ((SANDBOX_GROW_DAYS * ROUND_TIME) / SEASON_DAYS);
 
 // The sandbox pacing phases, in the order they're tested as the calendar
 // counts down from ROUND_TIME to 0: the first entry whose boundary timeLeft
 // is still ahead is the current phase. One table instead of two separate
 // rate/floor cascades, so a boundary change only has to be made once.
-export const SANDBOX_PHASES = [
+const SANDBOX_PHASES = [
   { boundary: SPRING_START_LEFT, rate: 1 }, // Jan 1 - Mar 31: quiet stretch
   { boundary: SUMMER_START_LEFT, rate: SANDBOX_SPRING_RATE }, // Apr 1 - May 31: planting
   { boundary: AUTUMN_START_LEFT, rate: SANDBOX_SUMMER_RATE }, // Jun 1 - Aug 31: growing
@@ -105,27 +85,27 @@ export const SANDBOX_PHASES = [
   { boundary: 0, rate: 1 }, // Nov 1 - Dec 31: quiet stretch
 ];
 
-export function sandboxPhase() {
+function sandboxPhase() {
   for (const p of SANDBOX_PHASES) {
     if (timeLeft > p.boundary) return p;
   }
   return SANDBOX_PHASES[SANDBOX_PHASES.length - 1];
 }
 
-export function sandboxClockRate() {
+function sandboxClockRate() {
   return sandboxPhase().rate;
 }
 
 // The timeLeft value where the current phase's rate stops applying
-export function sandboxPhaseFloor() {
+function sandboxPhaseFloor() {
   return sandboxPhase().boundary;
 }
 
-export function modeStartCash(m) {
+function modeStartCash(m) {
   return m === "sandbox" ? SANDBOX_START_CASH : SURVIVAL_START_CASH;
 }
 
-export function startGame(m) {
+function startGame(m) {
   setMode(m);
   cash = modeStartCash(m);
   setGameStarted(true);
@@ -135,7 +115,7 @@ export function startGame(m) {
 
 // Dec 31: the tax collector comes around. Returns false when the bill
 // bankrupts the farm and the run is over.
-export function collectTax() {
+function collectTax() {
   cash -= propertyTax;
   taxPaid = propertyTax;
   taxYear = year; // the year that's ending, before the caller rolls it over
@@ -152,7 +132,7 @@ export function collectTax() {
 // Dec 31 -> Jan 1: the year turns over and the calendar starts again from
 // the top. Shared by the live per-frame update and the offline catch-up
 // loop so this crossing only lives in one place.
-export function rollOverYear() {
+function rollOverYear() {
   year++;
   timeLeft = ROUND_TIME;
 }
@@ -160,7 +140,7 @@ export function rollOverYear() {
 // Away-clock catch-up: time the frame loop never saw (rAF stops in a
 // hidden tab) is applied in one step. Crops grow and the calendar keeps
 // turning — year by year in survival, taxes and all.
-export function advanceTime(sec) {
+function advanceTime(sec) {
   // Paused means paused: time away from the tab stays off the books too
   if (!gameStarted || gameOver || paused) return;
   worldTime += sec;
@@ -203,7 +183,7 @@ export function advanceTime(sec) {
 // Mar 31 = APR1_DAY - 1, Apr 1 = APR1_DAY, Nov 1 = NOV1_DAY,
 // Dec 31 = SEASON_DAYS - 1. Mirrors the HUD's date arithmetic exactly, so a
 // jump lands on the date the player reads.
-export function currentCalendarDay() {
+function currentCalendarDay() {
   const p = 1 - timeLeft / ROUND_TIME;
   return Math.min(SEASON_DAYS - 1, Math.floor(p * SEASON_DAYS));
 }
@@ -212,7 +192,7 @@ export function currentCalendarDay() {
 // calendar to that date's next occurrence. The world advances in small
 // real-time steps through advanceTime, so crops grow and taxes fall due
 // exactly as if the time had really been played.
-export function tryDateJump() {
+function tryDateJump() {
   if (dateJump.length !== 4) {
     setDateJumpError(true);
     return;
@@ -249,7 +229,7 @@ export function tryDateJump() {
 // tile arrays and the player's numbers are.
 // ---------------------------------------------------------------------------
 
-export function endSurvival() {
+function endSurvival() {
   gameOver = true;
   tractor.speed = 0;
   tractor.angVel = 0;
@@ -275,7 +255,7 @@ export function endSurvival() {
 // Offered on the bankruptcy screen: rather than starting over, the same
 // farm — tractor, fields, calendar — carries on in sandbox mode, debt
 // forgiven and no tax ever falling due again.
-export function continueInSandbox() {
+function continueInSandbox() {
   setMode("sandbox");
   cash = SANDBOX_START_CASH;
   gameOver = false;
@@ -285,34 +265,34 @@ export function continueInSandbox() {
 
 // Starting capital by mode: survival a buffer against the first tax bill,
 // sandbox plenty
-export let cash = modeStartCash(mode);
-// Only this module may reassign `cash` (ESM imports are read-only
-// bindings) - ladybug.js's find bonus calls this instead of `cash += x`.
-export function addCash(amount) {
+let cash = modeStartCash(mode);
+// Kept as a setter so this file stays the one place cash is declared -
+// ladybug.js's find bonus calls this instead of `cash += x`.
+function addCash(amount) {
   cash += amount;
 }
-export let seeds = 0; // start empty: buy seeds at the farm
-export let cargo = 0; // sacks on the trailer
-export let sold = 0; // total sacks delivered to the city
-export let fuel = FUEL_CAP; // start full
+let seeds = 0; // start empty: buy seeds at the farm
+let cargo = 0; // sacks on the trailer
+let sold = 0; // total sacks delivered to the city
+let fuel = FUEL_CAP; // start full
 // Set once per frame in update(dt) and read again by the HUD in draw(), so
 // each proximity check only runs its Math.hypot once a frame instead of once
 // per reader
-export let atFuelTank = false;
-export let atCity = false;
-export const sacks = []; // grain sacks lying on the fields
+let atFuelTank = false;
+let atCity = false;
+const sacks = []; // grain sacks lying on the fields
 
-// Only this module may reassign `seeds` (ESM imports are read-only
-// bindings) — ground.js's seedTileAt() calls this instead of `seeds--`.
-export function consumeSeed() {
+// Kept as a setter so this file stays the one place seeds is declared —
+// ground.js's seedTileAt() calls this instead of `seeds--`.
+function consumeSeed() {
   seeds--;
 }
 
-// Restores the economy/calendar numbers from an autosave. Only this module
-// may reassign cash/seeds/cargo/sold/fuel/year/propertyTax/timeLeft (ESM
-// imports are read-only bindings) — the startup resume logic calls this
-// instead of assigning each field directly.
-export function loadSavedRun(s) {
+// Restores the economy/calendar numbers from an autosave. Kept as one
+// function so this file stays the one place cash/seeds/cargo/sold/fuel/
+// year/propertyTax/timeLeft are declared — the startup resume logic
+// calls this instead of assigning each field directly.
+function loadSavedRun(s) {
   sacks.push(...s.sacks);
   cash = s.cash;
   seeds = s.seeds;
@@ -325,7 +305,7 @@ export function loadSavedRun(s) {
   Object.assign(tractor, s.tractor);
 }
 
-export const tractor = {
+const tractor = {
   x: FARM.x + 34,
   y: FARM.y + 10,
   angle: -2.4, // facing up-left, toward the middle of the map
@@ -356,8 +336,8 @@ export const tractor = {
 // (nudged up from an initial ~5mph — felt too slow for fieldwork even
 // after the road gear was judged right), both above the historical
 // figures on purpose.
-export const GEAR_FAST = 28; // ~14mph, top (road) gear
-export const GEAR_SLOW = 14; // ~7mph, working (plow) gear
+const GEAR_FAST = 28; // ~14mph, top (road) gear
+const GEAR_SLOW = 14; // ~7mph, working (plow) gear
 // Every other speed-coupled constant below (and in update()) is an
 // expression in one of these two ratios, not a hand-rounded literal —
 // ACCEL/BRAKE/FRICTION/accelRate/the slope-gravity coefficient/the
@@ -370,12 +350,12 @@ export const GEAR_SLOW = 14; // ~7mph, working (plow) gear
 // re-verified — which is exactly how one of these already drifted once:
 // an earlier pass's crawl-stop comment claimed an exact ratio that its
 // hardcoded literal didn't actually match.
-export const GEAR_FAST_RATIO = GEAR_FAST / 42; // 42 was the original GEAR_FAST
-export const GEAR_SLOW_RATIO = GEAR_SLOW / 16; // 16 was the original GEAR_SLOW
-export const ACCEL = 55 * GEAR_FAST_RATIO;
-export const BRAKE = 80 * GEAR_FAST_RATIO;
-export const FRICTION = 28 * GEAR_FAST_RATIO;
-export const MAX_REVERSE = -GEAR_SLOW; // backing up is never faster than the work gear
+const GEAR_FAST_RATIO = GEAR_FAST / 42; // 42 was the original GEAR_FAST
+const GEAR_SLOW_RATIO = GEAR_SLOW / 16; // 16 was the original GEAR_SLOW
+const ACCEL = 55 * GEAR_FAST_RATIO;
+const BRAKE = 80 * GEAR_FAST_RATIO;
+const FRICTION = 28 * GEAR_FAST_RATIO;
+const MAX_REVERSE = -GEAR_SLOW; // backing up is never faster than the work gear
 // Shared "is the tractor meaningfully moving" gate — field work, the
 // ground-work engine noise, and a couple of HUD warnings all use this
 // rather than a bare 0 so a stopped-but-twitching tractor doesn't flicker
@@ -383,18 +363,18 @@ export const MAX_REVERSE = -GEAR_SLOW; // backing up is never faster than the wo
 // lowered implement is engaged in work gear), so this tracks GEAR_SLOW —
 // see ROLLING_THRESHOLD below for the one gear-agnostic "is it rolling at
 // all" case that doesn't belong on this constant.
-export const MOVING_THRESHOLD = 2 * GEAR_SLOW_RATIO;
+const MOVING_THRESHOLD = 2 * GEAR_SLOW_RATIO;
 // The driver's seat-bounce animation: unlike MOVING_THRESHOLD's four
 // sites, this one isn't gated to work gear — it fires at any speed in
 // either gear — so it tracks the gear-agnostic GEAR_FAST_RATIO instead of
 // being lumped in with MOVING_THRESHOLD just because the two started out
 // as the same bare number.
-export const ROLLING_THRESHOLD = 2 * GEAR_FAST_RATIO;
+const ROLLING_THRESHOLD = 2 * GEAR_FAST_RATIO;
 // Fuel burn only applies while actually on the gas; coasting or sitting
 // still is free. Road gear burns faster than a work-gear pass, giving the
 // work-mode auto-throttle choice real stakes.
-export const FUEL_BURN_WORK = 0.5; // fuel/s, work gear on the gas
-export const FUEL_BURN_ROAD = 1.1; // fuel/s, road gear on the gas
+const FUEL_BURN_WORK = 0.5; // fuel/s, work gear on the gas
+const FUEL_BURN_ROAD = 1.1; // fuel/s, road gear on the gas
 // An empty tank never fully strands the tractor — it limps home at a
 // fraction of its usual top speed instead of stopping dead. Left at its
 // original (pre-rescale) value rather than scaled down with the gears —
@@ -402,12 +382,12 @@ export const FUEL_BURN_ROAD = 1.1; // fuel/s, road gear on the gas
 // slow, and unlike normal driving there's no "it should feel heavy"
 // case for it: running dry is already a punishing enough state on its
 // own without also crawling.
-export const FUEL_EMPTY_LIMP = 4;
+const FUEL_EMPTY_LIMP = 4;
 // Fixed steering geometry: turn rate scales with speed, so the turning
 // radius stays ~TURN_RADIUS at working speeds — tight enough to U-turn
 // into the adjacent row (one tile = 16 units away).
-export const TURN_RADIUS = 7; // world units
-export const MAX_TURN_RATE = 2.5; // rad/s cap so the fast gear doesn't spin wildly
+const TURN_RADIUS = 7; // world units
+const MAX_TURN_RATE = 2.5; // rad/s cap so the fast gear doesn't spin wildly
 // Steering doesn't snap to its target rate — it ramps there at this
 // angular acceleration instead, so turning in feels like leaning a heavy
 // machine into a corner rather than an instant twitch. This only softens
@@ -419,16 +399,16 @@ export const MAX_TURN_RATE = 2.5; // rad/s cap so the fast gear doesn't spin wil
 // sensible on its own if MAX_TURN_RATE (the ceiling it's ramping toward)
 // ever changes — unlike the constants above, this one was never tied to
 // GEAR_FAST/GEAR_SLOW in the first place, so it doesn't move with them.
-export const STEER_RESPONSE = MAX_TURN_RATE / 0.5; // rad/s²
+const STEER_RESPONSE = MAX_TURN_RATE / 0.5; // rad/s²
 
 // Towed implements pivot at the drawbar pin and trail behind the tractor
-export const HITCH_X = -7; // hitch pin position in tractor-local coords
-export const MAX_HITCH_ANGLE = 1.6; // jackknife limit: the drawbar hits the wheel
+const HITCH_X = -7; // hitch pin position in tractor-local coords
+const MAX_HITCH_ANGLE = 1.6; // jackknife limit: the drawbar hits the wheel
 
 // Frame the implement actually occupies: mounted implements share the
 // tractor's frame; towed ones swing around the hitch with their own heading.
 // The origin is placed so local (HITCH_X, 0) lands exactly on the hitch pin.
-export function implementPose() {
+function implementPose() {
   if (!IMPLEMENTS[tractor.implement].towed)
     return { x: tractor.x, y: tractor.y, angle: tractor.angle };
   const a = tractor.implAngle;
@@ -440,7 +420,7 @@ export function implementPose() {
 // True when any part of the implement's working width is over field dirt.
 // Deliberately generous — samples across the blades and a bit ahead of
 // them — so working the edge rows of a field isn't fiddly.
-export function implementOverField() {
+function implementOverField() {
   const pose = implementPose();
   const points = [
     [-9.8, -4],
@@ -462,7 +442,7 @@ export function implementOverField() {
 // still overrides it. Road mode stays fully manual. Shared by the physics,
 // engine sound and exhaust smoke so they all agree on when the tractor is
 // "on the gas".
-export function autoThrottling() {
+function autoThrottling() {
   return (
     autoThrottleOn &&
     !tractor.fastGear &&
@@ -476,7 +456,7 @@ export function autoThrottling() {
 // speed-vs-gear-ceiling clamp and its steering ramp need (see update()).
 // One expression handles both directions, so there's no if/else pair per
 // call site that could drift out of sync with each other.
-export function approach(current, target, maxDelta) {
+function approach(current, target, maxDelta) {
   if (current < target) return Math.min(target, current + maxDelta);
   return Math.max(target, current - maxDelta);
 }
@@ -485,14 +465,14 @@ export function approach(current, target, maxDelta) {
 // shared by every solid-obstacle collision check below (water, trees,
 // buildings, fences, animals). A hard stop, not a coast: angVel is zeroed
 // too so the tractor doesn't sit there spinning in place against the wall.
-export function stopTractor(prevX, prevY) {
+function stopTractor(prevX, prevY) {
   tractor.x = prevX;
   tractor.y = prevY;
   tractor.speed = 0;
   tractor.angVel = 0;
 }
 
-export function update(dt) {
+function update(dt) {
   if (paused) return;
   // Ambient life keeps moving even after the round ends
   worldTime += dt;

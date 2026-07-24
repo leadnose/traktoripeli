@@ -1,58 +1,50 @@
-import { MAP_INDEX, MODES, mode, gameStarted } from "./rng.js";
-import { MAP_PROFILES } from "./map-profiles.js";
-import { audio, initAudio, toggleMusic, toggleSound, playHydraulic, playClunk } from "./sound.js";
-import { nearFarm } from "./farmyard.js";
-import { IMPLEMENTS } from "./box-models.js";
-import { loadSave, clearSave, setSavingDisabled } from "./save.js";
-import { startGame, continueInSandbox, tryDateJump, gameOver, implementOverField, tractor } from "./tractor.js";
-import { fpsShown, setFpsShown } from "./fps.js";
 
 // ---------------------------------------------------------------------------
 // Input
 // ---------------------------------------------------------------------------
 
-export const keys = {};
-export const IMPLEMENT_KEYS = { 1: "plow", 2: "seeder", 3: "harvester", 4: "trailer" };
+const keys = {};
+const IMPLEMENT_KEYS = { 1: "plow", 2: "seeder", 3: "harvester", 4: "trailer" };
 
 // F1 opens the menu, the only place the map and mode can be picked. It is
 // also the start menu: a fresh visit begins with it open and the clock held.
-export let menuOpen = !gameStarted;
+let menuOpen = !gameStarted;
 // P holds the whole world still — clock, crops, critters — until P again.
 // Unlike the F1 menu, which leaves the calendar running, pause means pause.
-export let paused = false;
+let paused = false;
 // A toggles work mode's auto-throttle off and back on, for anyone who'd
 // rather hold the accelerator themselves. On by default.
-export let autoThrottleOn = true;
+let autoThrottleOn = true;
 // D opens a little date field: type MMDD and Enter fast-forwards the
 // calendar to that date — into next year if it's already passed, in the
 // cyclical modes — growing crops and collecting taxes on the way, exactly
 // like the away clock would.
-export let dateJump = null; // null = closed, else the digits typed so far
-export let dateJumpError = false; // the last Enter was an impossible or past date
-export let menuMap = 1; // the start menu defaults to map 1; R rolls a random one
-export let menuMode = mode;
+let dateJump = null; // null = closed, else the digits typed so far
+let dateJumpError = false; // the last Enter was an impossible or past date
+let menuMap = 1; // the start menu defaults to map 1; R rolls a random one
+let menuMode = mode;
 
-// Only this module may reassign these (ESM imports are read-only bindings)
-// - startGame() sets menuOpen/paused, tryDateJump() sets dateJump/
-// dateJumpError, both in tractor.js.
-export function setMenuOpen(v) {
+// Kept as setters so this file stays the one place these fields are
+// declared - startGame() sets menuOpen/paused, tryDateJump() sets
+// dateJump/dateJumpError, both in tractor.js.
+function setMenuOpen(v) {
   menuOpen = v;
 }
-export function setPaused(v) {
+function setPaused(v) {
   paused = v;
 }
-export function setDateJump(v) {
+function setDateJump(v) {
   dateJump = v;
 }
-export function setDateJumpError(v) {
+function setDateJumpError(v) {
   dateJumpError = v;
 }
 // The autosave the menu offers to continue, read once when the menu opens
 // (parsing the save JSON every drawn frame would be wasteful)
-export let menuSaveInfo = null;
-// Only this module may reassign menuSaveInfo (ESM imports are read-only
-// bindings) - main.js calls this instead of assigning directly.
-export function refreshMenuSaveInfo() {
+let menuSaveInfo = null;
+// Kept as a setter so this file stays the one place menuSaveInfo is
+// declared - main.js calls this instead of assigning directly.
+function refreshMenuSaveInfo() {
   if (menuOpen) menuSaveInfo = loadSave();
 }
 
@@ -60,7 +52,7 @@ export function refreshMenuSaveInfo() {
 // game time freezes there. With this on, the lost time is applied in one
 // catch-up step on return — crops grow, the calendar turns, taxes fall due.
 const AWAY_CLOCK_KEY = "traktoripeli.awayclock";
-export let awayClock = false;
+let awayClock = false;
 try {
   awayClock = localStorage.getItem(AWAY_CLOCK_KEY) === "1";
 } catch {

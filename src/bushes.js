@@ -1,9 +1,3 @@
-import { rand } from "./rng.js";
-import { TILE, MAP_SIZE } from "./projection.js";
-import { FARM, FARM_RADIUS, insideAnyPaddock } from "./farmyard.js";
-import { CITY, CITY_RADIUS } from "./city.js";
-import { tileTypeAt, roadTiles, tileKey, patches } from "./ground.js";
-import { trees } from "./trees.js";
 
 // ---------------------------------------------------------------------------
 // Bushes: little round shrubs on the meadows
@@ -15,13 +9,13 @@ const BUSH_COLORS = [
   ["#6caa6a", "#5f945a", "#9e8d51"],
   ["#558f55", "#477945", "#7f6d41"],
 ];
-export const bushes = [];
+const bushes = [];
 
 // Bushes need roads/patches (ground.js) and trees (for clearance) to
 // already exist, and its rand() calls have a fixed position in the
 // world-gen sequence - like initTerrain()/initTrees(), an explicit init
 // call rather than module-load-order top-level code.
-export function initBushes() {
+function initBushes() {
   for (let attempts = 0; bushes.length < 110 && attempts < 6000; attempts++) {
     const wx = 20 + rand() * (MAP_SIZE - 40);
     const wy = 20 + rand() * (MAP_SIZE - 40);
