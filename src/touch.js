@@ -178,5 +178,10 @@ const touchDrive = {
     }
     requestAnimationFrame(syncVisibility);
   }
-  requestAnimationFrame(syncVisibility);
+  // Waits for the window "load" event (fired only once every <script> tag on
+  // the page has finished loading and running) before its first tick, so it
+  // can never read gameStarted/tractor/etc from a later script that hasn't
+  // executed yet - unlike its own re-scheduling above, which is always safe
+  // once the whole page has already loaded once.
+  window.addEventListener("load", () => requestAnimationFrame(syncVisibility));
 })();
