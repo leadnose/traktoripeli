@@ -34,7 +34,7 @@ export let menuMode = mode;
 
 // Only this module may reassign these (ESM imports are read-only bindings)
 // - startGame() sets menuOpen/paused, tryDateJump() sets dateJump/
-// dateJumpError, both still in legacy.js until tractor.js exists.
+// dateJumpError, both in tractor.js.
 export function setMenuOpen(v) {
   menuOpen = v;
 }

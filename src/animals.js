@@ -486,7 +486,7 @@ export const birds = [];
 // Bird-flock placement is order-sensitive (rand()-consuming), and the
 // original sequence placed it after the cart, not with the rest of the
 // animal herds - so it's a separate init call from initAnimals(), called
-// from main.js/legacy.js at that later point.
+// from main.js at that later point.
 export function initBirds() {
   for (let flock = 0; flock < 4; flock++) {
     const fx = rand() * MAP_SIZE;

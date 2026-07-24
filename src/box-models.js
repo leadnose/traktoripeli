@@ -381,7 +381,7 @@ function localRectToFarmWorldAABB([x0, x1, y0, y1]) {
 }
 
 // Everything below needs PADDOCKS_LOCAL/PADDOCKS_WORLD finalized (which
-// happens in legacy.js, right after makeMap()), so - like
+// happens in main.js, right after makeMap()), so - like
 // initTerrain()/initTrees() - this is an explicit init call rather than
 // module-load-order top-level code: merely importing box-models.js must
 // not read PADDOCKS_LOCAL before it exists.

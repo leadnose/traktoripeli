@@ -4,7 +4,7 @@ import { nearPoint } from "./setup.js";
 // The Tractor<->Farmyard relationship (nearFarm/nearFuelTank read
 // tractor.x/y; the tractor update loop calls them every frame) is a mutual
 // runtime function-call/property-read, not a circular value read at
-// module-init time, so importing `tractor` here back from legacy.js is
+// module-init time, so importing `tractor` back from tractor.js here is
 // safe - see the plan's note on this for the full reasoning.
 import { tractor } from "./tractor.js";
 
@@ -50,8 +50,8 @@ export const PENNED_SPECIES = new Set(Object.keys(PADDOCK_SIZE));
 export let PADDOCKS_LOCAL = null;
 export let PADDOCKS_WORLD = null;
 // Only this module may reassign PADDOCKS_LOCAL/PADDOCKS_WORLD (ESM imports
-// are read-only bindings) — the paddock-finalization code (still in
-// legacy.js until ground.js/minimap.js exist) calls these instead.
+// are read-only bindings) — main.js's paddock-finalization code calls
+// these instead.
 export function setPaddocksLocal(v) {
   PADDOCKS_LOCAL = v;
 }
